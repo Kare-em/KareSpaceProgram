@@ -1,0 +1,22 @@
+fileFormatVersion: 2
+guid: f9d0fde4dd079ac44bbfb64e2bbea421
+TrueTypeFontImporter:
+  externalObjects: {}
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontNames:
+  - 'Suggested 3d Filled Gradient '
+  fallbackFontReferences:
+  - {fileID: 12800000, guid: c69012cf5800737488e4e9cd0e330c8c, type: 3}
+  customCharacters: 
+  fontRenderingMode: 0
+  ascentCalculationMode: 1
+  useLegacyBoundsCalculation: 0
+  shouldRoundAdvanceValue: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
