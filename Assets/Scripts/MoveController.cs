@@ -19,6 +19,16 @@ public class MoveController : MonoBehaviour
     private Rigidbody _rb;
     private bool _forced;
 
+    public Rigidbody RB
+    {
+        get
+        {
+            if (!_rb)
+                _rb = GetComponent<Rigidbody>();
+            return _rb;
+        }
+    }
+
     private void Start()
     {
         _rb = GetComponent<Rigidbody>();
@@ -56,7 +66,7 @@ public class MoveController : MonoBehaviour
                 var _vector = gravityBody.position - previousPosition;
                 var _sqrDistance = _vector.sqrMagnitude;
                 acceleration += _vector.normalized *
-                                (GameManager.Instance.Gravity * Time.fixedDeltaTime / _sqrDistance);
+                                (GameManager.Instance.Gravity / _sqrDistance);
             }
 
             nextVelocity = previousVelocity + acceleration * _timeLength;
@@ -68,6 +78,7 @@ public class MoveController : MonoBehaviour
             previousPosition = nextPosition;
         }
     }
+
 
     public bool TryExpendFuel(float specificFuelConsumption)
     {

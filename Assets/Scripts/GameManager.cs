@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class GameManager : MonoBehaviour
@@ -21,7 +22,6 @@ public class GameManager : MonoBehaviour
     [SerializeField] private MoveController currentPlayer;
     [SerializeField] private List<Transform> _gravityBodies;
     [SerializeField] private float _gravity;
-
     public MoveController CurrentPlayer => currentPlayer;
 
     public List<Transform> GravityBodies => _gravityBodies;

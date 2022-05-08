@@ -7,26 +7,73 @@ public class Gravity : MonoBehaviour
     private Rigidbody _rb;
     private float _sqrDistance;
     private Vector3 _vector;
-    private List<Transform> _gravityBodies=>GameManager.Instance.GravityBodies;
-    private void Start()
+    private Vector3 acceleration;
+    private List<Transform> _gravityBodies => GameManager.Instance.GravityBodies;
+
+    public Rigidbody RB
     {
-        _rb = GetComponent<Rigidbody>();
+        get
+        {
+            if (!_rb)
+                _rb = GetComponent<Rigidbody>();
+            return _rb;
+        }
+    }
+
+    public bool UseGravity
+    {
+        get => _useGravity;
+        set => _useGravity = value;
+    }
+
+    private void OnEnable()
+    {
+        UpdateGravity();
+    }
+
+    public void DisableGravity() => UseGravity = false;
+    public void EnableGravity() => UseGravity = true;
+
+    public void UpdateGravity()
+    {
+        if (transform.parent)
+        {
+            Destroy(this);
+            return;
+        }
+        else
+        {
+            EnableGravity();
+            if (!GetComponent<Rigidbody>())
+                gameObject.AddComponent<Rigidbody>();
+            RB.useGravity = false;
+        }
+
+        if (UseGravity)
+        {
+            RB.mass = 0f;
+            foreach (var part in GetComponentsInChildren<Part>())
+            {
+                RB.mass += part.Mass;
+            }
+        }
     }
 
     private void FixedUpdate()
     {
-        if (_useGravity)
+        if (UseGravity)
         {
-            Vector3 acceleration = Vector3.zero;
+            acceleration = Vector3.zero;
             foreach (var gravityBody in GameManager.Instance.GravityBodies)
             {
-                var _vector = gravityBody.position - _rb.position;
-                var _sqrDistance = _vector.sqrMagnitude;
+                _vector = gravityBody.position - RB.position;
+                _sqrDistance = _vector.sqrMagnitude;
                 acceleration += _vector.normalized * (GameManager.Instance.Gravity / _sqrDistance);
             }
-            _rb.AddForce(acceleration*Time.fixedDeltaTime, ForceMode.Acceleration);
-            Debug.Log("AddForce "+acceleration);
-            Debug.DrawRay(_rb.position, _vector, Color.yellow);
+
+            RB.AddForce(acceleration, ForceMode.Acceleration);
+            Debug.Log("AddForce " + acceleration);
+            Debug.DrawRay(RB.position, _vector, Color.yellow);
         }
     }
 }
