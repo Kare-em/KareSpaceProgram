@@ -83,6 +83,7 @@
      <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\CameraMagnets\CameraMagnetTargetController.cs" />
      <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\ActivateCameraWithDistance.cs" />
      <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Anywhere Door\PlayerMovement.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\GameLineRenderer.cs" />
      <None Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Anywhere Door\ScreenCutoutShader.shader" />
  <Reference Include="UnityEngine">
  <HintPath>C:/Program Files/2020.3.33f1/Editor/Data/Managed/UnityEngine/UnityEngine.dll</HintPath>

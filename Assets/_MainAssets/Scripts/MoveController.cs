@@ -29,6 +29,8 @@ public class MoveController : MonoBehaviour
         }
     }
 
+    LineDrawer lineDrawer;
+
     private void Start()
     {
         _rb = GetComponent<Rigidbody>();
@@ -36,6 +38,9 @@ public class MoveController : MonoBehaviour
         _fuelTanks = new List<Fuel>();
         _engines.AddRange(GetComponentsInChildren<Engine>());
         _fuelTanks.AddRange(GetComponentsInChildren<Fuel>());
+
+        lineDrawer = new LineDrawer();
+        RB.angularDrag = 1f;
     }
 
     private void FixedUpdate()
@@ -49,9 +54,11 @@ public class MoveController : MonoBehaviour
         ControlThrust();
     }
 
+
     private void DrawRay()
     {
-        Debug.DrawLine(transform.position, transform.position + transform.up * _lineLength, Color.green);
+        //Debug.DrawLine(transform.position, transform.position + transform.up * _lineLength, Color.green);
+        lineDrawer.DrawLineInGameView(transform.position, transform.position + transform.up * _lineLength, Color.green);
         //Debug.DrawLine(transform.position, transform.position+_rb.velocity.normalized * _lineLength, Color.red);
 
         Vector3 previousVelocity = _rb.velocity;
@@ -93,7 +100,7 @@ public class MoveController : MonoBehaviour
 
     private void ControlThrust()
     {
-        if (Input.GetKeyDown(KeyCode.LeftShift))
+        if (Input.GetKey(KeyCode.LeftShift))
         {
             foreach (var engine in _engines)
             {
@@ -101,7 +108,7 @@ public class MoveController : MonoBehaviour
             }
         }
 
-        if (Input.GetKeyDown(KeyCode.LeftControl))
+        if (Input.GetKey(KeyCode.LeftControl))
         {
             foreach (var engine in _engines)
             {
