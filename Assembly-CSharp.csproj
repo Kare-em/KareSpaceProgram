@@ -52,14 +52,38 @@
     <ImplicitlyExpandDesignTimeFacades>false</ImplicitlyExpandDesignTimeFacades>
   </PropertyGroup>
   <ItemGroup>
-     <Compile Include="Assets\Scripts\Fuel.cs" />
-     <Compile Include="Assets\Scripts\GameManager.cs" />
-     <Compile Include="Assets\Scripts\TimeWarp.cs" />
-     <Compile Include="Assets\Scripts\MoveController.cs" />
-     <Compile Include="Assets\Scripts\Engine.cs" />
-     <Compile Include="Assets\Scripts\Gravity.cs" />
-     <Compile Include="Assets\Scripts\CosmicBody.cs" />
-     <Compile Include="Assets\Scripts\Part.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\Fuel.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\Part.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\GameManager.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\TimeWarp.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\CosmicBody.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\MoveController.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\Engine.cs" />
+     <Compile Include="Assets\_MainAssets\Scripts\Gravity.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\ActivateCamOnPlay.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Anywhere Door\TagChanger.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Anywhere Door\PlayerLookAt.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\DualTarget\PointAtAimTarget.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\PlayerMovePhysics.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\MixingCameraBlend.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\SpawnInCircle.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\PlayerMoveOnSphere.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Trigger volumes\GenericTrigger.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Models\UnityCharacter\Scripts\CharacterMovementNoCamera.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\AimingRig\AimReticle.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\CameraMagnets\CameraMagnetProperty.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Scripting\ScriptingExample.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\3rdPersonWithAimMode\ActivateOnKeypress.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\DualTarget\MoveAimTarget.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\ExampleHelpWindow.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Models\UnityCharacter\Scripts\CharacterMovement2D.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Models\UnityCharacter\Scripts\CharacterMovement.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\InvokeEventFromInspector.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\PlayerMove.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\CameraMagnets\CameraMagnetTargetController.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Shared\Scripts\ActivateCameraWithDistance.cs" />
+     <Compile Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Anywhere Door\PlayerMovement.cs" />
+     <None Include="Assets\Samples\Cinemachine\2.6.11\Cinemachine Example Scenes\Scenes\Anywhere Door\ScreenCutoutShader.shader" />
  <Reference Include="UnityEngine">
  <HintPath>C:/Program Files/2020.3.33f1/Editor/Data/Managed/UnityEngine/UnityEngine.dll</HintPath>
  </Reference>
