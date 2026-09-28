@@ -40,7 +40,7 @@ public class MoveController : MonoBehaviour
         _fuelTanks.AddRange(GetComponentsInChildren<Fuel>());
 
         lineDrawer = new LineDrawer();
-        RB.angularDrag = 1f;
+        RB.angularDamping = 1f;
     }
 
     private void FixedUpdate()
@@ -61,7 +61,7 @@ public class MoveController : MonoBehaviour
         lineDrawer.DrawLineInGameView(transform.position, transform.position + transform.up * _lineLength, Color.green);
         //Debug.DrawLine(transform.position, transform.position+_rb.velocity.normalized * _lineLength, Color.red);
 
-        Vector3 previousVelocity = _rb.velocity;
+        Vector3 previousVelocity = _rb.linearVelocity;
         Vector3 nextVelocity = previousVelocity;
         Vector3 previousPosition = transform.position;
         Vector3 nextPosition = previousPosition;
