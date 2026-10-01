@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.2.0",
     "com.unity.2d.sprite": "1.0.0",
     "com.unity.2d.tilemap": "1.0.0",
     "com.unity.ai.navigation": "2.0.14",
@@ -11,6 +12,7 @@
     "com.unity.ide.vscode": "1.2.5",
     "com.unity.multiplayer.center": "2.0.1",
     "com.unity.recorder": "5.1.7",
+    "com.unity.render-pipelines.high-definition": "17.6.0",
     "com.unity.test-framework": "1.8.0",
     "com.unity.timeline": "6.6.0",
     "com.unity.ugui": "2.6.0",

@@ -1,0 +1,9 @@
+{
+  "name": "com.unity.render-pipelines.high-definition-config",
+  "description": "Configuration files for the High Definition Render Pipeline. Embedded copy: PrecomputedAtmosphericAttenuation = 0 for rendering planets from space.",
+  "version": "17.6.0",
+  "displayName": "High Definition Render Pipeline Config",
+  "dependencies": {
+    "com.unity.render-pipelines.core": "17.6.0"
+  }
+}
