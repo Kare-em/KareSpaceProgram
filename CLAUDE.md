@@ -11,8 +11,9 @@ KSP-подобная игра, реальная Солнечная систем�
 ## Структура
 ```
 Assets/_Project/Core    ядро симуляции, чистый .NET (asmdef noEngineReferences), namespace Kare.Space.Core
-Assets/_Project/Game    игровой слой Unity — ПУСТО, начать по docs/SCENE_SETUP.md
-Assets/_Project/Editor  McpPortPin.cs (порт MCP 8767)
+Assets/_Project/Game    игровой слой: Bootstrap, FloatingOrigin, BodyRenderer, Sky, Sun, VesselView, камера, ввод, HUD, карта
+Assets/_Project/Editor  McpPortPin.cs (порт MCP 8767), FlightSceneBuilder.cs (меню Kare/Build Flight Scene)
+Assets/_Project/Settings HDRP.asset, FlightVolume.asset, материалы — пересоздаёт FlightSceneBuilder
 Tools/CoreTests         headless-тесты ядра (csproj подхватывает Core/**/*.cs)
 ```
 Library/, Temp/, Logs/, UserSettings/ — не трогать и не коммитить.
@@ -21,7 +22,8 @@ Library/, Temp/, Logs/, UserSettings/ — не трогать и не комми
 - M0 (ядро) готово: эфемериды, Кеплер, patched conics, атмосфера СА-1976, RK4, ступени, двигатели (запуски,
   ullage), автопилоты выведения / исполнения узла / посадки, окна старта, планировщик перелёта, миссии.
 - Тесты 36/36 ✅ включая полный прогон «Луна-9»: старт → орбита → перелёт → мягкая посадка 3,3 м/с.
-- Unity-сторона (рендер, сцена, HUD, ввод) не начата и ничем не проверена.
+- Игровой слой написан, сцена `Scenes/Flight.unity` собирается меню **Kare/Build Flight Scene** (идемпотентно).
+  Миссия по умолчанию — `GameBootstrap.MissionId = "vostok"`. Ввод — старый Input Manager (Input System нет).
 
 ## Тесты ядра
 ```bash
@@ -44,6 +46,9 @@ MCP for Unity (CoplayDev), `.mcp.json` → `http://127.0.0.1:8767/mcp`. Car_Trai
 - Комментарии по-русски, «почему», со ссылкой на §GDD. Числа — константами с парой-зависимостью в комментарии.
 
 ## Подтверждённые грабли
+- **В проекте не было HDRP-ассета**: `GraphicsSettings.currentRenderPipeline == null` → всё HDRP/Lit пурпурное.
+  Builder создаёт `Settings/HDRP.asset` и ставит по умолчанию; первая установка — долгий реимпорт шейдеров, MCP молчит.
+- **`VisualEnvironment.planetCenter/planetRadius` — в километрах**, сцена в метрах (делить на 1000).
 - **СА-1976 — высоты геопотенциальные**: 22 632 Па на 11 км геопотенциальных, не геометрических.
 - **`Vessel.RemainingStats` учитывал только работающие двигатели** → заглушенная ступень перед посадкой
   «не имела Δv», планировщик посадки ничего не мог. Теперь: взведена + топливо + (работает или есть запуски).

@@ -1,0 +1,21 @@
+{
+    "name": "Kare.Space.Editor",
+    "rootNamespace": "Kare.Space.EditorTools",
+    "references": [
+        "Kare.Space.Core",
+        "Kare.Space.Game",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

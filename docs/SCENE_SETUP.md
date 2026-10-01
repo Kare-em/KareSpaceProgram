@@ -1,7 +1,10 @@
 # Сборка сцены Flight — инструкция
 
 Состояние на 01.10.2026: ядро симуляции (`Assets/_Project/Core`) готово, тесты 36/36 зелёные.
-Игрового слоя (`Assets/_Project/Game`) и сцены **ещё нет** — ниже порядок, как их собрать:
+Игровой слой написан, сцену собирает меню **Kare/Build Flight Scene** (`Editor/FlightSceneBuilder.cs`,
+заодно создаёт `Settings/HDRP.asset` и ставит его пайплайном по умолчанию — без него всё пурпурное).
+Ввод — старый Input Manager (пакета Input System в проекте нет), ссылки на `Unity.InputSystem` в asmdef нет.
+Ниже исходный порядок сборки:
 вручную (раздел А) или автосборкой из меню редактора, как в Car_Train (раздел Б).
 
 Unity 6000.6.3f1, HDRP 17.6. Редактор открывать из Hub; MCP for Unity — порт **8767**
@@ -119,7 +122,7 @@ static void Build()
 Запуск: вручную из меню, через MCP (`execute_menu_item` «Kare/Build Flight Scene») или batch:
 
 ```bash
-"/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Unity.exe" -batchmode -quit -projectPath "C:/CocosGames/KareSpaceProgram" -executeMethod Kare.Space.Editor.FlightSceneBuilder.Build -logFile -
+"/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Unity.exe" -batchmode -quit -projectPath "C:/CocosGames/KareSpaceProgram" -executeMethod Kare.Space.EditorTools.FlightSceneBuilder.Build -logFile -
 ```
 
 (batch — только при закрытом редакторе: один проект нельзя открыть дважды.)
