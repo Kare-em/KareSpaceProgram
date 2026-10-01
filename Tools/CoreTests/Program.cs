@@ -1,0 +1,361 @@
+using System;
+using System.Diagnostics;
+using Kare.Space.Core;
+
+// Прогон ядра без Unity: математика, эфемериды, атмосфера и полные полёты миссий автопилотом.
+// Запуск: dotnet run --project Tools/CoreTests [имя теста]
+static class Program
+{
+    static int passed, failed;
+
+    static int Main(string[] args)
+    {
+        string only = args.Length > 0 ? args[0] : null;
+        Run("math", TestMath, only);
+        Run("orbit", TestOrbit, only);
+        Run("moon", TestEphemeris, only);
+        Run("atmo", TestAtmosphere, only);
+        Run("stats", TestStats, only);
+        Run("karman", TestKarman, only);
+        Run("sputnik", TestSputnik, only);
+        Run("mechta", () => TestLunar("mechta", 30e6), only);
+        Run("vympel", () => TestLunar("vympel", 1000e3), only);
+        Run("farside", () => TestLunar("farside", 8000e3, 2.6 * 86400), only);
+        Run("vostok", TestVostok, only);
+        Run("luna9", () => TestLunar("luna9", 1000e3, land: true), only);
+        Console.WriteLine($"\nИтого: {passed} ok, {failed} fail");
+        return failed == 0 ? 0 : 1;
+    }
+
+    static void Run(string name, Action test, string only)
+    {
+        if (only != null && only != name) return;
+        Console.WriteLine($"\n== {name}");
+        var sw = Stopwatch.StartNew();
+        try { test(); }
+        catch (Exception e) { Check($"{name}: исключение", false, e.ToString()); }
+        Console.WriteLine($"   ({sw.Elapsed.TotalSeconds:F1} с)");
+    }
+
+    static void Check(string name, bool ok, string detail = "")
+    {
+        if (ok) passed++;
+        else failed++;
+        Console.WriteLine($"{(ok ? "[OK]  " : "[FAIL]")} {name}{(detail.Length > 0 ? " — " + detail : "")}");
+    }
+
+    // ------------------------------------------------------------------ базовое
+
+    static Vector3d RandomVector(Random rnd) => new Vector3d(rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5, rnd.NextDouble() - 0.5);
+
+    static void TestMath()
+    {
+        var rnd = new Random(1);
+        double err = 0, errRot = 0;
+        for (int i = 0; i < 1000; i++)
+        {
+            var q = QuaternionD.AngleAxis(rnd.NextDouble() * 2 * Math.PI, RandomVector(rnd).normalized);
+            var v = RandomVector(rnd) * 10;
+            err = Math.Max(err, ((q * v).SwapYZ - q.SwapYZ * v.SwapYZ).magnitude);
+            var w = RandomVector(rnd);
+            errRot = Math.Max(errRot, (QuaternionD.FromToRotation(v.normalized, w.normalized) * v.normalized - w.normalized).magnitude);
+        }
+        Check("SwapYZ кватерниона согласован с векторами", err < 1e-12, $"{err:E1}");
+        Check("FromToRotation", errRot < 1e-9, $"{errRot:E1}");
+    }
+
+    static void TestOrbit()
+    {
+        const double mu = 3.986004418e14;
+        foreach (var (name, r0, v0) in new[]
+                 {
+                     ("эллипс", new Vector3d(6.9e6, 1e5, 2e5), new Vector3d(100, 7600, 1200)),
+                     ("гипербола", new Vector3d(7e6, 0, 0), new Vector3d(0, 11500, 3000)),
+                 })
+        {
+            var o = KeplerOrbit.FromState(r0, v0, mu, 100);
+            o.GetState(100, out var r1, out var v1);
+            // Сверка с численным RK4 за 3000 с.
+            Vector3d r = r0, v = v0;
+            const double h = 0.5;
+            Func<Vector3d, Vector3d> acc = p => p * (-mu / Math.Pow(p.magnitude, 3));
+            for (int i = 0; i < 6000; i++)
+            {
+                var k1v = acc(r); var k1r = v;
+                var k2v = acc(r + k1r * (h / 2)); var k2r = v + k1v * (h / 2);
+                var k3v = acc(r + k2r * (h / 2)); var k3r = v + k2v * (h / 2);
+                var k4v = acc(r + k3r * h); var k4r = v + k3v * h;
+                r += (k1r + k2r * 2 + k3r * 2 + k4r) * (h / 6);
+                v += (k1v + k2v * 2 + k3v * 2 + k4v) * (h / 6);
+            }
+            o.GetState(3100, out var r2, out _);
+            Check($"Кеплер {name}: туда-обратно", (r1 - r0).magnitude < 1e-3 && (v1 - v0).magnitude < 1e-6,
+                $"{(r1 - r0).magnitude:E1} м");
+            Check($"Кеплер {name}: против RK4 за 3000 с", (r2 - r).magnitude < 1, $"{(r2 - r).magnitude:F3} м");
+        }
+    }
+
+    static void TestEphemeris()
+    {
+        var sys = SolarSystem.CreateReal();
+        var moon = sys.Get("moon");
+        double min = double.MaxValue, max = 0;
+        double t0 = GameCalendar.ToGameTime(1959, 1, 1);
+        for (double t = t0; t < t0 + 30 * 86400; t += 3600)
+        {
+            moon.LocalStateAt(t, out var r, out _);
+            min = Math.Min(min, r.magnitude);
+            max = Math.Max(max, r.magnitude);
+        }
+        Check("Луна: перигей января 1959", min > 355e6 && min < 372e6, $"{min / 1e3:F0} км");
+        Check("Луна: апогей января 1959", max > 400e6 && max < 407e6, $"{max / 1e3:F0} км");
+        sys.Update(GameCalendar.ToGameTime(2000, 1, 1, 12));
+        var earth = sys.Get("earth");
+        double au = earth.Position.magnitude / 1.495978707e11;
+        Check("Земля: ~1 а.е. от Солнца на J2000", au > 0.98 && au < 0.99, $"{au:F4} а.е.");
+    }
+
+    static void TestAtmosphere()
+    {
+        var atm = SolarSystem.CreateReal().Get("earth").Atmosphere;
+        atm.Sample(0, out var p0, out var rho0, out var t0);
+        atm.Sample(11019.1, out var p11, out _, out var t11);
+        atm.Sample(50000, out var p50, out _, out _);
+        Check("СА-1976 на уровне моря", Math.Abs(p0 - 101325) < 1 && Math.Abs(rho0 - 1.225) < 0.001, $"{p0:F0} Па, {rho0:F3} кг/м³");
+        Check("СА-1976 на 11 км геопотенциальных", Math.Abs(p11 - 22632) < 20 && Math.Abs(t11 - 216.65) < 0.5, $"{p11:F0} Па, {t11:F1} К");
+        Check("СА-1976 на 50 км", Math.Abs(p50 - 79.8) < 2, $"{p50:F1} Па");
+    }
+
+    static void TestStats()
+    {
+        foreach (var id in new[] { "heavy", "sputnik", "vostok", "luna", "sounding" })
+        {
+            var d = VesselPresets.ById(id);
+            Console.WriteLine($"   {d.Name}: {d.TotalMass / 1000:F2} т, Δv {d.TotalDeltaVVac:F0} м/с");
+            foreach (var s in d.ComputeStats())
+                Console.WriteLine($"      {s.Name,-28} Δv {s.DeltaVVac,6:F0} (у Земли {s.DeltaVSL,6:F0}) TWR {s.TwrSL:F2}/{s.TwrVac:F2} {s.BurnTime,5:F0} с");
+        }
+        var heavy = VesselPresets.Kara1Heavy();
+        var st = heavy.ComputeStats();
+        Check("Кара-1: стартовая масса", Math.Abs(heavy.TotalMass - 529770) < 100, $"{heavy.TotalMass / 1000:F2} т");
+        Check("Кара-1: Δv хватает на НОО с запасом", heavy.TotalDeltaVVac > 9500, $"{heavy.TotalDeltaVVac:F0} м/с");
+        Check("Кара-1: TWR на старте 1.3–1.6", st[0].TwrSL > 1.3 && st[0].TwrSL < 1.6, $"{st[0].TwrSL:F2}");
+    }
+
+    // ------------------------------------------------------------------ полёты
+
+    static (Universe u, MissionTracker tr) StartMission(string id)
+    {
+        var def = MissionCatalog.Get(id);
+        var u = MissionTracker.CreateUniverse(def, SolarSystem.CreateReal());
+        var tr = new MissionTracker(def);
+        double t0 = u.Time;
+        u.Message += m => Console.WriteLine($"   [{Clock(u.Time - t0)}] {m}");
+        tr.Changed += m => Console.WriteLine($"   [{Clock(u.Time - t0)}] ★ {m}");
+        Console.WriteLine($"   {def.Title}: {GameCalendar.Format(def.StartTime)}, {u.Active.Design.Name}, {u.Active.Mass / 1000:F1} т");
+        return (u, tr);
+    }
+
+    static string Clock(double s)
+    {
+        if (s < 3600) return $"{(int)(s / 60):00}:{s % 60:00.0}";
+        if (s < 86400) return $"{(int)(s / 3600)}ч{(int)(s % 3600 / 60):00}м";
+        return $"{s / 86400:F2} сут";
+    }
+
+    /// <summary>Шагать вселенную, пока cond истинно. Ускорение задаётся один раз — дальше его сбрасывает сама вселенная.</summary>
+    static void Fly(Universe u, MissionTracker tr, int warp, double maxTime, Func<bool> cond, Action perStep = null)
+    {
+        u.SetWarp(warp);
+        double end = u.Time + maxTime;
+        while (u.Time < end && cond())
+        {
+            u.Advance(0.1);
+            tr?.Update(u);
+            perStep?.Invoke();
+        }
+    }
+
+    static string OrbitText(Vessel v, double t)
+    {
+        if (v.IsLanded) return $"на поверхности ({v.Body.Name})";
+        var o = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, t);
+        double pe = (o.PeriapsisRadius - v.Body.Radius) / 1000, ap = (o.ApoapsisRadius - v.Body.Radius) / 1000;
+        double inc = o.InclinationTo(v.Body.PoleAt(t)) / Constants.Deg2Rad;
+        return $"{v.Body.Name}: Pe {pe:F1} км, Ap {(double.IsInfinity(ap) ? "∞" : ap.ToString("F1"))} км, i {inc:F2}°, e {o.E:F4}";
+    }
+
+    /// <summary>Вывод на опорную орбиту автопилотом с телеметрией каждые 30 с.</summary>
+    static bool Ascend(Universe u, MissionTracker tr, double target)
+    {
+        var v = u.Active;
+        u.Ascent = new AscentAutopilot { TargetAltitude = target };
+        double t0 = u.Time, maxQ = 0, maxG = 0, nextLog = 0;
+        var phase = u.Ascent.Phase;
+        Fly(u, tr, 2, 3000, () => u.Ascent != null && u.Active.Alive, () =>
+        {
+            v = u.Active;
+            maxQ = Math.Max(maxQ, v.DynamicPressure);
+            maxG = Math.Max(maxG, v.GForce);
+            double mt = u.Time - t0;
+            if (u.Ascent != null && (mt >= nextLog || u.Ascent.Phase != phase))
+            {
+                nextLog = Math.Floor(mt / 30) * 30 + 30;
+                phase = u.Ascent.Phase;
+                double pitch = 90 - Vector3d.Angle(v.NoseP, v.Position.normalized) / Constants.Deg2Rad;
+                Console.WriteLine($"      T+{mt,5:F0} {phase,-12} h {v.Altitude / 1000,6:F1} км  vs {v.VerticalSpeed,6:F0}  vh {v.HorizontalSpeed,6:F0}  " +
+                                  $"q {v.DynamicPressure / 1000,5:F1} кПа  α {v.AngleOfAttack,4:F1}°  тангаж {pitch,5:F1}°  {v.Mass / 1000,6:F1} т  {u.Ascent.Status}");
+            }
+        });
+        v = u.Active;
+        Console.WriteLine($"   итог: {OrbitText(v, u.Time)}, масса {v.Mass / 1000:F2} т, max q {maxQ / 1000:F1} кПа, max {maxG:F1} g");
+        return v.Alive && u.Ascent == null && !v.IsLanded;
+    }
+
+    static void TestKarman()
+    {
+        var (u, tr) = StartMission("karman");
+        var v = u.Active;
+        u.Stage(); // зажигание
+        double apex = 0;
+        bool separated = false, chute = false;
+        Fly(u, tr, 2, 3000, () => tr.Status == MissionStatus.Active, () =>
+        {
+            v = u.Active;
+            apex = Math.Max(apex, v.Altitude);
+            if (!separated && v.VerticalSpeed < 0 && v.Altitude > 50000)
+            {
+                u.Stage();
+                separated = true;
+            }
+            if (separated && !chute && v.Altitude < 6000 && v.DynamicPressure < 20000)
+            {
+                u.Stage();
+                chute = true;
+            }
+        });
+        Console.WriteLine($"   апогей {apex / 1000:F1} км, итог: {v.Situation}, {v.DestroyReason}");
+        Check("Линия Кармана выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
+    static void TestSputnik()
+    {
+        var (u, tr) = StartMission("sputnik");
+        bool orbit = Ascend(u, tr, 220000);
+        Check("Спутник: автопилот вывел на орбиту", orbit);
+        if (!orbit) return;
+        Fly(u, tr, 5, 4 * 3600, () => tr.Status == MissionStatus.Active);
+        Check("Спутник: миссия выполнена (виток на орбите)", tr.Status == MissionStatus.Success, tr.FailReason ?? OrbitText(u.Active, u.Time));
+    }
+
+    static void TestLunar(string id, double miss, double maxTransfer = double.PositiveInfinity, bool land = false)
+    {
+        var (u, tr) = StartMission(id);
+        var earth = u.Active.Body;
+        var moon = u.System.Get("moon");
+        // Окно старта: плоскость опорной орбиты проходит через Луну к прибытию (GDD §6.2).
+        double flight = 3300 + (double.IsInfinity(maxTransfer) ? 5 * 86400 : maxTransfer);
+        double tL = LaunchWindow.NextPlaneWindow(earth, SolarSystem.GetSite(tr.Def.SiteId), 90, moon, u.Time + 60, flight);
+        Check($"{id}: окно старта найдено", !double.IsNaN(tL));
+        Console.WriteLine($"   окно старта: через {Clock(tL - u.Time)}");
+        if (tL - u.Time > 300) Fly(u, tr, 5, tL - u.Time - 200, () => true);
+        Fly(u, tr, 3, tL - u.Time, () => true);
+        if (!Ascend(u, tr, 200000)) { Check($"{id}: опорная орбита", false); return; }
+        var v = u.Active;
+        var sw = Stopwatch.StartNew();
+        var plan = TransferPlanner.PlanIntercept(earth, v.Position, v.Velocity, u.Time, moon, miss, 12 * 86400, maxTransfer);
+        Console.WriteLine($"   план: через {Clock(plan.Time - u.Time)}, Δv {plan.Prograde:F0}/{plan.Normal:F0} м/с, " +
+                          $"промах {plan.Miss / 1000:F0} км, перелёт {Clock(plan.ArrivalTime - plan.Time)} ({sw.ElapsedMilliseconds} мс)");
+        Check($"{id}: планировщик нашёл перелёт", plan != null && Math.Abs(plan.Miss - miss) < 2000e3);
+
+        u.SetNode(plan.Time, plan.Prograde, plan.Normal, plan.Radial);
+        var patches = u.PredictActive();
+        foreach (var p in patches)
+            Console.WriteLine($"      участок {p.Body.Name}: до {Clock(p.EndTime - u.Time)} → {p.EndType} {p.NextBody?.Name}" +
+                              (p.Body == moon ? $", Pe {(p.Orbit.PeriapsisRadius - moon.Radius) / 1000:F0} км" : ""));
+        Check($"{id}: прогноз видит вход в SOI Луны", patches.Exists(p => p.EndType == TransitionType.Encounter && p.NextBody == moon));
+
+        u.NodePilot = new NodeAutopilot();
+        Fly(u, tr, 6, plan.Time - u.Time + 86400, () => u.NodePilot != null && u.Active.Alive);
+        v = u.Active;
+        Console.WriteLine($"   после разгона: {OrbitText(v, u.Time)}, масса {v.Mass / 1000:F2} т");
+        patches = u.PredictActive();
+        var lunar = patches.Find(p => p.Body == moon);
+        Console.WriteLine(lunar != null ? $"   прогноз у Луны: Pe {(lunar.Orbit.PeriapsisRadius - moon.Radius) / 1000:F0} км" : "   прогноз: Луна не достигается");
+
+        Action landLog = null;
+        if (land)
+        {
+            // Программа «Посадка» включается сразу: до сферы влияния Луны она ждёт, ускорение сбросит сама.
+            u.Landing = new LandingAutopilot(moon);
+            var lp = u.Landing.Phase;
+            double nextLog = 0;
+            landLog = () =>
+            {
+                var a = u.Landing;
+                if (a == null || a.Phase == LandingAutopilot.PhaseType.Coast && lp == a.Phase) return;
+                if (a.Phase != lp || u.Time >= nextLog)
+                {
+                    lp = a.Phase;
+                    nextLog = u.Time + (a.Phase == LandingAutopilot.PhaseType.Terminal ? 2 : 10);
+                    var lv = u.Active;
+                    Console.WriteLine($"      {a.Phase,-9} h {moon.AltitudeAboveTerrain(lv.Position),8:F0} м  vs {lv.VerticalSpeed,7:F1}  vh {lv.HorizontalSpeed,7:F1}  " +
+                                      $"{lv.Mass,7:F0} кг  {a.Status}");
+                }
+            };
+        }
+        Fly(u, tr, 7, 20 * 86400, () => tr.Status == MissionStatus.Active && u.Active.Alive, landLog);
+        if (land)
+        {
+            var lv = u.Active;
+            double left = 0;
+            for (int i = 0; i < lv.Attached.Length; i++) if (lv.Attached[i]) left += lv.Propellant[i];
+            Console.WriteLine($"   посадка: {lv.Situation}, остаток топлива {left:F0} кг");
+        }
+        // Падение на Луну доводит физика: ускорение сброшено у рельефа, дальше шагаем в реальном темпе.
+        if (tr.Status == MissionStatus.Active && u.Active.Body == moon)
+            Fly(u, tr, 2, 3600, () => tr.Status == MissionStatus.Active);
+        Console.WriteLine($"   итог: {(u.Active.Alive ? OrbitText(u.Active, u.Time) : u.Active.DestroyReason)}");
+        Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
+    static void TestVostok()
+    {
+        var (u, tr) = StartMission("vostok");
+        if (!Ascend(u, tr, 220000)) { Check("Восток: орбита", false); return; }
+        Fly(u, tr, 5, 4 * 3600, () => !tr.Done[0]);
+        Check("Восток: виток выполнен", tr.Done[0]);
+        // Сброс II ступени и подготовка ТДУ.
+        while (u.Active.NextStageLabel != null && u.Active.Design.Sequence[u.Active.NextStage].Type != StageActionType.Ignite)
+            u.Stage();
+        u.Stage();
+        var v = u.Active;
+        u.SetNode(u.Time + 300, -95, 0, 0);
+        u.NodePilot = new NodeAutopilot();
+        Fly(u, tr, 4, 3600, () => u.NodePilot != null && u.Active.Alive);
+        Console.WriteLine($"   после ТДУ: {OrbitText(v, u.Time)}");
+        u.Stage(); // отделение приборного отсека
+        v = u.Active;
+        v.Sas = SasMode.Off;
+        double maxG = 0, maxHeat = 0, maxEntryG = 0, entryAlt = 0;
+        bool chute = false;
+        Fly(u, tr, 2, 6 * 3600, () => tr.Status == MissionStatus.Active, () =>
+        {
+            if (v.Situation == Situation.Flying)
+            {
+                if (!chute && v.GForce > maxEntryG) { maxEntryG = v.GForce; entryAlt = v.Altitude; }
+                maxG = Math.Max(maxG, v.GForce);
+                maxHeat = Math.Max(maxHeat, v.HeatFlux);
+            }
+            if (!chute && v.Altitude < 7000 && v.DynamicPressure < 20000 && v.Situation == Situation.Flying)
+            {
+                u.Stage();
+                chute = true;
+                Console.WriteLine($"      парашют на {v.Altitude / 1000:F1} км, {v.SurfaceSpeed:F0} м/с");
+            }
+        });
+        Console.WriteLine($"   вход: max {maxEntryG:F1} g на {entryAlt / 1000:F0} км");
+        Console.WriteLine($"   спуск: max {maxG:F1} g, max тепловой поток {maxHeat / 1e3:F0} кВт/м², итог {v.Situation} {v.DestroyReason}");
+        Check("Восток: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+}
