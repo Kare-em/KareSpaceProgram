@@ -57,7 +57,8 @@ namespace Kare.Space.Core
             var site = SolarSystem.GetSite(siteId) ?? throw new ArgumentException($"Нет космодрома {siteId}");
             var body = System.Get(site.BodyId);
             var v = new Vessel(design);
-            FlightPhysics.PlaceOnSurface(v, body, site.Latitude, site.Longitude, Time);
+            FlightPhysics.PlaceOnSurface(v, body, site.Latitude, site.Longitude, Time, site.PadHeight);
+            v.Site = site;
             FlightPhysics.UpdateTelemetry(v, Time);
             Add(v);
             SetActive(v);

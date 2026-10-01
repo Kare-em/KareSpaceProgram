@@ -73,7 +73,7 @@ namespace Kare.Space.Game
             if (b != profileBody) ApplyProfile(b);
 
             // HDRP ждёт центр и радиус планеты в КИЛОМЕТРАХ (VisualEnvironment), сцена — в метрах.
-            var c = BodyRenderer.Project(b.Position, out double k);
+            var c = BodyRenderer.Project(b, out double k);
             env.planetCenter.Override(c / 1000f);
             env.planetRadius.Override((float)(b.Radius * k / 1000));
 
@@ -81,7 +81,10 @@ namespace Kare.Space.Game
             {
                 exposure.mode.Override(MapView.IsOpen ? ExposureMode.Fixed : ExposureMode.AutomaticHistogram);
                 exposure.fixedExposure.Override(MapEv);
-                exposure.limitMin.Override(Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active)));
+                float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active));
+                float plume = VesselView.PlumePeakNits;
+                if (plume > 0) evMin = Mathf.Max(evMin, Mathf.Log(plume / (1.2f * PreExposedMax), 2));
+                exposure.limitMin.Override(evMin);
             }
         }
 
@@ -94,6 +97,14 @@ namespace Kare.Space.Game
         /// <summary>Высота, к которой небо уже чёрное и предел выходит на SunlitEvMin, м.
         /// Пара: кадр на 25 км — небо почти чёрное; у поверхности гистограмме не мешаем (закаты).</summary>
         const double DarkSkyAltitude = 30000;
+
+        /// <summary>
+        /// Потолок яркости после предэкспозиции для факела (§9.5). Множитель кадра 1/(1,2·2^EV): при EV −5
+        /// ядро 3·10³ нит даёт 8·10⁴ — выше максимума half (65 504) → Inf в буфере. Отсюда
+        /// EV ≥ log2(нит / (1,2·PreExposedMax)): для ядра 3·10³ это ≈ −2. Запас ×6 до half — на наложение слоёв
+        /// аддитива (две стенки ядра + две свечения). Пара: VesselView.CoreNits.
+        /// </summary>
+        const float PreExposedMax = 1e4f;
 
         static float SunlitWeight(Vessel v)
         {

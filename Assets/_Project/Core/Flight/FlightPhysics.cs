@@ -33,7 +33,7 @@ namespace Kare.Space.Core
         /// <summary>Константа Саттона — Грейвса для воздуха, кг^0.5/м.</summary>
         const double SuttonGraves = 1.7415e-4;
         /// <summary>Сколько секунд суммарного перегрева выдерживает обшивка.</summary>
-        const double OverheatTolerance = 3;
+        public const double OverheatTolerance = 3;
 
         static readonly double[] CdMach = { 0, 0.6, 0.85, 1.05, 1.2, 2, 4, 10 };
         static readonly double[] CdValue = { 0.30, 0.30, 0.45, 0.80, 0.70, 0.50, 0.35, 0.30 };
@@ -63,7 +63,8 @@ namespace Kare.Space.Core
         // ---------------------------------------------------------------- на поверхности
 
         /// <summary>Поставить корабль на поверхность носом в зенит (стартовый стол).</summary>
-        public static void PlaceOnSurface(Vessel v, CelestialBody body, double latDeg, double lonDeg, double t)
+        public static void PlaceOnSurface(Vessel v, CelestialBody body, double latDeg, double lonDeg, double t,
+            double padHeight = 0)
         {
             v.Body = body;
             v.MassProperties(out _, out double com, out _, out _);
@@ -71,7 +72,7 @@ namespace Kare.Space.Core
             double h = body.SurfaceHeight(up);
             var east = Vector3d.Cross(Vector3d.forward, up).normalized;
             var north = Vector3d.Cross(up, east);
-            v.AnchorBodyFixed = up * (body.Radius + h + com);
+            v.AnchorBodyFixed = up * (body.Radius + h + padHeight + com);
             // Связанные оси: X — восток, Y — зенит, Z — север (в координатах U тела).
             v.AttitudeBodyFixed = QuaternionD.FromBasis(east.SwapYZ, up.SwapYZ, north.SwapYZ);
             v.Situation = Situation.Landed;

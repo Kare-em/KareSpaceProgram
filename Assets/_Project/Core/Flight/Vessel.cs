@@ -78,6 +78,8 @@ namespace Kare.Space.Core
         public Vector3d AngularVelocity;
         public Situation Situation = Situation.Landed;
         public Vector3d AnchorBodyFixed;
+        /// <summary>Космодром старта (для стола и креплений в рендере); null — борт создан не на старте.</summary>
+        public LaunchSite Site;
         public QuaternionD AttitudeBodyFixed = QuaternionD.identity;
         public KeplerOrbit Orbit;
         public bool OnRails;

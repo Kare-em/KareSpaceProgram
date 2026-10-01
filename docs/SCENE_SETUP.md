@@ -22,7 +22,7 @@ Unity 6000.6.3f1, HDRP 17.6. Редактор открывать из Hub; MCP f
 |---|---|---|
 | `GameBootstrap` | создаёт `Universe`, ставит «Кара-1» на площадку Байконура, каждый кадр шагает симуляцию (`Update` → шаг с текущим warp), трекер миссий | §1.3, §3 |
 | `FloatingOrigin` | активный борт = (0,0,0) Unity; всё остальное: `(pos_double − origin_double)` → float. Переход эклиптика J2000 → Unity через SwapYZ (см. тест `math`) | §2.6 |
-| `BodyRenderer` | меш тела (сначала UV-сфера с процедурной текстурой, потом кубосфера + квадродерево), сжатие дальних тел `d' = d0·(1+ln(d/d0))`, `d0 = 1e7 м` | §2.7, §2.8 |
+| `BodyRenderer` | меш тела (сначала UV-сфера с процедурной текстурой, потом кубосфера + квадродерево), сжатие дальних тел в оболочку 5e6…9,5e6 м по расстоянию до горизонта | §2.7, §2.8 |
 | `SunLight` | Directional Light по направлению на Солнце, 127 000 лк × (1 а.е./r)², затмения по угловым дискам | §9.1, §9.3 |
 | `SkyController` | центр/радиус Physically Based Sky каждый кадр, смена профиля по SOI, экспозиция EV [−5, 16] | §9.2, §9.3 |
 | `VesselView` | процедурный меш ракеты из секций `Design.Sections` (Length, Diameter), ориентация из `Vessel.Attitude` (+Y = нос), факел | §5, §9.5 |
@@ -83,7 +83,7 @@ u.Message += Debug.Log; tr.Changed += Debug.Log;
    - Tonemapping ACES, Bloom 0.2, Fog — выкл. (атмосферу даёт PBSky).
 4. **Directional Light «Sun»**: Intensity 127 000 lux, Color Temperature 5778 K, Angular Diameter 0.53°,
    тени: Cascades 4, Max Distance 2000 м. Повесить `SunLight`.
-5. **Main Camera**: Near 0.1, Far 2e8 (§2.7), FOV 60, Clear = Sky. Повесить `FlightCamera`.
+5. **Main Camera**: Near 1, Far 1e7 (§2.7; больше — пропадают тени), FOV 60, Clear = Sky. Повесить `FlightCamera`.
    Physical Camera — вкл. (ISO 100, Shutter 1/125, Aperture 16) — экспозицию всё равно ведёт Volume.
 6. Пустой объект **«Game»**: `GameBootstrap`, `FloatingOrigin`, `FlightInput`, `FlightHud`, `MapView`.
    Ссылки в инспекторе: Camera, Sun, Global Volume.
@@ -109,7 +109,7 @@ static void Build()
     var profile = CreateOrLoadVolumeProfile("Assets/_Project/Settings/FlightVolume.asset"); // PBSky, Exposure, Tonemapping, Bloom — значения из п. А3
     var volume = new GameObject("Global Volume").AddComponent<Volume>(); volume.isGlobal = true; volume.sharedProfile = profile;
     var sun = CreateSun();          // п. А4: HDAdditionalLightData, 127000 lux, 5778 K, 0.53°
-    var cam = CreateCamera();       // п. А5: near 0.1, far 2e8, HDAdditionalCameraData
+    var cam = CreateCamera();       // п. А5: near 1, far 1e7, HDAdditionalCameraData
     var game = new GameObject("Game");
     var boot = game.AddComponent<GameBootstrap>(); boot.Camera = cam; boot.Sun = sun; boot.Volume = volume;
     game.AddComponent<FloatingOrigin>(); game.AddComponent<FlightInput>(); game.AddComponent<FlightHud>(); game.AddComponent<MapView>();

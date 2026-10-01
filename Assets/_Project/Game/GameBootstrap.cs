@@ -26,6 +26,8 @@ namespace Kare.Space.Game
         public Material VesselMaterial;
         [Tooltip("Эмиссионный материал факела.")]
         public Material PlumeMaterial;
+        [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
+        public Texture2D PadTexture;
 
         Universe universe;
         public MissionTracker Tracker { get; private set; }
@@ -47,6 +49,8 @@ namespace Kare.Space.Game
             Tracker.Changed += OnMessage;
             OnMessage($"Миссия «{Mission.Title}»: {Mission.Brief}");
             FloatingOrigin.Refresh();
+            if (universe.Active?.Site != null)
+                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial);
         }
 
         void OnDestroy()

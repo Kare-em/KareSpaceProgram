@@ -27,6 +27,9 @@ namespace Kare.Space.Core
         public double Latitude, Longitude, Elevation;
         /// <summary>Радиус ровной площадки и зоны плавного перехода, м.</summary>
         public double FlatRadius = 1500, BlendRadius = 9000;
+        /// <summary>Высота стартового стола над грунтом, м: ракета висит на опорах над газоотводом, сопла
+        /// не уходят в землю (§7). Пара: LaunchPadView.PadHeight рисует бетон на этой же высоте.</summary>
+        public double PadHeight = 6;
 
         public LaunchSite(string id, string name, string bodyId, double lat, double lon, double elevation)
         {

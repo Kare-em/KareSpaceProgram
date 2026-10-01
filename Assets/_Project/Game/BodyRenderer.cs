@@ -7,19 +7,36 @@ namespace Kare.Space.Game
 {
     /// <summary>
     /// Меши тел (GDD §2.7, §2.8, этап 1): UV-сфера с процедурной текстурой на каждое тело каталога
-    /// и локальный патч рельефа под бортом. Дальние тела сжимаются по расстоянию `d' = d0·(1+ln(d/d0))`
-    /// с масштабом k = d'/d — угловой размер истинный. Детей создаёт сам: радиусы и рельеф — из Core.
+    /// и локальный патч рельефа под бортом. Дальние тела кладутся в «оболочку» перед дальней плоскостью
+    /// (аналог ScaledSpace KSP одной камерой) с масштабом k = d'/d — угловой размер истинный.
+    /// Детей создаёт сам: радиусы и рельеф — из Core.
     /// </summary>
     [DefaultExecutionOrder(-50)]
     public sealed class BodyRenderer : MonoBehaviour
     {
         public static BodyRenderer Instance { get; private set; }
 
-        /// <summary>Порог сжатия §2.7, м. Пара: дальняя плоскость камеры 2e8 (FlightCamera.FarClip) —
-        /// при d0 = 1e7 Нептун ложится на 1,4e8, внутрь неё.</summary>
-        public const double CompressionStart = 1e7;
+        /// <summary>
+        /// Оболочка сжатия §2.7, м: тело, у которого расстояние до горизонта H больше ShellStart,
+        /// масштабируется так, что H ложится в ShellStart + ShellWidth·x/(x + ShellSoftness), x = ln(H/ShellStart).
+        /// Почему не 2e8, как в GDD: при дальней плоскости ≥ 3e6 (near 0,1) и 2e8 (near 2/20) HDRP теряет
+        /// тени Солнца целиком; 1e7 при near 1 и 1e6 при near 0,1 — тени есть (замер 01.10.2026).
+        /// Пара: ShellStart + ShellWidth = 9,5e6 &lt; FlightCamera.FarClip = 1e7.
+        /// Пара: ShellStart = 5e6 больше горизонта с потолка патча (40 км → 715 км) — патч всегда без сжатия.
+        /// </summary>
+        public const double ShellStart = 5e6, ShellWidth = 4.5e6;
+        /// <summary>Мягкость оболочки (в единицах ln): Луна с Земли ложится на ≈6,7e6, Нептун — на ≈8e6.</summary>
+        const double ShellSoftness = 7;
 
         public Material BaseMaterial;
+
+        [Header("Грунт вблизи (§2.8): цвет тайлом в метрах + крупная вариация детальной картой")]
+        public Texture2D EarthGround, EarthMacro, MoonGround, MarsGround;
+        /// <summary>Повтор тайла грунта и крупной вариации, м. Пара: шаг патча в центре ≈ 20 м — крупный
+        /// масштаб много больше шага, иначе вариация не читается; мелкий — меньше камеры у стола (≈ 60 м).</summary>
+        const double GroundTile = 6, MacroTile = 350;
+        /// <summary>Контраст крупной вариации: доля отклонения яркости макро-текстуры от средней.</summary>
+        const float MacroContrast = 1.6f;
 
         /// <summary>Карта (§9.6) рисует без сжатия.</summary>
         public static bool Compression = true;
@@ -42,7 +59,12 @@ namespace Kare.Space.Game
             public Transform Tr;
             public Renderer Rend;
             public Material Mat;
+            /// <summary>Тот же материал без ночных огней: вблизи тексель 40 км светился бы пятном под столом.</summary>
+            public Material PatchMat;
             public double SphereRadius;
+            /// <summary>Есть свой грунт: UV патча — метры, цвет подгоняется к цвету тела в точке.</summary>
+            public bool Ground;
+            public Color GroundMean;
         }
 
         readonly List<Entry> entries = new List<Entry>();
@@ -80,6 +102,9 @@ namespace Kare.Space.Game
                 e.Mat.SetTexture("_BaseColorMap", BuildTexture(b, detailed ? TextureDetailed : TexturePlain));
                 e.Mat.SetColor("_BaseColor", Color.white);
                 e.Mat.SetFloat("_Smoothness", 0.15f);
+                e.PatchMat = new Material(e.Mat) { name = $"Patch {b.Id}" };
+                if (b.Id == "earth") AddNightLights(e.Mat, b, TextureDetailed);
+                SetupGround(e);
                 mr.sharedMaterial = e.Mat;
                 // Тени от планеты на планету рисовать бессмысленно (каскады 2 км), затмения — SunLight.
                 mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -106,14 +131,21 @@ namespace Kare.Space.Game
         /// <summary>
         /// Положение и масштаб меша тела в Unity с учётом сжатия §2.7. scale — множитель к истинным
         /// размерам (1 вблизи). Нужен и PBSky (SkyController), чтобы небо совпадало с мешем.
+        /// Мерило — расстояние до горизонта, а не до центра: вся видимая часть сферы ближе горизонта,
+        /// поэтому Земля под стартовым столом (центр 6,4e6) не сжимается и совпадает с патчем.
         /// </summary>
-        public static Vector3 Project(Vector3d worldP, out double scale)
+        public static Vector3 Project(CelestialBody b, out double scale)
         {
-            var rel = (worldP - FloatingOrigin.OriginP).SwapYZ;
+            var rel = (b.Position - FloatingOrigin.OriginP).SwapYZ;
             double d = rel.magnitude;
+            double r = b.Radius;
+            double horizon = d > r ? System.Math.Sqrt(d * d - r * r) : 0;
             scale = 1;
-            if (Compression && d > CompressionStart)
-                scale = CompressionStart * (1 + System.Math.Log(d / CompressionStart)) / d;
+            if (Compression && horizon > ShellStart)
+            {
+                double x = System.Math.Log(horizon / ShellStart);
+                scale = (ShellStart + ShellWidth * x / (x + ShellSoftness)) / horizon;
+            }
             return FloatingOrigin.ToVector3(rel * scale);
         }
 
@@ -124,7 +156,7 @@ namespace Kare.Space.Game
             FloatingOrigin.Refresh();
             foreach (var e in entries)
             {
-                var pos = Project(e.Body.Position, out double k);
+                var pos = Project(e.Body, out double k);
                 e.Tr.SetPositionAndRotation(pos, FloatingOrigin.BodyRotation(e.Body));
                 e.Tr.localScale = Vector3.one * (float)(e.SphereRadius * k);
             }
@@ -164,6 +196,25 @@ namespace Kare.Space.Game
             int n = PatchN + 1;
             var verts = new Vector3[n * n];
             var uvs = new Vector2[n * n];
+            var e = byBody[b];
+            var macro = e.Ground ? new Vector2[n * n] : null;
+            // Метрические UV от широты/долготы, а не от осей патча: оси патча меняются при каждой
+            // перестройке, и текстура прыгала бы под ракетой. Опорная точка округлена до градуса, а её
+            // доля тайла добавлена отдельно — в float остаются только метры внутри патча.
+            double lat0 = 0, lon0 = 0, kx = 0, ky = b.Radius * Constants.Deg2Rad;
+            Vector2 g0 = default, m0 = default;
+            if (e.Ground)
+            {
+                CelestialBody.BodyFixedToLatLon(centerBf, out double clat, out double clon);
+                lat0 = System.Math.Round(clat);
+                lon0 = System.Math.Round(clon);
+                kx = ky * System.Math.Max(0.1, System.Math.Cos(lat0 * Constants.Deg2Rad));
+                g0 = new Vector2(Frac(lon0 * kx / GroundTile), Frac(lat0 * ky / GroundTile));
+                m0 = new Vector2(Frac(lon0 * kx / MacroTile), Frac(lat0 * ky / MacroTile));
+                var c = SurfaceColor(b, BodyVisuals.Get(b.Id), clat, clon);
+                // Средний цвет тайла → цвет тела в точке: с высоты патч не выделяется квадратом.
+                e.PatchMat.SetColor("_BaseColor", new Color(c.r / e.GroundMean.r, c.g / e.GroundMean.g, c.b / e.GroundMean.b, 1));
+            }
             for (int j = 0; j < n; j++)
             for (int i = 0; i < n; i++)
             {
@@ -173,7 +224,16 @@ namespace Kare.Space.Game
                 var dir = (centerBf + e1 * x + e2 * y).normalized;
                 var p = dir * (b.Radius + b.SurfaceHeight(dir)) - patchCenterLocal;
                 verts[j * n + i] = FloatingOrigin.ToVector3(p.SwapYZ);
-                uvs[j * n + i] = LatLonUv(dir);
+                if (e.Ground)
+                {
+                    CelestialBody.BodyFixedToLatLon(dir, out double lat, out double lon);
+                    double dl = lon - lon0;
+                    if (dl > 180) dl -= 360; else if (dl < -180) dl += 360;
+                    double mx = dl * kx, my = (lat - lat0) * ky;
+                    uvs[j * n + i] = new Vector2((float)(mx / GroundTile), (float)(my / GroundTile)) + g0;
+                    macro[j * n + i] = new Vector2((float)(mx / MacroTile), (float)(my / MacroTile)) + m0;
+                }
+                else uvs[j * n + i] = LatLonUv(dir);
             }
             var tris = new int[PatchN * PatchN * 6];
             int t = 0;
@@ -188,12 +248,81 @@ namespace Kare.Space.Game
             mesh.Clear();
             mesh.vertices = verts;
             mesh.uv = uvs;
+            if (macro != null) mesh.uv2 = macro;
             mesh.triangles = tris;
             FixWinding(mesh, (centerBf).SwapYZ);
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
-            patchMr.sharedMaterial = byBody[b].Mat;
+            patchMr.sharedMaterial = e.PatchMat;
             patchTr.gameObject.SetActive(true);
+        }
+
+        static float Frac(double x) => (float)(x - System.Math.Floor(x));
+
+        /// <summary>
+        /// Свой грунт патча: цвет — тайл в метрах (UV0), крупные пятна — детальная карта HDRP по UV1
+        /// (только альбедо, R; G/A — плоская нормаль, B — нейтральная гладкость). С высоты мипы
+        /// усредняют обе в среднее — патч сходится к цвету тела без шва.
+        /// </summary>
+        void SetupGround(Entry e)
+        {
+            var id = e.Body.Id;
+            var albedo = id == "earth" ? EarthGround : id == "moon" ? MoonGround : id == "mars" ? MarsGround : null;
+            if (albedo == null || !albedo.isReadable) return;
+            var src = id == "earth" && EarthMacro != null && EarthMacro.isReadable ? EarthMacro : albedo;
+            e.Ground = true;
+            e.GroundMean = MeanColor(albedo);
+            var m = e.PatchMat;
+            m.SetTexture("_BaseColorMap", albedo);
+            m.SetTexture("_DetailMap", BuildDetail(src));
+            // ValidateMaterial в рантайме не вызывается — ключевое слово и канал UV ставим сами.
+            m.EnableKeyword("_DETAIL_MAP");
+            m.SetFloat("_UVDetail", 1);
+            m.SetVector("_UVDetailsMappingMask", new Vector4(0, 1, 0, 0));
+            m.SetFloat("_DetailAlbedoScale", 1);
+            m.SetFloat("_DetailNormalScale", 0);
+            m.SetFloat("_DetailSmoothnessScale", 0);
+        }
+
+        static Color MeanColor(Texture2D t)
+        {
+            int mip = Mathf.Max(0, t.mipmapCount - 5);
+            var px = t.GetPixels(mip);
+            Color s = Color.black;
+            foreach (var c in px) s += c;
+            s /= px.Length;
+            return new Color(Mathf.Max(s.r, 0.02f), Mathf.Max(s.g, 0.02f), Mathf.Max(s.b, 0.02f), 1);
+        }
+
+        static Texture2D BuildDetail(Texture2D src)
+        {
+            const int w = 256;
+            int mip = 0;
+            while (mip + 1 < src.mipmapCount && (src.width >> (mip + 1)) >= w) mip++;
+            int sw = Mathf.Max(1, src.width >> mip), sh = Mathf.Max(1, src.height >> mip);
+            var px = src.GetPixels(mip);
+            var lum = new float[w * w];
+            float mean = 0;
+            for (int y = 0; y < w; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var c = px[(y * sh / w) * sw + x * sw / w];
+                float l = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+                lum[y * w + x] = l;
+                mean += l;
+            }
+            mean /= lum.Length;
+            var tex = new Texture2D(w, w, TextureFormat.RGBA32, true, true) { name = $"Detail {src.name}", wrapMode = TextureWrapMode.Repeat, anisoLevel = 4 };
+            var outPx = new Color32[w * w];
+            for (int i = 0; i < lum.Length; i++)
+            {
+                float d = 0.5f + (lum[i] - mean) / Mathf.Max(mean, 0.05f) * 0.5f * MacroContrast;
+                byte r = (byte)Mathf.Clamp(Mathf.RoundToInt(255 * d), 0, 255);
+                outPx[i] = new Color32(r, 128, 128, 128);
+            }
+            tex.SetPixels32(outPx);
+            tex.Apply(true, true);
+            return tex;
         }
 
         // ---------------------------------------------------------------- генерация
@@ -262,6 +391,49 @@ namespace Kare.Space.Game
             }
         }
 
+        /// <summary>
+        /// Ночные огни (§9.4, этап 1): эмиссия в нитах на суше вне льдов, гуще в умеренных широтах севера,
+        /// пятнами по шуму + точки-города. Днём (EV 12+) их не видно, ночью (EV −5) — видно; экспозиция
+        /// решает сама, переключать по терминатору не нужно.
+        /// </summary>
+        static void AddNightLights(Material m, CelestialBody b, int w)
+        {
+            int h = w / 2;
+            var look = BodyVisuals.Get(b.Id);
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, true) { name = $"Lights {b.Id}", wrapModeU = TextureWrapMode.Repeat, wrapModeV = TextureWrapMode.Clamp };
+            var px = new Color32[w * h];
+            var rnd = new System.Random(4);
+            for (int y = 0; y < h; y++)
+            {
+                double lat = -90 + 180.0 * (y + 0.5) / h;
+                // Населённость по широте: пик 25–55° с. ш., юг втрое реже.
+                double belt = System.Math.Exp(-System.Math.Pow((lat - 38) / 18, 2)) + 0.35 * System.Math.Exp(-System.Math.Pow((lat + 25) / 15, 2));
+                for (int x = 0; x < w; x++)
+                {
+                    double lon = -180 + 360.0 * (x + 0.5) / w;
+                    if (System.Math.Abs(lat) > look.IceLatitude - 8) continue;
+                    var dir = CelestialBody.LatLonToBodyFixed(lat, lon);
+                    if (b.SurfaceHeight(dir) <= 0) continue;
+                    float n = Mathf.PerlinNoise((float)lon * 0.15f + 300, (float)lat * 0.15f + 300);
+                    float n2 = Mathf.PerlinNoise((float)lon * 0.9f + 700, (float)lat * 0.9f + 700);
+                    double v = belt * Mathf.Clamp01((n - 0.45f) * 3) * Mathf.Clamp01((n2 - 0.35f) * 2);
+                    if (rnd.NextDouble() < belt * 0.03) v = System.Math.Max(v, 0.6 + 0.4 * rnd.NextDouble()); // город
+                    byte c = (byte)(255 * System.Math.Min(1, v));
+                    px[y * w + x] = new Color32(c, c, c, 255);
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply(true, true);
+            m.SetTexture("_EmissiveColorMap", tex);
+            m.SetColor("_EmissiveColor", NightLightsColor * NightLightsNits);
+            m.EnableKeyword("_EMISSIVE_COLOR_MAP");
+        }
+
+        /// <summary>Яркость огней в пике, нит (порядок VIIRS для города, ≈1e-4 Вт/м²/ср). Пара: ночная экспозиция
+        /// SkyController.EvMin = −5 — серое 18 % ≈ 0,004 нит, огни в 5 раз ярче.</summary>
+        const float NightLightsNits = 0.02f;
+        static readonly Color NightLightsColor = new Color(1f, 0.72f, 0.38f); // натрий
+
         /// <summary>Равнопромежуточная текстура-заглушка (§9.4 этап 1): цвет по высоте, океан, шапки, полосы.</summary>
         static Texture2D BuildTexture(CelestialBody b, int w)
         {
@@ -269,34 +441,36 @@ namespace Kare.Space.Game
             var look = BodyVisuals.Get(b.Id);
             var tex = new Texture2D(w, h, TextureFormat.RGBA32, true) { name = $"Tex {b.Id}", wrapModeU = TextureWrapMode.Repeat, wrapModeV = TextureWrapMode.Clamp };
             var px = new Color32[w * h];
-            double amp = b.Terrain != null && b.Terrain.Amplitude > 0 ? b.Terrain.Amplitude : 1;
-            bool ocean = b.Terrain != null && b.Terrain.Ocean;
             for (int y = 0; y < h; y++)
             {
                 double lat = -90 + 180.0 * (y + 0.5) / h;
                 for (int x = 0; x < w; x++)
                 {
                     double lon = -180 + 360.0 * (x + 0.5) / w;
-                    Color c;
-                    if (look.Bands > 0)
-                    {
-                        float band = Mathf.Sin((float)(lat * Constants.Deg2Rad) * look.Bands * 1.7f + Mathf.Sin((float)(lon * Constants.Deg2Rad) * 3) * 0.15f);
-                        c = Color.Lerp(look.Low, look.High, 0.5f + 0.5f * band * look.BandContrast);
-                    }
-                    else
-                    {
-                        var dir = CelestialBody.LatLonToBodyFixed(lat, lon);
-                        double hh = b.Terrain != null ? b.SurfaceHeight(dir) : 0;
-                        if (ocean && hh <= 0) c = look.Ocean;
-                        else c = Color.Lerp(look.Low, look.High, Mathf.Clamp01((float)(0.5 + 0.5 * hh / amp)));
-                        if (System.Math.Abs(lat) > look.IceLatitude) c = look.Ice;
-                    }
-                    px[y * w + x] = c;
+                    px[y * w + x] = SurfaceColor(b, look, lat, lon);
                 }
             }
             tex.SetPixels32(px);
             tex.Apply(true, true);
             return tex;
+        }
+
+        /// <summary>Цвет тела в точке — им же рисуется сфера (BuildTexture) и тонируется грунт патча.</summary>
+        static Color SurfaceColor(CelestialBody b, BodyLook look, double lat, double lon)
+        {
+            if (look.Bands > 0)
+            {
+                float band = Mathf.Sin((float)(lat * Constants.Deg2Rad) * look.Bands * 1.7f + Mathf.Sin((float)(lon * Constants.Deg2Rad) * 3) * 0.15f);
+                return Color.Lerp(look.Low, look.High, 0.5f + 0.5f * band * look.BandContrast);
+            }
+            double amp = b.Terrain != null && b.Terrain.Amplitude > 0 ? b.Terrain.Amplitude : 1;
+            bool ocean = b.Terrain != null && b.Terrain.Ocean;
+            var dir = CelestialBody.LatLonToBodyFixed(lat, lon);
+            double hh = b.Terrain != null ? b.SurfaceHeight(dir) : 0;
+            Color c = ocean && hh <= 0 ? look.Ocean
+                    : Color.Lerp(look.Low, look.High, Mathf.Clamp01((float)(0.5 + 0.5 * hh / amp)));
+            if (System.Math.Abs(lat) > look.IceLatitude) c = look.Ice;
+            return c;
         }
     }
 }

@@ -17,6 +17,9 @@ namespace Kare.Space.EditorTools
         const string SettingsDir = "Assets/_Project/Settings";
         const string ProfilePath = SettingsDir + "/FlightVolume.asset";
         const string PipelinePath = SettingsDir + "/HDRP.asset";
+        /// <summary>Текстуры из атласов генератора (Tools/gen-texture.mjs → Tools/slice-atlas.py).</summary>
+        const string GroundDir = "Assets/_Project/Textures/Ground";
+        const string HudIconsPath = "Assets/_Project/Textures/UI/HudIcons.png";
 
         /// <summary>Пара: SunLight.IlluminanceAt1Au — стартовое значение до первого кадра.</summary>
         const float SunLux = 127000;
@@ -25,7 +28,6 @@ namespace Kare.Space.EditorTools
         const float SunAngularDiameter = 0.53f;
         /// <summary>Пара: дальность теней ↔ размер борта/патча рельефа вблизи камеры.</summary>
         const float ShadowDistance = 2000;
-        const float PlumeNits = 2e5f;
 
         [MenuItem("Kare/Build Flight Scene")]
         public static void Build()
@@ -77,15 +79,21 @@ namespace Kare.Space.EditorTools
             boot.Volume = vol;
             boot.VesselMaterial = vesselMat;
             boot.PlumeMaterial = plumeMat;
+            boot.PadTexture = GroundTexture("Concrete", false);
             game.AddComponent<FloatingOrigin>();
             game.AddComponent<FlightInput>();
-            game.AddComponent<FlightHud>();
+            game.AddComponent<FlightHud>().Icons = IconTexture(HudIconsPath);
             var map = game.AddComponent<MapView>();
             map.Camera = cam;
             map.LineMaterial = lineMat;
 
             var bodies = new GameObject("Bodies");
-            bodies.AddComponent<BodyRenderer>().BaseMaterial = bodyMat;
+            var bodyRenderer = bodies.AddComponent<BodyRenderer>();
+            bodyRenderer.BaseMaterial = bodyMat;
+            bodyRenderer.EarthGround = GroundTexture("SteppeDetail", true);
+            bodyRenderer.EarthMacro = GroundTexture("SteppeMacro", true);
+            bodyRenderer.MoonGround = GroundTexture("Regolith", true);
+            bodyRenderer.MarsGround = GroundTexture("MarsSoil", true);
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             AddToBuildSettings(ScenePath);
@@ -147,6 +155,9 @@ namespace Kare.Space.EditorTools
             var sky = Get<PhysicallyBasedSky>(profile);
             sky.type.Override(PhysicallyBasedSkyModel.EarthAdvanced);
             env.planetRadius.Override(6378.137f); // км; рантайм перезаписывает из BodyRenderer (§9.2)
+            // Звёзды и Млечный Путь в нитах (§9.2): множитель 1, видимость решает экспозиция §9.3.
+            sky.spaceEmissionTexture.Override(StarFieldBaker.Ensure());
+            sky.spaceEmissionMultiplier.Override(1);
 
             var exp = Get<Exposure>(profile);
             exp.mode.Override(ExposureMode.AutomaticHistogram);
@@ -199,15 +210,62 @@ namespace Kare.Space.EditorTools
             return m;
         }
 
+        /// <summary>Факел (§9.5): Unlit, прозрачный, аддитивный, двусторонний, без записи глубины.
+        /// Цвет в нитах и градиент по длине ставит VesselView через MaterialPropertyBlock.</summary>
         static Material PlumeMaterial(string path)
         {
-            var m = LoadOrCreate(path, "HDRP/Lit");
-            m.SetColor("_BaseColor", new Color(1f, 0.75f, 0.45f));
-            HDMaterial.SetEmissiveColor(m, new Color(1f, 0.7f, 0.4f));
-            HDMaterial.SetEmissiveIntensity(m, PlumeNits, EmissiveIntensityUnit.Nits);
+            var m = LoadOrCreate(path, "HDRP/Unlit");
+            m.shader = Shader.Find("HDRP/Unlit"); // старый Plume.mat был на HDRP/Lit
+            m.SetFloat("_SurfaceType", 1);   // Transparent
+            m.SetFloat("_BlendMode", 1);     // Additive
+            m.SetFloat("_DoubleSidedEnable", 1);
+            m.SetFloat("_TransparentZWrite", 0);
+            // Цвет Unlit идёт мимо экспозиции — светим только эмиссией (её HDRP экспонирует).
+            m.SetColor("_UnlitColor", Color.black);
+            m.SetColor("_EmissiveColor", Color.white);
+            // Туман на прозрачных добавлял бы рассеяние неба в каждый аддитивный слой — голубой налёт.
+            m.SetFloat("_EnableFogOnTransparent", 0);
             HDMaterial.ValidateMaterial(m);
+            // Ключ на ассете не держится (Validate снимает его без текстуры в материале) — VesselView
+            // делает рантайм-копию с градиентом и ключом. Здесь — чтобы вариант шейдера попал в сборку.
+            m.EnableKeyword("_EMISSIVE_COLOR_MAP");
             EditorUtility.SetDirty(m);
             return m;
+        }
+
+        /// <summary>Тайл грунта: повтор, анизотропия, мипы. readable — BodyRenderer считает средний цвет
+        /// и строит детальную карту; без сжатия, чтобы GetPixels работал на любом формате.</summary>
+        static Texture2D GroundTexture(string name, bool readable)
+        {
+            string path = $"{GroundDir}/{name}.png";
+            if (AssetImporter.GetAtPath(path) is TextureImporter ti)
+            {
+                ti.textureType = TextureImporterType.Default;
+                ti.sRGBTexture = true;
+                ti.mipmapEnabled = true;
+                ti.wrapMode = TextureWrapMode.Repeat;
+                ti.anisoLevel = 8;
+                ti.maxTextureSize = 1024;
+                ti.isReadable = readable;
+                ti.textureCompression = readable ? TextureImporterCompression.Uncompressed : TextureImporterCompression.CompressedHQ;
+                ti.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        /// <summary>Атлас иконок HUD 4×4: белое по альфе, красится GUI.color; без мипов и повтора.</summary>
+        static Texture2D IconTexture(string path)
+        {
+            if (AssetImporter.GetAtPath(path) is TextureImporter ti)
+            {
+                ti.textureType = TextureImporterType.Default;
+                ti.alphaIsTransparency = true;
+                ti.mipmapEnabled = true;
+                ti.wrapMode = TextureWrapMode.Clamp;
+                ti.textureCompression = TextureImporterCompression.Uncompressed;
+                ti.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         static Material UnlitMaterial(string path)
