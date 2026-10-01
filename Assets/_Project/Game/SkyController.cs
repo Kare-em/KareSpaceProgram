@@ -81,7 +81,24 @@ namespace Kare.Space.Game
             {
                 exposure.mode.Override(MapView.IsOpen ? ExposureMode.Fixed : ExposureMode.AutomaticHistogram);
                 exposure.fixedExposure.Override(MapEv);
+                exposure.limitMin.Override(Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active)));
             }
+        }
+
+        /// <summary>
+        /// Нижний предел EV на свету (§9.3, «орбита на свету»). Без него гистограмма в космосе видит
+        /// почти чёрный кадр и уходит к EvMin — освещённые Земля и борт выбеливаются целиком
+        /// (замер 01.10.2026: белый кадр на 124 км, при пределе 12 — нормальный). Ночью предел — EvMin.
+        /// </summary>
+        public const float SunlitEvMin = 12;
+        /// <summary>Высота, к которой небо уже чёрное и предел выходит на SunlitEvMin, м.
+        /// Пара: кадр на 25 км — небо почти чёрное; у поверхности гистограмме не мешаем (закаты).</summary>
+        const double DarkSkyAltitude = 30000;
+
+        static float SunlitWeight(Vessel v)
+        {
+            double air = v.Body.HasAtmosphere ? System.Math.Min(1, System.Math.Max(0, v.Altitude / DarkSkyAltitude)) : 1;
+            return (float)(SunLight.Visible * air);
         }
 
         /// <summary>Смена профиля по SOI (§9.2): Земля, Марс, остальное — без атмосферы.</summary>

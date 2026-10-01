@@ -86,3 +86,6 @@ Crazy_Car_BackUpThisFolder_ButDontShipItWithYourGame\il2cppOutput
 # Сборка headless-тестов ядра
 /Tools/**/bin/
 /Tools/**/obj/
+
+# Скриншоты прогонов (MCP manage_camera)
+/Captures/
