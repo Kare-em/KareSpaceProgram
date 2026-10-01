@@ -18,7 +18,7 @@ namespace Kare.Space.Game
         {
             var u = GameBootstrap.U;
             var v = u?.Active;
-            if (v == null) return;
+            if (v == null || PauseMenu.IsOpen) return;
 
             if (Input.GetKeyDown(KeyCode.M)) MapView.Toggle();
             if (Input.GetKeyDown(KeyCode.Period)) u.WarpUp();

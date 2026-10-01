@@ -89,7 +89,7 @@ namespace Kare.Space.Game
 
             GUI.color = Dim;
             GUI.Label(new Rect(10, h - 24, 1100, 22),
-                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот · ,/. время · M карта · H детали", small);
+                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот · ,/. время · M карта · H детали · Esc меню", small);
             GUI.color = Color.white;
         }
 
@@ -499,13 +499,6 @@ namespace Kare.Space.Game
             sb.Append('\n');
             foreach (var m in boot.Messages) sb.Append(m).Append('\n');
             GUI.Box(new Rect(10, 10, PanelWidth, 560), sb.ToString(), box);
-
-            // Правила — тут же, чтобы менять без инспектора; GameBootstrap передаёт их в ядро каждый кадр.
-            var tg = new Rect(10, 576, PanelWidth, 104);
-            Fill(tg, Panel);
-            boot.AeroBreakup = GUI.Toggle(new Rect(tg.x + 10, tg.y + 6, PanelWidth - 20, 24), boot.AeroBreakup, " Разрушение от аэронагрузки", GUI.skin.toggle);
-            boot.HeatDamage = GUI.Toggle(new Rect(tg.x + 10, tg.y + 38, PanelWidth - 20, 24), boot.HeatDamage, " Разрушение от перегрева", GUI.skin.toggle);
-            boot.AscentTutor = GUI.Toggle(new Rect(tg.x + 10, tg.y + 70, PanelWidth - 20, 24), boot.AscentTutor, " Подсказка по углу", GUI.skin.toggle);
         }
 
         // ---------------------------------------------------------------- примитивы

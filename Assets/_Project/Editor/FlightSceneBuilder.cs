@@ -94,6 +94,8 @@ namespace Kare.Space.EditorTools
             bodyRenderer.EarthMacro = GroundTexture("SteppeMacro", true);
             bodyRenderer.MoonGround = GroundTexture("Regolith", true);
             bodyRenderer.MarsGround = GroundTexture("MarsSoil", true);
+            bodyRenderer.EarthGroundNormal = NormalTexture("GroundNormal");
+            bodyRenderer.WaterNormal = NormalTexture("WaterNormal");
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             AddToBuildSettings(ScenePath);
@@ -248,6 +250,23 @@ namespace Kare.Space.EditorTools
                 ti.maxTextureSize = 1024;
                 ti.isReadable = readable;
                 ti.textureCompression = readable ? TextureImporterCompression.Uncompressed : TextureImporterCompression.CompressedHQ;
+                ti.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        /// <summary>Нормаль-карта тайла (из Car_Train, GL-формат — как ждёт Unity), повтор и мипы.</summary>
+        static Texture2D NormalTexture(string name)
+        {
+            string path = $"{GroundDir}/{name}.png";
+            if (AssetImporter.GetAtPath(path) is TextureImporter ti)
+            {
+                ti.textureType = TextureImporterType.NormalMap;
+                ti.mipmapEnabled = true;
+                ti.wrapMode = TextureWrapMode.Repeat;
+                ti.anisoLevel = 8;
+                ti.maxTextureSize = 1024;
+                ti.textureCompression = TextureImporterCompression.CompressedHQ;
                 ti.SaveAndReimport();
             }
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);

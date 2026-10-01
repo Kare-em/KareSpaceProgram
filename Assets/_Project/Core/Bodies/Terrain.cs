@@ -95,7 +95,7 @@ namespace Kare.Space.Core
 
         static readonly Dictionary<int, int[]> PermCache = new Dictionary<int, int[]>();
 
-        static int[] Perm(int seed)
+        public static int[] Perm(int seed)
         {
             lock (PermCache)
             {

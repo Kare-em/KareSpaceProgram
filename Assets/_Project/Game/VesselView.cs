@@ -31,6 +31,12 @@ namespace Kare.Space.Game
         /// заметна, днём (Солнце 127 000 лк) почти нет. Пара: PlumeLightRange.</summary>
         const float PlumeCandela = 2e6f, PlumeLightRange = 600;
         const double SeaLevelPressure = 101325;
+        /// <summary>Купол (GDD §6.4): стропы — столько радиусов полностью раскрытого купола; угол — полураствор
+        /// сферического сегмента. Пара: площадь Section.ParachuteArea и рифление FlightPhysics.ChuteFraction —
+        /// радиус купола считается из той же площади, что тормозит в ядре, поэтому рифлёный купол на экране узкий.</summary>
+        const float ChuteRiser = 1.3f, ChuteDomeAngle = 75, ChuteLineWidth = 0.06f;
+        /// <summary>Число полотнищ (клиньев) купола: полосы оранжевый/белый, как у «Востока».</summary>
+        const int ChuteGores = 16;
 
         public Vessel Vessel { get; private set; }
 
@@ -42,6 +48,8 @@ namespace Kare.Space.Game
             public Renderer CoreR, GlowR;
             public Light PlumeLight;
             public float PlumeRadius;
+            public Transform Chute, Canopy;
+            public LineRenderer Lines;
         }
 
         readonly List<Part> parts = new List<Part>();
@@ -152,7 +160,94 @@ namespace Kare.Space.Game
                     glow.SetActive(false);
                     lgo.SetActive(false);
                 }
+                if (s.ParachuteArea > 0) AddChute(part);
                 parts.Add(part);
+            }
+        }
+
+        /// <summary>Купол и стропы: корень в точке крепления (верх секции), +Y — против набегающего потока.</summary>
+        void AddChute(Part part)
+        {
+            var root = new GameObject("Parachute");
+            root.transform.SetParent(transform, false);
+            var canopy = new GameObject("Canopy");
+            canopy.transform.SetParent(root.transform, false);
+            canopy.AddComponent<MeshFilter>().sharedMesh = ProcMesh.Dome(ChuteDomeAngle, ChuteGores * 2, 8);
+            var mr = canopy.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = bodyMat;
+            mpb.Clear();
+            mpb.SetColor("_BaseColor", Color.white);
+            mpb.SetTexture("_BaseColorMap", GoreStripes());
+            mr.SetPropertyBlock(mpb);
+
+            var lines = root.AddComponent<LineRenderer>();
+            lines.sharedMaterial = bodyMat;
+            lines.useWorldSpace = false;
+            lines.widthMultiplier = ChuteLineWidth;
+            lines.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mpb.Clear();
+            mpb.SetColor("_BaseColor", new Color(0.85f, 0.83f, 0.78f));
+            lines.SetPropertyBlock(mpb);
+            // Ломаная «крепление → кромка → крепление → …»: одна линия вместо отдельной на каждую стропу.
+            lines.positionCount = ChuteGores * 2;
+
+            part.Chute = root.transform;
+            part.Canopy = canopy.transform;
+            part.Lines = lines;
+            root.SetActive(false);
+        }
+
+        /// <summary>Полотнища вдоль U: чётные оранжевые, нечётные белые.</summary>
+        static Texture2D stripes;
+        static Texture2D GoreStripes()
+        {
+            if (stripes != null) return stripes;
+            stripes = new Texture2D(ChuteGores, 1, TextureFormat.RGBA32, false) { name = "Chute Gores", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Repeat };
+            for (int i = 0; i < ChuteGores; i++)
+                stripes.SetPixel(i, 0, i % 2 == 0 ? new Color(0.95f, 0.42f, 0.10f) : new Color(0.93f, 0.92f, 0.88f));
+            stripes.Apply(false, true);
+            return stripes;
+        }
+
+        /// <summary>Сколько метров над бортом занимает раскрытый парашют (0 — нет купола). FlightCamera берёт его
+        /// в кадр; полный радиус, а не текущий, — иначе кадр «дышал» бы весь процесс наполнения.</summary>
+        public static float ChuteReach(Vessel v)
+        {
+            float reach = 0;
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!v.Attached[i] || !v.ChuteDeployed[i] || v.ChuteFailed[i] || secs[i].ParachuteArea <= 0) continue;
+                float r = Mathf.Sqrt((float)secs[i].ParachuteArea / Mathf.PI);
+                reach = Mathf.Max(reach, r * (ChuteRiser + 1));
+            }
+            return reach;
+        }
+
+        void UpdateChute(Part p, Vector3 airflow)
+        {
+            var s = Vessel.Design.Sections[p.Index];
+            bool open = Vessel.ChuteDeployed[p.Index] && !Vessel.ChuteFailed[p.Index];
+            p.Chute.gameObject.SetActive(open);
+            if (!open) return;
+            float full = Mathf.Sqrt((float)s.ParachuteArea / Mathf.PI);
+            float r = Mathf.Sqrt((float)(s.ParachuteArea * FlightPhysics.ChuteFraction(Vessel.ChuteOpenTime[p.Index])) / Mathf.PI);
+            r = Mathf.Max(r, 0.3f);
+            // Выпуск: первую секунду купол вытягивается из контейнера на стропах.
+            float riser = full * ChuteRiser * Mathf.Clamp01((float)Vessel.ChuteOpenTime[p.Index] + 0.2f);
+
+            // Крепление — верх секции; купол против потока, с лёгким раскачиванием.
+            p.Chute.position = p.Tr.TransformPoint(0, (float)s.Length, 0);
+            float t = Time.time;
+            var sway = Quaternion.Euler(3 * Mathf.Sin(t * 0.9f + p.Index), 0, 3 * Mathf.Sin(t * 0.7f));
+            p.Chute.rotation = Quaternion.FromToRotation(Vector3.up, -airflow) * sway;
+            p.Canopy.localPosition = new Vector3(0, riser, 0);
+            p.Canopy.localScale = new Vector3(r, r, r);
+            for (int k = 0; k < ChuteGores; k++)
+            {
+                float a = 2 * Mathf.PI * k / ChuteGores;
+                p.Lines.SetPosition(2 * k, Vector3.zero);
+                p.Lines.SetPosition(2 * k + 1, new Vector3(r * Mathf.Cos(a), riser, r * Mathf.Sin(a)));
             }
         }
 
@@ -237,9 +332,14 @@ namespace Kare.Space.Game
             transform.SetPositionAndRotation(pos, FloatingOrigin.ToQuaternion(Vessel.Attitude));
 
             float pressure = (float)(Vessel.StaticPressure / SeaLevelPressure);
+            // Набегающий поток — скорость относительно вращающейся атмосферы; у стоящего борта — местная вертикаль.
+            var air = Vessel.Velocity - Vessel.Body.SurfaceVelocity(Vessel.Position);
+            var airflow = air.magnitude > 1 ? FloatingOrigin.DirToUnity(air).normalized
+                                            : -FloatingOrigin.DirToUnity(Vessel.Position).normalized;
             foreach (var p in parts)
             {
                 p.Tr.localPosition = new Vector3(0, (float)(baseHeight[p.Index] - com), 0);
+                if (p.Chute != null) UpdateChute(p, airflow);
                 if (p.Plume == null) continue;
                 bool on = Vessel.Running[p.Index];
                 float thr = on ? (float)Vessel.EffectiveThrottle(p.Index) : 0;
@@ -335,6 +435,48 @@ namespace Kare.Space.Game
             m.SetVertices(verts);
             m.SetUVs(0, uv);
             m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>
+        /// Купол: сферический сегмент с кромкой радиуса 1 на y = 0, макушка вверх; угол — полураствор сегмента.
+        /// Двусторонний (внутренняя поверхность видна снизу). UV.x — по окружности, по полотнищу на 1/16 оборота.
+        /// </summary>
+        public static Mesh Dome(float angleDeg, int seg, int rings)
+        {
+            float th = angleDeg * Mathf.Deg2Rad, rho = 1 / Mathf.Sin(th), top = rho * Mathf.Cos(th);
+            var verts = new List<Vector3>();
+            var uv = new List<Vector2>();
+            var tris = new List<int>();
+            for (int side = 0; side < 2; side++)
+            {
+                int start = verts.Count;
+                for (int i = 0; i <= seg; i++)
+                {
+                    float a = 2 * Mathf.PI * i / seg;
+                    for (int k = 0; k <= rings; k++)
+                    {
+                        // k = 0 — кромка, k = rings — макушка; сфера радиуса rho с центром ниже кромки.
+                        float t = th * (1 - (float)k / rings);
+                        verts.Add(new Vector3(rho * Mathf.Sin(t) * Mathf.Cos(a), rho * Mathf.Cos(t) - top, rho * Mathf.Sin(t) * Mathf.Sin(a)));
+                        uv.Add(new Vector2((float)i / seg, (float)k / rings));
+                    }
+                }
+                int rc = rings + 1;
+                for (int i = 0; i < seg; i++)
+                for (int k = 0; k < rings; k++)
+                {
+                    int a = start + i * rc + k, b = start + (i + 1) * rc + k;
+                    Quad(tris, a, b, b + 1, a + 1, side == 0);
+                }
+            }
+            var m = new Mesh { name = "Dome" };
+            m.SetVertices(verts);
+            m.SetUVs(0, uv);
+            m.SetTriangles(tris, 0);
+            // Вершины сторон раздельные — RecalculateNormals даёт каждой стороне свои нормали.
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;

@@ -21,6 +21,8 @@ namespace Kare.Space.Game
         VisualEnvironment env;
         PhysicallyBasedSky sky;
         Exposure exposure;
+        Bloom bloom;
+        float bloomFlight;
         CelestialBody profileBody;
         EarthAir earth;
 
@@ -53,6 +55,7 @@ namespace Kare.Space.Game
             Volume.profile.TryGet(out env);
             Volume.profile.TryGet(out sky);
             Volume.profile.TryGet(out exposure);
+            if (Volume.profile.TryGet(out bloom)) bloomFlight = bloom.intensity.value;
             if (env == null || sky == null)
             {
                 Debug.LogError("[Sky] В профиле нет VisualEnvironment/PhysicallyBasedSky — пересобери сцену (Kare/Build Flight Scene).");
@@ -86,6 +89,9 @@ namespace Kare.Space.Game
                 if (plume > 0) evMin = Mathf.Max(evMin, Mathf.Log(plume / (1.2f * PreExposedMax), 2));
                 exposure.limitMin.Override(evMin);
             }
+            // На карте bloom выключен: при фиксированной EV диск Солнца (≈1,6·10⁹ нит) с порогом 0 размазывался
+            // на весь кадр серой пеленой, и линии орбит в ней тонули (замер 01.10.2026: без bloom — чёрный фон).
+            if (bloom != null) bloom.intensity.Override(MapView.IsOpen ? 0 : bloomFlight);
         }
 
         /// <summary>

@@ -42,6 +42,8 @@ namespace Kare.Space.Core
         /// строгим правилам. Задаются из игры (GameBootstrap) — статика, т.к. правило одно на всю симуляцию.
         /// </summary>
         public static bool AeroBreakup, HeatDamage;
+        /// <summary>Предел перегрузки целей миссий (Objective.MaxG): выключен — превышение не проваливает задачу.</summary>
+        public static bool GLoadLimit;
 
         /// <summary>Превышен ли предел поперечной нагрузки — и для разрушения, и для предупреждения HUD.
         /// Шар капсулы (длина ≤ 4 радиусов) ей не подвержен; ниже 2 кПа не ломается ничего.</summary>

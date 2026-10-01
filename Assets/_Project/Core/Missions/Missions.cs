@@ -49,7 +49,7 @@ namespace Kare.Space.Core
                 case ObjectiveType.Impact: return $"Достичь поверхности: {b}";
                 case ObjectiveType.Landing: return $"Мягкая посадка: {b}, не быстрее {MaxSpeed:F0} м/с";
                 case ObjectiveType.Return:
-                    return $"Вернуть капсулу: {b}" + (MaxG > 0 ? $", перегрузка ≤ {MaxG:F0} g" : "");
+                    return $"Вернуть капсулу: {b}" + (MaxG > 0 && FlightPhysics.GLoadLimit ? $", перегрузка ≤ {MaxG:F0} g" : "");
             }
             return Type.ToString();
         }
@@ -223,7 +223,7 @@ namespace Kare.Space.Core
                         fail = "Капсулы нет на борту";
                         return false;
                     }
-                    if (o.MaxG > 0 && peakG[i] > o.MaxG)
+                    if (FlightPhysics.GLoadLimit && o.MaxG > 0 && peakG[i] > o.MaxG)
                     {
                         fail = $"Перегрузка на спуске {peakG[i]:F1} g > {o.MaxG:F0} g";
                         return false;

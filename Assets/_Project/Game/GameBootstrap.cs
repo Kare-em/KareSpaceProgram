@@ -29,11 +29,13 @@ namespace Kare.Space.Game
         [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
         public Texture2D PadTexture;
 
-        [Header("Правила (GDD §4.7); в игре — панель H")]
+        [Header("Правила (GDD §4.7); в игре — меню Esc")]
         [Tooltip("Разрушение от поперечной аэродинамической нагрузки q·sin α.")]
         public bool AeroBreakup;
         [Tooltip("Разрушение от перегрева обшивки.")]
         public bool HeatDamage;
+        [Tooltip("Предел перегрузки в целях миссий (спуск «Востока» ≤ 9 g).")]
+        public bool GLoadLimit;
         [Tooltip("Подсказка по углу тангажа при ручном выведении.")]
         public bool AscentTutor = true;
 
@@ -56,6 +58,7 @@ namespace Kare.Space.Game
             universe.Message += OnMessage;
             Tracker.Changed += OnMessage;
             OnMessage($"Миссия «{Mission.Title}»: {Mission.Brief}");
+            gameObject.AddComponent<PauseMenu>();
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)
                 new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial);
@@ -77,8 +80,9 @@ namespace Kare.Space.Game
         {
             FlightPhysics.AeroBreakup = AeroBreakup;
             FlightPhysics.HeatDamage = HeatDamage;
-            // Advance сам режет realDt до 0,1 с и выбирает физику/рельсы по WarpIndex.
-            universe.Advance(Time.deltaTime);
+            FlightPhysics.GLoadLimit = GLoadLimit;
+            // Advance сам режет realDt до 0,1 с и выбирает физику/рельсы по WarpIndex. В меню — пауза.
+            if (!PauseMenu.IsOpen) universe.Advance(Time.deltaTime);
             Tracker.Update(universe);
             FloatingOrigin.Refresh();
             SyncViews();

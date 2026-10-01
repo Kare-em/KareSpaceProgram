@@ -82,11 +82,13 @@ namespace Kare.Space.Game
             // Цель — середина борта вместе с полосой под соплами, а не центр масс: ЦМ у полной ракеты низко, и при старте нос уходил
             // за кадр. Дистанция подгоняется под длину при смене борта/отделении, дальше — колесом.
             v.MassProperties(out _, out double com, out double length, out _);
-            if (v != fitVessel || System.Math.Abs(length - fitLength) > 0.05 * fitLength)
+            // Раскрытый парашют — тоже в кадр (§6.4): цель остаётся на борту, дистанция растёт на высоту купола.
+            double fit = length + VesselView.ChuteReach(v);
+            if (v != fitVessel || System.Math.Abs(fit - fitLength) > 0.05 * fitLength)
             {
                 fitVessel = v;
-                fitLength = length;
-                float half = (float)length * (1 + FitBelow) * 0.5f * FitMargin;
+                fitLength = fit;
+                float half = (float)fit * (1 + FitBelow) * 0.5f * FitMargin;
                 Distance = Mathf.Clamp(half / Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad), MinDistance, MaxDistance);
             }
 
