@@ -111,6 +111,24 @@ namespace Kare.Space.EditorTools
             EditorUtility.SetDirty(asset);
             if (GraphicsSettings.defaultRenderPipeline != asset) GraphicsSettings.defaultRenderPipeline = asset;
             if (QualitySettings.renderPipeline != null) QualitySettings.renderPipeline = null;
+            // HDRP в Gamma не рендерит вовсе (ошибка в консоли каждый кадр).
+            if (PlayerSettings.colorSpace != ColorSpace.Linear) PlayerSettings.colorSpace = ColorSpace.Linear;
+            SetHighLightmapEncoding();
+        }
+
+        /// <summary>
+        /// HDRP Wizard требует High Quality кодирование лайтмапов. Публичного сеттера нет —
+        /// внутренний PlayerSettings.SetLightmapEncodingQualityForPlatform (тот же путь в Car_Train).
+        /// </summary>
+        static void SetHighLightmapEncoding()
+        {
+            var method = typeof(PlayerSettings).GetMethod("SetLightmapEncodingQualityForPlatform",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (method == null) { Debug.LogWarning("[Kare] Нет SetLightmapEncodingQualityForPlatform — выставь High вручную."); return; }
+            var high = System.Enum.Parse(method.GetParameters()[1].ParameterType, "High");
+            foreach (var t in new[] { BuildTarget.StandaloneWindows64, BuildTarget.StandaloneWindows,
+                                      BuildTarget.StandaloneOSX, BuildTarget.StandaloneLinux64 })
+                method.Invoke(null, new object[] { t, high });
         }
 
         static VolumeProfile BuildProfile()

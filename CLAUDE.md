@@ -47,7 +47,7 @@ MCP for Unity (CoplayDev), `.mcp.json` → `http://127.0.0.1:8767/mcp`. Car_Trai
 
 ## Подтверждённые грабли
 - **В проекте не было HDRP-ассета**: `GraphicsSettings.currentRenderPipeline == null` → всё HDRP/Lit пурпурное.
-  Builder создаёт `Settings/HDRP.asset` и ставит по умолчанию; первая установка — долгий реимпорт шейдеров, MCP молчит.
+  Builder создаёт `Settings/HDRP.asset` и ставит по умолчанию; первая установка — долгий реимпорт шейдеров, MCP молчит. Плюс `PlayerSettings.colorSpace = Linear` — в Gamma HDRP не рисует; и лайтмапы High Quality (внутренний `SetLightmapEncodingQualityForPlatform`, Wizard ругается).
 - **`VisualEnvironment.planetCenter/planetRadius` — в километрах**, сцена в метрах (делить на 1000).
 - **СА-1976 — высоты геопотенциальные**: 22 632 Па на 11 км геопотенциальных, не геометрических.
 - **`Vessel.RemainingStats` учитывал только работающие двигатели** → заглушенная ступень перед посадкой
