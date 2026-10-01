@@ -39,7 +39,7 @@ namespace Kare.Space.Game
             vessel = v;
             body = v.Body;
             var site = v.Site;
-            // Тот же базис, что у PlaceOnSurface: X — восток, Y — зенит, Z — север.
+            // Базис стола: X — восток, Y — зенит, Z — север (борт на нём повёрнут креном, см. PlaceOnSurface; стол симметричен).
             var up = CelestialBody.LatLonToBodyFixed(site.Latitude, site.Longitude);
             anchorBf = up * (body.Radius + body.SurfaceHeight(up));
             var east = Vector3d.Cross(Vector3d.forward, up).normalized;

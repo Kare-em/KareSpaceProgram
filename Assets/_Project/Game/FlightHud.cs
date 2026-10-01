@@ -18,6 +18,15 @@ namespace Kare.Space.Game
         /// <summary>Порог жёлтого «нагрев»: доля предельного потока самого слабого борта (2·10⁵ Вт/м²).
         /// Пара: FlightPhysics.OverheatTolerance — красное «перегрев» по таймеру, когда поток выше предела.</summary>
         const double HeatWarnFlux = 1e5, GWarn = 5;
+        /// <summary>Жёлтое «угол атаки» — с этой доли предела FlightPhysics.QAlphaLimit, красное — с предела.</summary>
+        const double QAlphaWarnShare = 0.6;
+        /// <summary>Подсказка по углу (§10.2): цель по апоцентру, м. Пара: FlightInput, G — автопилот на 200 км.
+        /// Запас перицентра над атмосферой — как у довыведения AscentAutopilot (верх атмосферы + 10 км и выше).</summary>
+        const double TutorApoapsis = 200000, TutorPeriapsisMargin = 40000;
+        /// <summary>Масштаб программы тангажа подсказки, м. Пара: AscentAutopilot.TurnAltitude.</summary>
+        const double TutorTurnAltitude = 100000;
+        /// <summary>Отклонение носа от цели, при котором подсказка говорит «так держать», градусы.</summary>
+        const double TutorOkAngle = 3;
 
         public Texture2D Icons;
 
@@ -76,6 +85,7 @@ namespace Kare.Space.Game
             Bottom(u, v, w, h);
             Messages(boot, w, h);
             if (details) Details(u, v, boot);
+            else if (boot.AscentTutor) Tutor(u, v);
 
             GUI.color = Dim;
             GUI.Label(new Rect(10, h - 24, 1100, 22),
@@ -112,9 +122,19 @@ namespace Kare.Space.Game
         {
             float y = 12, x = w - 330;
             if (v.OverheatTimer > 0)
-                Warning(ref y, x, Icon.Heat, Danger, $"ПЕРЕГРЕВ {v.OverheatTimer / FlightPhysics.OverheatTolerance * 100:0} %");
+                Warning(ref y, x, Icon.Heat, Danger, $"ПЕРЕГРЕВ {v.OverheatTimer / FlightPhysics.OverheatTolerance * 100:0} %"
+                                                     + (FlightPhysics.HeatDamage ? "" : " (выкл.)"));
             else if (v.HeatFlux > HeatWarnFlux)
                 Warning(ref y, x, Icon.Heat, Warn, $"Нагрев {v.HeatFlux / 1e6:0.00} МВт/м²");
+            // Поперечная нагрузка — главная причина разрушения при ручном развороте (§4.7).
+            double qa = v.DynamicPressure * System.Math.Sin(v.AngleOfAttack * Constants.Deg2Rad);
+            v.MassProperties(out _, out _, out double len, out double rad);
+            if (FlightPhysics.QAlphaExceeded(v.DynamicPressure, 1, len, rad) && qa > QAlphaWarnShare * FlightPhysics.QAlphaLimit)
+            {
+                bool over = qa > FlightPhysics.QAlphaLimit;
+                string tail = over && !FlightPhysics.AeroBreakup ? " (разрушение выкл.)" : "";
+                Warning(ref y, x, Icon.Stability, over ? Danger : Warn, $"Угол атаки {v.AngleOfAttack:0}°{tail}");
+            }
             if (v.GForce > GWarn)
                 Warning(ref y, x, Icon.GLoad, v.GForce > 2 * GWarn ? Danger : Warn, $"Перегрузка {v.GForce:0.0} g");
             if (u.WarpIndex > 0 && !u.RailsActive)
@@ -256,7 +276,7 @@ namespace Kare.Space.Game
 
         void ThrustFuel(Vessel v, float h)
         {
-            var r = new Rect(12, h - 112, 250, 78);
+            var r = new Rect(12, h - 138, 250, 104);
             Fill(r, Panel);
             Bar(new Rect(r.x + 12, r.y + 12, 226, 22), "Газ", (float)v.Throttle, Accent);
             // Топливо ближайшей работающей (или первой с двигателем) ступени — ему и кончаться первым.
@@ -271,6 +291,147 @@ namespace Kare.Space.Game
             if (idx >= 0 && v.Design.Sections[idx].Propellant > 0)
                 fuel = (float)(v.Propellant[idx] / v.Design.Sections[idx].Propellant);
             Bar(new Rect(r.x + 12, r.y + 44, 226, 22), "Топливо", fuel, fuel < 0.1f ? Danger : Warn);
+
+            // Тяговооружённость при текущей тяге: меньше 1 — ракета не разгоняется вверх, а теряет скорость.
+            double r0 = v.Position.magnitude, g = v.Body.Mu / (r0 * r0);
+            double twr = v.Mass > 0 ? v.CurrentThrust / (v.Mass * g) : 0;
+            double full;
+            if (v.CurrentThrust > 0 && v.Throttle > 0.05) full = twr / v.Throttle;
+            else
+            {
+                // Двигатель молчит — полный газ по таблице ступени при текущем давлении.
+                var stats = v.RemainingStats();
+                double p = v.Body.HasAtmosphere ? System.Math.Min(1, v.StaticPressure / 101325) : 0;
+                full = stats.Count > 0 ? stats[0].TwrVac + (stats[0].TwrSL - stats[0].TwrVac) * p : 0;
+            }
+            GUI.Label(new Rect(r.x + 12, r.y + 72, 70, 22), "TWR", small);
+            GUI.color = v.CurrentThrust > 0 && twr < 1 && v.Situation != Situation.Landed ? Warn : Color.white;
+            GUI.Label(new Rect(r.x + 72, r.y + 68, 80, 28), twr.ToString("0.00"), mid);
+            GUI.color = Dim;
+            GUI.Label(new Rect(r.x + 140, r.y + 72, 110, 22), "газ 100%: " + full.ToString("0.00"), small);
+            GUI.color = Color.white;
+        }
+
+        // ---------------------------------------------------------------- подсказка по углу (выведение)
+
+        /// <summary>
+        /// Учебная подсказка ручного выведения (§10.2): какой тангаж держать сейчас — по тому же закону, что у
+        /// автопилота, — где нос сейчас и какую клавишу жать. Видна, пока не ведёт автопилот и орбита не набрана.
+        /// </summary>
+        void Tutor(Universe u, Vessel v)
+        {
+            if (u.Ascent != null || u.NodePilot != null || u.Landing != null || !v.Body.HasAtmosphere) return;
+            bool landed = v.Situation == Situation.Landed;
+            if (landed && v.Site == null) return;
+            double atm = v.Body.AtmosphereTop;
+            double apAlt = 0, peAlt = 0, toAp = double.NaN;
+            if (!landed)
+            {
+                var o = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, u.Time);
+                apAlt = o.IsElliptic ? o.ApoapsisRadius - v.Body.Radius : double.PositiveInfinity;
+                peAlt = o.PeriapsisRadius - v.Body.Radius;
+                toAp = o.TimeToApoapsis(u.Time);
+                // Орбита набрана или борт уже падает без тяги (спуск) — подсказка не нужна.
+                if (peAlt > atm) return;
+                if (!v.AnyEngineRunning && v.VerticalSpeed < 0 && v.Altitude < atm) return;
+            }
+
+            FlightControl.LocalFrame(v, u.Time, out var up, out _, out var east);
+            string step, hint;
+            double target = double.NaN; // тангаж над горизонтом, градусы; NaN — угол сейчас не важен
+            bool burning = v.AnyEngineRunning;
+            if (landed)
+            {
+                step = "1. Старт";
+                hint = "Z — полный газ, Пробел — зажигание. Нос строго вверх.";
+            }
+            else if (!burning && v.HasNextStage && apAlt < TutorApoapsis)
+            {
+                step = "Ступень";
+                hint = "Двигатель молчит — Пробел: следующая ступень.";
+            }
+            else if (v.SurfaceSpeed < AscentAutopilot.VerticalSpeedEnd && v.Altitude < AscentAutopilot.VerticalAltitudeEnd)
+            {
+                step = "2. Вертикальный подъём";
+                hint = $"Вверх до {AscentAutopilot.VerticalSpeedEnd:0} м/с, потом плавно на восток.";
+                target = 90;
+            }
+            else if (apAlt < TutorApoapsis)
+            {
+                step = "3. Разворот на восток";
+                hint = "Нос по голубой линии. Плавно: резкий угол атаки ломает ракету.";
+                target = AscentAutopilot.ProgramPitch(v.Altitude, TutorTurnAltitude) * Constants.Rad2Deg;
+            }
+            else if (burning && toAp > 60)
+            {
+                step = "4. Отсечка";
+                hint = $"Апоцентр {Km(apAlt)} — X: выключить двигатель.";
+            }
+            else if (!burning)
+            {
+                step = "5. Полёт к апоцентру";
+                hint = $"До апоцентра {GameCalendar.FormatDuration(toAp)}. За ~30 с до него — нос на горизонт, Z.";
+                target = 0;
+            }
+            else
+            {
+                step = "6. Разгон по горизонту";
+                hint = $"Держать 0°, пока перицентр не выше {Km(atm + TutorPeriapsisMargin)} (сейчас {Km(peAlt)}).";
+                target = 0;
+            }
+
+            var r = new Rect(12, 12, 340, double.IsNaN(target) ? 74 : 196);
+            Fill(r, Panel);
+            GUI.color = Accent;
+            GUI.Label(new Rect(r.x + 12, r.y + 6, r.width - 24, 22), "ПОДСКАЗКА · " + step, label);
+            GUI.color = Color.white;
+            var wrap = new GUIStyle(small) { wordWrap = true, alignment = TextAnchor.UpperLeft };
+            GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 40), hint, wrap);
+            if (double.IsNaN(target)) return;
+
+            // Угол носа в вертикальной плоскости «восток — зенит»: 0° — горизонт на восток, 90° — вверх.
+            var nose = v.NoseP;
+            double noseDeg = System.Math.Atan2(Vector3d.Dot(nose, up), Vector3d.Dot(nose, east)) * Constants.Rad2Deg;
+            double tRad = target * Constants.Deg2Rad;
+            var want = up * System.Math.Sin(tRad) + east * System.Math.Cos(tRad);
+            double err = Vector3d.Angle(nose, want) * Constants.Rad2Deg;
+
+            // Шкала-четверть: горизонт и вертикаль, цель — акцентом, нос — белым.
+            var pivot = new Vector2(r.x + 24, r.y + 182);
+            const float len = 100;
+            Line(pivot, 0, len, Dim, 1);
+            Line(pivot, 90, len, Dim, 1);
+            Line(pivot, (float)target, len, Accent, 4);
+            Line(pivot, (float)noseDeg, len * 0.85f, Color.white, 3);
+
+            float tx = r.x + 140;
+            GUI.color = Dim; GUI.Label(new Rect(tx, r.y + 76, 60, 20), "ЦЕЛЬ", small);
+            GUI.Label(new Rect(tx + 90, r.y + 76, 60, 20), "НОС", small);
+            GUI.color = Accent; GUI.Label(new Rect(tx, r.y + 94, 90, 30), target.ToString("0") + "°", mid);
+            GUI.color = Color.white; GUI.Label(new Rect(tx + 90, r.y + 94, 90, 30), noseDeg.ToString("0") + "°", mid);
+            string key;
+            if (err < TutorOkAngle) { GUI.color = new Color(0.45f, 1f, 0.55f); key = "✓ так держать"; }
+            else { GUI.color = Warn; key = "жми " + KeyToward(v, want - nose); }
+            GUI.Label(new Rect(tx, r.y + 140, 190, 30), key, mid);
+            GUI.color = Color.white;
+        }
+
+        /// <summary>Клавиша, которая ведёт нос в сторону delta (P). Соглашение FlightControl.Update:
+        /// W — нос к +X связанных осей, S — к −X, D — к −Z, A — к +Z.</summary>
+        static string KeyToward(Vessel v, Vector3d delta)
+        {
+            var l = v.WorldToLocal(delta);
+            if (System.Math.Abs(l.x) >= System.Math.Abs(l.z)) return l.x > 0 ? "W" : "S";
+            return l.z < 0 ? "D" : "A";
+        }
+
+        /// <summary>Отрезок из pivot под углом deg над горизонталью (вправо — восток), в координатах GUI.</summary>
+        static void Line(Vector2 pivot, float deg, float length, Color c, float width)
+        {
+            var m = GUI.matrix;
+            GUIUtility.RotateAroundPivot(-deg, pivot);
+            Fill(new Rect(pivot.x, pivot.y - width / 2, length, width), c);
+            GUI.matrix = m;
         }
 
         void Bar(Rect r, string name, float f, Color col)
@@ -325,7 +486,7 @@ namespace Kare.Space.Game
             if (stats.Count > 0) sb.Append("   у земли ").Append(stats[0].TwrSL.ToString("0.00")).Append("   вак. ").Append(stats[0].TwrVac.ToString("0.00"));
             sb.Append('\n');
             double q = v.DynamicPressure / 1000;
-            sb.Append("q ").Append(q.ToString("0.0")).Append(" кПа   Qα ").Append((q * v.AngleOfAttack * Constants.Rad2Deg).ToString("0")).Append(" кПа·°   M ").Append(v.Mach.ToString("0.00")).Append('\n');
+            sb.Append("q ").Append(q.ToString("0.0")).Append(" кПа   Qα ").Append((q * v.AngleOfAttack).ToString("0")).Append(" кПа·°   M ").Append(v.Mach.ToString("0.00")).Append('\n');
             sb.Append("Тепловой поток ").Append((v.HeatFlux / 1e6).ToString("0.000")).Append(" МВт/м²\n");
             sb.Append("Масса ").Append((v.Mass / 1000).ToString("0.0")).Append(" т\n");
             if (SunLight.Visible < 0.999) sb.Append("Тень: Солнце ").Append((SunLight.Visible * 100).ToString("0")).Append(" %\n");
@@ -338,6 +499,13 @@ namespace Kare.Space.Game
             sb.Append('\n');
             foreach (var m in boot.Messages) sb.Append(m).Append('\n');
             GUI.Box(new Rect(10, 10, PanelWidth, 560), sb.ToString(), box);
+
+            // Правила — тут же, чтобы менять без инспектора; GameBootstrap передаёт их в ядро каждый кадр.
+            var tg = new Rect(10, 576, PanelWidth, 104);
+            Fill(tg, Panel);
+            boot.AeroBreakup = GUI.Toggle(new Rect(tg.x + 10, tg.y + 6, PanelWidth - 20, 24), boot.AeroBreakup, " Разрушение от аэронагрузки", GUI.skin.toggle);
+            boot.HeatDamage = GUI.Toggle(new Rect(tg.x + 10, tg.y + 38, PanelWidth - 20, 24), boot.HeatDamage, " Разрушение от перегрева", GUI.skin.toggle);
+            boot.AscentTutor = GUI.Toggle(new Rect(tg.x + 10, tg.y + 70, PanelWidth - 20, 24), boot.AscentTutor, " Подсказка по углу", GUI.skin.toggle);
         }
 
         // ---------------------------------------------------------------- примитивы

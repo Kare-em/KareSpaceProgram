@@ -70,7 +70,10 @@ namespace Kare.Space.Game
             var up = FloatingOrigin.DirToUnity(v.Position.normalized);
             if (!frameValid)
             {
-                frame = Quaternion.FromToRotation(Vector3.up, up);
+                // Лицом на север: восток справа, и D (нос на восток, см. FlightPhysics.PlaceOnSurface) уводит нос вправо (§10.1).
+                var pole = FloatingOrigin.DirToUnity(v.Body.OrientationAt(u.Time) * Vector3d.forward);
+                var north = Vector3.ProjectOnPlane(pole, up);
+                frame = north.sqrMagnitude > 1e-6f ? Quaternion.LookRotation(north, up) : Quaternion.FromToRotation(Vector3.up, up);
                 frameValid = true;
             }
             else frame = Quaternion.FromToRotation(lastUp, up) * frame;

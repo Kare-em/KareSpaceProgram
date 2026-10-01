@@ -11,6 +11,8 @@ static class Program
     static int Main(string[] args)
     {
         string only = args.Length > 0 ? args[0] : null;
+        // В игре повреждения по умолчанию выключены; автопилоты проверяем по строгим правилам.
+        FlightPhysics.AeroBreakup = FlightPhysics.HeatDamage = true;
         Run("math", TestMath, only);
         Run("orbit", TestOrbit, only);
         Run("moon", TestEphemeris, only);

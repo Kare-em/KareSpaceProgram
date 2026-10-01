@@ -254,6 +254,14 @@ namespace Kare.Space.Core
 
         public string Status { get; private set; } = "";
 
+        /// <summary>Вертикальный подъём до этой поверхностной скорости или высоты — потом разворот.</summary>
+        public const double VerticalSpeedEnd = 100, VerticalAltitudeEnd = 2000;
+
+        /// <summary>Программный тангаж над горизонтом на высоте h, рад: 90°·(1 − √(h/H)). Им ведёт автопилот
+        /// и его же подсказывает HUD ручному пилоту (FlightHud.Tutor) — один закон на двоих.</summary>
+        public static double ProgramPitch(double altitude, double turnAltitude) =>
+            Math.PI / 2 * (1 - Math.Sqrt(MathD.Clamp01(altitude / turnAltitude)));
+
         public AutopilotRequest Update(Vessel v, double t, double dt)
         {
             if (!v.Alive) return AutopilotRequest.Finished;
@@ -296,13 +304,13 @@ namespace Kare.Space.Core
                     v.Throttle = 1;
                     FlightControl.PointAt(v, up);
                     Status = "Вертикальный подъём";
-                    if (v.SurfaceSpeed > 100 || v.Altitude > 2000) Phase = PhaseType.PitchProgram;
+                    if (v.SurfaceSpeed > VerticalSpeedEnd || v.Altitude > VerticalAltitudeEnd) Phase = PhaseType.PitchProgram;
                     break;
 
                 case PhaseType.PitchProgram:
                 {
                     v.Throttle = 1;
-                    double pitch = Math.PI / 2 * (1 - Math.Sqrt(MathD.Clamp01(v.Altitude / TurnAltitude)));
+                    double pitch = ProgramPitch(v.Altitude, TurnAltitude);
                     var dir = up * Math.Sin(pitch) + heading * Math.Cos(pitch);
                     FlightControl.PointAt(v, LimitAoA(v, t, dir));
                     Status = $"Разворот по тангажу: {pitch * Constants.Rad2Deg:F0}°";

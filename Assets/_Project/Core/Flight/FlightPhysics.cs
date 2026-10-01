@@ -35,6 +35,19 @@ namespace Kare.Space.Core
         /// <summary>Сколько секунд суммарного перегрева выдерживает обшивка.</summary>
         public const double OverheatTolerance = 3;
 
+        /// <summary>
+        /// Правила повреждений (GDD §4.7). По умолчанию выключены: игрок учится разворачивать ракету, а не
+        /// теряет её на первом же развороте. qα и нагрев считаются всегда — HUD их показывает; при выключенном
+        /// правиле борт просто не разрушается. Тесты ядра включают оба: автопилоты обязаны проходить и по
+        /// строгим правилам. Задаются из игры (GameBootstrap) — статика, т.к. правило одно на всю симуляцию.
+        /// </summary>
+        public static bool AeroBreakup, HeatDamage;
+
+        /// <summary>Превышен ли предел поперечной нагрузки — и для разрушения, и для предупреждения HUD.
+        /// Шар капсулы (длина ≤ 4 радиусов) ей не подвержен; ниже 2 кПа не ломается ничего.</summary>
+        public static bool QAlphaExceeded(double q, double sinA, double length, double radius) =>
+            length > 4 * radius && q > 2000 && q * sinA > QAlphaLimit;
+
         static readonly double[] CdMach = { 0, 0.6, 0.85, 1.05, 1.2, 2, 4, 10 };
         static readonly double[] CdValue = { 0.30, 0.30, 0.45, 0.80, 0.70, 0.50, 0.35, 0.30 };
 
@@ -73,8 +86,10 @@ namespace Kare.Space.Core
             var east = Vector3d.Cross(Vector3d.forward, up).normalized;
             var north = Vector3d.Cross(up, east);
             v.AnchorBodyFixed = up * (body.Radius + h + padHeight + com);
-            // Связанные оси: X — восток, Y — зенит, Z — север (в координатах U тела).
-            v.AttitudeBodyFixed = QuaternionD.FromBasis(east.SwapYZ, up.SwapYZ, north.SwapYZ);
+            // Связанные оси: X — север, Y — зенит, Z — запад (в координатах U тела). Крен выбран под клавиши
+            // FlightControl (D — нос к −Z): по умолчанию D уводит на восток, как в KSP (§10.1). Пара — FlightCamera
+            // ставит камеру на столе лицом на север, чтобы восток был справа.
+            v.AttitudeBodyFixed = QuaternionD.FromBasis(north.SwapYZ, up.SwapYZ, (-east).SwapYZ);
             v.Situation = Situation.Landed;
             UpdateLandedPose(v, t);
         }
@@ -276,7 +291,7 @@ namespace Kare.Space.Core
             if (q <= 0) return;
 
             // Поперечная нагрузка ломает только длинный пакет; шар капсулы ей не подвержен.
-            if (g.Length > 4 * g.Radius && q > 2000 && q * sinA > QAlphaLimit)
+            if (AeroBreakup && QAlphaExceeded(q, sinA, g.Length, g.Radius))
             {
                 v.Destroy($"Разрушение от аэродинамической нагрузки: q = {q / 1000:F1} кПа, α = {v.AngleOfAttack:F0}°");
                 return;
@@ -297,7 +312,9 @@ namespace Kare.Space.Core
             v.HeatFlux = SuttonGraves * Math.Sqrt(v.Density / Math.Max(0.5, lead.Radius)) * sp * sp * sp;
             if (v.HeatFlux > lead.MaxHeatFlux) v.OverheatTimer += dt * v.HeatFlux / lead.MaxHeatFlux;
             else v.OverheatTimer = Math.Max(0, v.OverheatTimer - dt * 0.5);
-            if (v.OverheatTimer > OverheatTolerance)
+            // Без правила таймер упирается в предел: HUD показывает «перегрев 100 %», борт цел.
+            if (!HeatDamage) v.OverheatTimer = Math.Min(v.OverheatTimer, OverheatTolerance);
+            else if (v.OverheatTimer > OverheatTolerance)
                 v.Destroy($"Сгорел в атмосфере: тепловой поток {v.HeatFlux / 1e6:F2} МВт/м² ({lead.Name})");
         }
 

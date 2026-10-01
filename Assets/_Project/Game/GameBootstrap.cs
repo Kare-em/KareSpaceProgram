@@ -29,6 +29,14 @@ namespace Kare.Space.Game
         [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
         public Texture2D PadTexture;
 
+        [Header("Правила (GDD §4.7); в игре — панель H")]
+        [Tooltip("Разрушение от поперечной аэродинамической нагрузки q·sin α.")]
+        public bool AeroBreakup;
+        [Tooltip("Разрушение от перегрева обшивки.")]
+        public bool HeatDamage;
+        [Tooltip("Подсказка по углу тангажа при ручном выведении.")]
+        public bool AscentTutor = true;
+
         Universe universe;
         public MissionTracker Tracker { get; private set; }
         public MissionDef Mission { get; private set; }
@@ -67,6 +75,8 @@ namespace Kare.Space.Game
 
         void Update()
         {
+            FlightPhysics.AeroBreakup = AeroBreakup;
+            FlightPhysics.HeatDamage = HeatDamage;
             // Advance сам режет realDt до 0,1 с и выбирает физику/рельсы по WarpIndex.
             universe.Advance(Time.deltaTime);
             Tracker.Update(universe);
