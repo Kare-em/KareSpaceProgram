@@ -75,6 +75,13 @@ namespace Kare.Space.Core
         /// <summary>Высота стартового стола над грунтом, м: ракета висит на опорах над газоотводом, сопла
         /// не уходят в землю (§7). Пара: LaunchPadView.PadHeight рисует бетон на этой же высоте.</summary>
         public double PadHeight = 6;
+        /// <summary>Радиус котловины, м: на нём сырой рельеф плавно опускается к отметке космодрома (Terrain.Height).
+        /// Карта суши в 20 км ставит Байконур на 1130 м при реальных 90, и площадка в 9 км стояла в котловане
+        /// с километровой стеной над горизонтом (замер 02.10.2026). 150 км дают уклон ≤ 0,7° на перепад 1 км.
+        /// Пара: BlendRadius — внутри него рельеф уже выровнен, котловина должна быть много шире.</summary>
+        public double BasinRadius = 150000;
+        /// <summary>Сырой рельеф в центре минус отметка, м (NaN — не посчитан). Детерминирован, гонка потоков безвредна.</summary>
+        internal double BasinDrop = double.NaN;
 
         public LaunchSite(string id, string name, string bodyId, double lat, double lon, double elevation)
         {
@@ -107,6 +114,16 @@ namespace Kare.Space.Core
             {
                 if (site.BodyId != body.Id) continue;
                 double dist = Vector3d.Angle(d, site.DirectionBodyFixed) * body.Radius;
+                if (dist >= Math.Max(site.BlendRadius * 6, site.BasinRadius)) continue;
+                // Котловина: суша вокруг космодрома, поднятая картой выше его отметки, плавно опускается на
+                // ту же разницу — мелкий рельеф сохраняется, а ступени у края площадки нет.
+                if (double.IsNaN(site.BasinDrop))
+                    site.BasinDrop = Math.Max(0, RawHeight(ts, site.DirectionBodyFixed.normalized) - site.Elevation);
+                // Опускаем не ниже отметки: вычитание полного перепада уводило низины в 50–150 км под ноль, и
+                // вокруг Байконура выступали «озёра» на текстуре сферы (02.10.2026). Выше Elevation+перепад рельеф
+                // сдвинут целиком, между — сжат к отметке, ниже отметки не тронут; по h монотонно (наклон 1−w ≥ 0).
+                double bw = 1 - MathD.Smoothstep(site.BlendRadius, site.BasinRadius, dist);
+                h -= bw * Math.Min(site.BasinDrop, Math.Max(0, h - site.Elevation));
                 if (dist >= site.BlendRadius * 6) continue;
                 // Ближняя зона — ровная площадка на отметке космодрома; дальше суша поднимается не ниже
                 // площадки, чтобы шум не утопил космодром в океане.

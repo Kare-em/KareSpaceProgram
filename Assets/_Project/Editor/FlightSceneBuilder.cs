@@ -28,6 +28,9 @@ namespace Kare.Space.EditorTools
         const float SunAngularDiameter = 0.53f;
         /// <summary>Пара: дальность теней ↔ размер борта/патча рельефа вблизи камеры.</summary>
         const float ShadowDistance = 2000;
+        /// <summary>Порог отбора в RTAS, градусы телесного угла (как в Car_Train). Пара: борт 40 м виден под 4° с ≈ 600 м —
+        /// дальше его отражение и RT-тень всё равно в пиксель; ближний патч рельефа под камерой всегда крупнее.</summary>
+        const float RtasMinSolidAngle = 4;
 
         [MenuItem("Kare/Build Flight Scene")]
         public static void Build()
@@ -73,6 +76,7 @@ namespace Kare.Space.EditorTools
             cam.farClipPlane = FlightCamera.FarClip;
             cam.fieldOfView = 60;
             camGo.AddComponent<FlightCamera>();
+            camGo.AddComponent<RenderQuality>();
 
             var game = new GameObject("Game");
             var boot = game.AddComponent<GameBootstrap>();
@@ -89,6 +93,13 @@ namespace Kare.Space.EditorTools
             boot.EngineMesh = ModelMesh("RD107_Engine");
             boot.LegMesh = ModelMesh("Lander_Leg");
             boot.TrussMesh = ModelMesh("Pad_Truss_Arm");
+            boot.SputnikMesh = ModelMesh("Sputnik_PS1");
+            boot.VostokServiceMesh = ModelMesh("Vostok_Service");
+            boot.Luna9Mesh = ModelMesh("Luna9_Station");
+            boot.UpperEngineMesh = ModelMesh("RD0110_Engine");
+            boot.InterstageMesh = ModelMesh("Interstage_Truss");
+            boot.FairingHalfMesh = ModelMesh("Fairing_Half");
+            boot.FinsMesh = ModelMesh("Sounding_Fins");
             game.AddComponent<FloatingOrigin>();
             game.AddComponent<FlightInput>();
             game.AddComponent<FlightHud>().Icons = IconTexture(HudIconsPath);
@@ -128,6 +139,21 @@ namespace Kare.Space.EditorTools
             }
             var s = asset.currentPlatformRenderPipelineSettings;
             s.supportSSAO = true;
+            // RT и DLSS (тот же набор, что в Car_Train/HdrpSetup): возможности пайплайна, включает их игрок
+            // (RenderQuality, меню Esc). Без поддержки в ассете тумблеры ничего не делают.
+            s.supportSSR = true;
+            s.supportRayTracing = true;
+            s.supportedRayTracingMode = RenderPipelineSettings.SupportedRayTracingMode.Both;
+            // Тени Солнца лучами идут через экранный буфер теней — слоты под Солнце и ночной свет (NightLight).
+            s.hdShadowInitParams.supportScreenSpaceShadows = true;
+            s.hdShadowInitParams.maxScreenSpaceShadowSlots = Mathf.Max(4, s.hdShadowInitParams.maxScreenSpaceShadowSlots);
+            var drs = s.dynamicResolutionSettings;
+            drs.enabled = true;
+            drs.dynResType = DynamicResolutionType.Hardware; // D3D12 — без лишней копии кадра
+            drs.DLSSUseOptimalSettings = true;
+            // Приоритет: DLSS на RTX, иначе STP (апскейлер Unity) — камера разрешает его только флагом DRS.
+            drs.advancedUpscalerNames = new System.Collections.Generic.List<string> { "DLSS", "STP" };
+            s.dynamicResolutionSettings = drs;
             asset.currentPlatformRenderPipelineSettings = s;
             EditorUtility.SetDirty(asset);
             if (GraphicsSettings.defaultRenderPipeline != asset) GraphicsSettings.defaultRenderPipeline = asset;
@@ -135,6 +161,12 @@ namespace Kare.Space.EditorTools
             // HDRP в Gamma не рендерит вовсе (ошибка в консоли каждый кадр).
             if (PlayerSettings.colorSpace != ColorSpace.Linear) PlayerSettings.colorSpace = ColorSpace.Linear;
             SetHighLightmapEncoding();
+            // Трассировка лучей есть только в D3D12 — ставим его первым явно, а не надеемся на «по умолчанию».
+            foreach (var t in new[] { BuildTarget.StandaloneWindows64, BuildTarget.StandaloneWindows })
+            {
+                PlayerSettings.SetUseDefaultGraphicsAPIs(t, false);
+                PlayerSettings.SetGraphicsAPIs(t, new[] { GraphicsDeviceType.Direct3D12, GraphicsDeviceType.Direct3D11 });
+            }
         }
 
         /// <summary>
@@ -187,6 +219,17 @@ namespace Kare.Space.EditorTools
             var sh = Get<HDShadowSettings>(profile);
             sh.maxShadowDistance.Override(ShadowDistance);
             sh.cascadeShadowSplitCount.Override(4);
+
+            // Отражения: экранные всегда, лучами (Mixed) — когда RT включён (RenderQuality меняет tracing).
+            var ssr = Get<ScreenSpaceReflection>(profile);
+            ssr.enabled.Override(true);
+            ssr.mode.Override(RayTracingMode.Performance);
+            ssr.tracing.Override(RayCastingMode.RayMarching);
+            // Отбор в ускоряющую структуру по телесному углу: далёкие тела в «оболочке» (BodyRenderer) и мелочь
+            // на горизонте в RTAS не попадают — иначе структура пересобирается из гигантских сфер каждый кадр.
+            var rts = Get<RayTracingSettings>(profile);
+            rts.cullingMode.Override(RTASCullingMode.SolidAngle);
+            rts.minSolidAngle.Override(RtasMinSolidAngle);
 
             EditorUtility.SetDirty(profile);
             return profile;

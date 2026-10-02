@@ -13,6 +13,14 @@
 - **`execute_code` без `action:"execute"` падает**; codedom (C# 6, без `dynamic`) — без `StringBuilder.Append` цепочкой,
   собирать строку через `+`.
 - `read_console types` — списком.
+- **Порт 8767 отвечает 406 и при закрытом редакторе** — это жив Python-сервер `mcp-for-unity.exe`, а не Unity.
+  Признак: тулы возвращают `no_unity_session`. Проверять `tasklist | grep Unity.exe`; запуск —
+  `"/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Unity.exe" -projectPath <проект> &`.
+- **Добавление `com.unity.modules.nvidia` не перекомпилировало DLL пакета HDRP** (02.10.2026): в asmdef HDRP
+  `ENABLE_NVIDIA_MODULE` уже есть, а `Library/ScriptAssemblies/Unity.RenderPipelines.HighDefinition.Runtime.dll`
+  остаётся вчерашним → `DLSSDetected = false` на RTX. Признак: IL `DLSSPass.SetupFeature` = 2 байта (рефлексией,
+  `GetMethodBody().GetILAsByteArray()`), в ссылках сборки нет NVIDIA. Лечит
+  `CompilationPipeline.RequestScriptCompilation(RequestScriptCompilationOptions.CleanBuildCache)` (~13 с перезагрузки).
 
 ## Отладка в Play
 - `execute_code` → `Kare.Space.EditorTools.FlightDebug` через рефлексию (`Reentry(alt, speed, γ°)`, `Stage`, `Status`,
@@ -36,18 +44,28 @@
 - Инструменты появляются только в сессии, начатой ПОСЛЕ правки `.mcp.json` (и после одобрения проектного сервера);
   02.10.2026 сервер и сокет были живы, а в текущей сессии тулов `blender` не было.
 - Экспорт: `Assets/_Project/Models/<деталь>.fbx`, метры, Apply Transform; ось ракеты в Blender +Z → в Unity +Y
-  (нос борта) — подтверждено на 4 деталях 02.10.2026. Начало модели (днище/верх/шарнир) и габарит — в константах
+  (нос борта) — подтверждено на 11 деталях 02.10.2026. Параметры `export_scene.fbx`: `bake_space_transform=True,
+  apply_scale_options='FBX_SCALE_ALL', axis_forward='-Z', axis_up='Y', object_types={'MESH'}, use_selection=True`.
+  Без них импорт давал fileScale 0,01, поворот 270° и масштаб 100. Начало модели (днище/верх/шарнир) и габарит — в константах
   `VesselView`/`LaunchPadView` и в Tooltip полей `GameBootstrap`; поменял модель — сверь bounds (`mesh.bounds`).
 - **В FBX несколько субмешей** (по материалу Blender): `sharedMaterials` — массив длиной `subMeshCount`,
   иначе рисуется только первый субмеш.
 - **`manage_camera screenshot` пишет в `Assets/Screenshots/`** (`output_folder` игнорирует, `screenshot_file_name`
   принимает) — после съёмки файл и `Assets/Screenshots(.meta)` удалить. `camera: "<имя>"` снимает без OnGUI-HUD.
-  Своя камера для кадра: клон Main Camera, `LookAt(цель, vessel.up)` — мировой Y в сцене не «верх»
-  (плавающее начало), без `up` кадр заваливается.
+  Его «верх» — мировой Y, а местная вертикаль в сцене наклонена (P со SwapYZ + плавающее начало) — кадр завален.
+  Рабочий кадр (HDRP, 02.10.2026): клон `boot.Camera`, выключить все MonoBehaviour кроме `HDAdditionalCameraData`,
+  удалить AudioListener, `targetTexture` = RT 1920×1080, `enabled = false`; `rotation = LookRotation(цель − поз,
+  vessel.up)`, 12× `cam.Render()` (догоняет автоэкспозиция) → `ReadPixels` → PNG в скретчпад. Файлов в Assets нет.
+- **Демо-борт рядом с основным** (показ деталей): `new Vessel(VesselPresets.ById("vostok"))` (у `VesselDesign`
+  нет `ById`) + обязательно `Body/Position/Attitude` от активного — иначе NRE в `FloatingOrigin.WorldP` при
+  `VesselView.Init`; виду `enabled = false`, позицию ставить руками.
 - **Тест у тела: телепорт ниже ~1 км = удар** — `Teleport(Луна, 200 м)` + отстрел ступеней дал «удар 103 м/с»
   и `Alive = false` (вид перестаёт перестраиваться). Брать 15 км, как чит в Esc.
 
 ## Как вызывать UnityMCP, если тулов нет в сессии
+- 02.10.2026: в сессии два набора тулов — `UnityMCP` (заглавные) отвечает `no_unity_session`, рабочий —
+  `unityMCP` (строчные, stdio). Ресурсов у него нет (`editor/state` не читается) — состояние узнавать `execute_code`.
+  Сразу после `play` — доменная перезагрузка, «No Unity Editor instances found»/таймаут: просто повторить вызов.
 - 02.10.2026: после /mcp и одобрения тулы `UnityMCP` в сессии так и не появились, а сервер на 8767 жив.
   Обход — HTTP-клиент JSON-RPC (`initialize` → `notifications/initialized` → `tools/call`, заголовок
   `mcp-session-id`, ответ SSE `data:`); C# — через `execute_code`. Скрипт ~50 строк, писать в скретчпад.

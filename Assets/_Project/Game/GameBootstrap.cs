@@ -42,6 +42,20 @@ namespace Kare.Space.Game
         public Mesh LegMesh;
         [Tooltip("Ферма стола: начало у шарнира, длина 8,2 м по +Y.")]
         public Mesh TrussMesh;
+        [Tooltip("ПС-1: начало в центре шара Ø0,58 м, антенны вниз (−Y) на 2,63 м.")]
+        public Mesh SputnikMesh;
+        [Tooltip("Приборный отсек «Востока» с ТДУ: начало у верха, Ø2,44 м, низ сопла на −2,25 м.")]
+        public Mesh VostokServiceMesh;
+        [Tooltip("Станция Е-6 («Луна-9») с КТДУ: начало у среза сопла, высота 2,7 м, Ø1,5 м.")]
+        public Mesh Luna9Mesh;
+        [Tooltip("Одиночный двигатель верхней ступени (РД-0110): начало у верха, Ø2,2 м, высота 1,6 м.")]
+        public Mesh UpperEngineMesh;
+        [Tooltip("Ферма горячего разделения: начало у низа, Ø2,66 м, высота 1,2 м.")]
+        public Mesh InterstageMesh;
+        [Tooltip("Створка обтекателя: начало у низа, половина в −X, Ø5,2 м, высота 13 м.")]
+        public Mesh FairingHalfMesh;
+        [Tooltip("Хвостовой отсек с 4 стабилизаторами: начало у низа, корпус Ø1,0 м, размах Ø1,5 м, высота 1,2 м.")]
+        public Mesh FinsMesh;
 
         [Header("Правила (GDD §4.7); в игре — меню Esc")]
         [Tooltip("Разрушение от поперечной аэродинамической нагрузки q·sin α.")]

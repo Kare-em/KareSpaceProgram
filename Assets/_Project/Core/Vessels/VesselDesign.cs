@@ -28,6 +28,9 @@ namespace Kare.Space.Core
         public double IspSL => Isp(101325);
     }
 
+    /// <summary>Деталь вида секции из Tools/blender. Физики не касается: ядро о мешах не знает, только об имени детали.</summary>
+    public enum SectionModel { None, Sputnik, VostokService, Luna9 }
+
     public enum SectionKind
     {
         Stage,
@@ -68,6 +71,8 @@ namespace Kare.Space.Core
         public bool Sphere;
         /// <summary>Только вид: четыре посадочные опоры по кромке днища (станция Е-6К). Физику не меняет.</summary>
         public bool LandingLegs;
+        /// <summary>Только вид: деталь из Models/*.fbx вместо процедурного корпуса (VesselView.ModelFor).</summary>
+        public SectionModel Model;
         /// <summary>Мест экипажа: перегрузка (§4.7) убивает только живых, приборные капсулы её терпят.</summary>
         public int Crew;
 
@@ -265,6 +270,7 @@ namespace Kare.Space.Core
         public static VesselDesign Kara1Sputnik() => Kara1("Кара-1 «Спутник»", new SectionDef
         {
             Name = "ПС-1", Kind = SectionKind.Payload, DryMass = 83.6, Length = 0.58, Diameter = 0.58, RcsTorque = 5,
+            Model = SectionModel.Sputnik,
         });
 
         /// <summary>Пилотируемый «Восток»: приборный отсек с ТДУ + шар спускаемого аппарата.</summary>
@@ -275,7 +281,7 @@ namespace Kare.Space.Core
                 {
                     Name = "Приборный отсек", Kind = SectionKind.Stage, DryMass = 2000, Propellant = 275,
                     Engine = new EngineDef { Name = "ТДУ-1", ThrustVac = 15.8e3, ThrustSL = 12e3, IspVac = 266, Ignitions = 1 },
-                    EngineCount = 1, Length = 2.3, Diameter = 2.4, RcsTorque = 1.5e3,
+                    EngineCount = 1, Length = 2.3, Diameter = 2.4, RcsTorque = 1.5e3, Model = SectionModel.VostokService,
                 },
                 new SectionDef
                 {
@@ -300,6 +306,7 @@ namespace Kare.Space.Core
                     Name = "КТДУ-5К", ThrustVac = 16e3, ThrustSL = 12e3, IspVac = 277, MinThrottle = 0.25, Ignitions = 4,
                 },
                 EngineCount = 1, Length = 2.7, Diameter = 2.0, RcsTorque = 800, MaxHeatFlux = 2e5, LandingLegs = true,
+                Model = SectionModel.Luna9,
             });
             // КТДУ взводится отделением II ступени: на торможении у Луны ступень сменяется без лишнего шага (GDD §6.11).
             d.Sequence[d.Sequence.Count - 1] = new StageAction(StageActionType.Separate, 1, igniteNext: true);

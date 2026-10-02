@@ -483,6 +483,7 @@ namespace Kare.Space.Game
             int cols = seg + 1;
             var verts = new Vector3[cols * (rings + 1)];
             var uvs = new Vector2[verts.Length];
+            var heights = relief && b.Terrain != null ? ConservativeHeights(b, seg) : null;
             for (int r = 0; r <= rings; r++)
             {
                 double lat = -90 + 180.0 * r / rings;
@@ -490,7 +491,7 @@ namespace Kare.Space.Game
                 {
                     double lon = -180 + 360.0 * s / seg;
                     var dir = CelestialBody.LatLonToBodyFixed(lat, lon);
-                    double h = relief && b.Terrain != null ? b.SurfaceHeight(dir) : 0;
+                    double h = heights != null ? heights[r * cols + s] : 0;
                     verts[r * cols + s] = FloatingOrigin.ToVector3((dir * ((radius + h) / radius)).SwapYZ);
                     uvs[r * cols + s] = new Vector2((float)s / seg, (float)r / rings);
                 }
@@ -512,6 +513,51 @@ namespace Kare.Space.Game
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        /// <summary>
+        /// Высоты вершин дальней сферы «снизу»: грань сферы — плоский треугольник между вершинами, и если
+        /// между ними рельеф проседает (котлован площадки космодрома ≈ 9 км против грани ≈ 104 км), грань
+        /// вылезает над патчем — на 12 км над Байконуром было +128 м, и сквозь этот слой пролетали.
+        /// Поэтому: (1) рельеф берётся на сетке вдвое гуще и вершина получает минимум по своей
+        /// окрестности в полграни; (2) вершины рядом с космодромом не выше его отметки.
+        /// </summary>
+        static double[] ConservativeHeights(CelestialBody b, int seg)
+        {
+            int rings = seg / 2, cols = seg + 1;
+            int fr = rings * 2, fs = seg * 2, fcols = fs + 1;
+            var fine = new double[fcols * (fr + 1)];
+            for (int r = 0; r <= fr; r++)
+            {
+                double lat = -90 + 180.0 * r / fr;
+                for (int s = 0; s <= fs; s++)
+                    fine[r * fcols + s] = b.SurfaceHeight(CelestialBody.LatLonToBodyFixed(lat, -180 + 360.0 * s / fs));
+            }
+            // Радиус влияния площадки на вершину: зона выравнивания плюс диагональ грани на экваторе.
+            double faceDiag = b.Radius * (2 * System.Math.PI / seg) * System.Math.Sqrt(2);
+            var h = new double[cols * (rings + 1)];
+            for (int r = 0; r <= rings; r++)
+            for (int s = 0; s <= seg; s++)
+            {
+                double m = double.MaxValue;
+                for (int dr = -1; dr <= 1; dr++)
+                for (int ds = -1; ds <= 1; ds++)
+                {
+                    int rr = 2 * r + dr, ss = 2 * s + ds;
+                    if (rr < 0 || rr > fr) continue;
+                    if (ss < 0) ss += fs; else if (ss > fs) ss -= fs; // шов долготы ±180
+                    m = System.Math.Min(m, fine[rr * fcols + ss]);
+                }
+                var dir = CelestialBody.LatLonToBodyFixed(-90 + 180.0 * r / rings, -180 + 360.0 * s / seg);
+                foreach (var site in Kare.Space.Core.Terrain.Sites)
+                {
+                    if (site.BodyId != b.Id) continue;
+                    if (Vector3d.Angle(dir, site.DirectionBodyFixed) * b.Radius < site.BlendRadius + faceDiag)
+                        m = System.Math.Min(m, site.Elevation);
+                }
+                h[r * cols + s] = m;
+            }
+            return h;
         }
 
         /// <summary>

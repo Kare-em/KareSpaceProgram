@@ -35,7 +35,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
 
             int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + Row + 2 * (Row + 4) + 10;
+            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + Row + 2 * (Row + 4) + 10;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -77,6 +77,12 @@ namespace Kare.Space.Game
             }
             y += missionRows * (Row + 4) + 16;
 
+            // Графика (GDD §9): RT и DLSS — RenderQuality применяет на лету, без перезапуска.
+            GUI.Label(new Rect(x, y, w, 24), "Графика", label); y += 30;
+            Quality(x, y, w, ref RenderQuality.RayTracing, RenderQuality.RayTracingSupported,
+                "  Трассировка лучей (тени Солнца, отражения)"); y += Row;
+            Quality(x, y, w, ref RenderQuality.Dlss, RenderQuality.DlssSupported, "  DLSS (апскейл NVIDIA)"); y += Row + 20;
+
             // Читы для тестов: телепорт и бесконечное топливо. Миссия при этом не засчитывается честно — это отладка.
             GUI.Label(new Rect(x, y, w, 24), "Читы (для тестов)", label); y += 30;
             boot.InfiniteFuel = GUI.Toggle(new Rect(x, y, w, Row), boot.InfiniteFuel, "  Бесконечное топливо", toggle); y += Row;
@@ -90,6 +96,14 @@ namespace Kare.Space.Game
             y += Row + 4;
             if (GUI.Button(new Rect(x, y, hw, Row), "Над Луной 15 км (G — посадка)", small)) Jump(u, moon, 15e3, false);
             if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Марса 300 км", small)) Jump(u, mars, 300e3, true);
+        }
+
+        void Quality(float x, float y, float w, ref bool value, bool supported, string text)
+        {
+            if (supported) { value = GUI.Toggle(new Rect(x, y, w, Row), value, text, toggle); return; }
+            GUI.enabled = false;
+            GUI.Toggle(new Rect(x, y, w, Row), false, text + " — нет на этой видеокарте", toggle);
+            GUI.enabled = true;
         }
 
         /// <summary>Сколько кнопок миссий в ряду. Пара: Width — подписи «Пролёт Луны» должны влезать.</summary>

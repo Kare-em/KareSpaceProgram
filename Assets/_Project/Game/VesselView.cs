@@ -67,6 +67,17 @@ namespace Kare.Space.Game
         /// вынос стопы опоры наружу и вниз от шарнира. Пара: границы мешей в Models/*.fbx — меняешь модель, сверяй.</summary>
         const float CapsuleModelDiameter = 2.3f, EngineModelWidth = 1.96f, EngineModelHeight = 1.6f;
         const float LegModelReach = 1.09f, LegModelDrop = 1.37f;
+        /// <summary>Габариты деталей реальных аппаратов, м: шар ПС-1; приборный отсек «Востока» (Ø, высота до
+        /// среза ТДУ); станция Е-6; РД-0110 (Ø, высота); ферма горячего разделения (наружный радиус, высота);
+        /// створка обтекателя (радиус, высота); корпус хвостового отсека Г-1 под стабилизаторами (радиус).
+        /// Пара: границы мешей в Models/*.fbx — меняешь модель, сверяй (mesh.bounds).</summary>
+        const float SputnikModelDiameter = 0.58f, ServiceModelDiameter = 2.44f, ServiceModelHeight = 2.25f;
+        const float Luna9ModelDiameter = 1.5f, Luna9ModelHeight = 2.7f;
+        const float UpperEngineModelDiameter = 2.2f, UpperEngineModelHeight = 1.6f;
+        const float InterstageModelRadius = 1.33f, InterstageModelHeight = 1.2f;
+        const float FairingModelRadius = 2.6f, FairingModelHeight = 13f, FinsModelBodyRadius = 0.5f;
+        /// <summary>Радиус среза ТДУ «Востока» в долях радиуса отсека — по модели (сопло Ø≈0,5 м на Ø2,44).</summary>
+        const float ServiceNozzleShare = 0.2f;
 
         public Vessel Vessel { get; private set; }
 
@@ -80,8 +91,11 @@ namespace Kare.Space.Game
             public float PlumeRadius, Throttle;
             public Transform Chute, Canopy;
             public LineRenderer Lines;
-            public Renderer BodyR;
-            public Color BodyColor;
+            // Корпус может состоять из нескольких рендереров (две створки), у каждого — палитра по слотам.
+            public readonly List<Renderer> BodyR = new List<Renderer>();
+            public readonly List<Color[]> BodyColors = new List<Color[]>();
+
+            public void AddBody(Renderer r, Color[] palette) { BodyR.Add(r); BodyColors.Add(palette); }
         }
 
         readonly List<Part> parts = new List<Part>();
@@ -100,6 +114,9 @@ namespace Kare.Space.Game
         static readonly Color CapsuleColor = new Color(0.30f, 0.28f, 0.26f);
         static readonly Color FairingColor = new Color(0.92f, 0.92f, 0.90f);
         static readonly Color NozzleColor = new Color(0.20f, 0.18f, 0.17f);
+        // Слоты FBX «Metal» (рамы, баки, антенны) и «Polished» (полированный шар ПС-1, экраны Е-6).
+        static readonly Color MetalColor = new Color(0.55f, 0.55f, 0.53f);
+        static readonly Color PolishedColor = new Color(0.85f, 0.85f, 0.83f);
 
         public void Init(Vessel v, Material mat, Material plume)
         {
@@ -133,6 +150,20 @@ namespace Kare.Space.Game
             var boot = GameBootstrap.Instance;
             Mesh capsuleFbx = boot != null ? boot.CapsuleMesh : null, engineFbx = boot != null ? boot.EngineMesh : null;
             Mesh legFbx = boot != null ? boot.LegMesh : null;
+            Mesh sputnikFbx = boot != null ? boot.SputnikMesh : null, serviceFbx = boot != null ? boot.VostokServiceMesh : null;
+            Mesh luna9Fbx = boot != null ? boot.Luna9Mesh : null, upperEngineFbx = boot != null ? boot.UpperEngineMesh : null;
+            Mesh interstageFbx = boot != null ? boot.InterstageMesh : null, fairingFbx = boot != null ? boot.FairingHalfMesh : null;
+            Mesh finsFbx = boot != null ? boot.FinsMesh : null;
+            // Высота фермы под секцией j (0 — фермы нет). Условие — то же, что у постановки фермы ниже: одиночный
+            // двигатель без своего сопла в модели, над другой секцией.
+            float TrussHeight(int j)
+            {
+                if (interstageFbx == null || j <= 0 || j >= secs.Count || !Vessel.Attached[j] || Vessel.IsEnclosed(j)) return 0;
+                var sj = secs[j];
+                if (!sj.HasEngine || sj.EngineCount != 1) return 0;
+                bool own = (sj.Model == SectionModel.VostokService && serviceFbx != null) || (sj.Model == SectionModel.Luna9 && luna9Fbx != null);
+                return own ? 0 : Mathf.Min((float)sj.Radius * 0.45f, 1.2f) * 1.4f;
+            }
             for (int i = 0; i < secs.Count; i++)
             {
                 if (!Vessel.Attached[i] || Vessel.IsEnclosed(i)) continue;
@@ -146,21 +177,82 @@ namespace Kare.Space.Game
                     case SectionKind.Capsule:
                         mesh = s.Sphere ? ProcMesh.Sphere(r, len * 0.5f, 32, 16) : ProcMesh.Frustum(r, r * 0.35f, len, 24, true);
                         col = CapsuleColor; break;
-                    case SectionKind.Fairing: mesh = ProcMesh.Fairing(r, len, 24, Vessel.FairingHalf); col = FairingColor; break;
+                    case SectionKind.Fairing:
+                        mesh = fairingFbx != null ? null : ProcMesh.Fairing(r, len, 24, Vessel.FairingHalf); col = FairingColor; break;
                     case SectionKind.Payload: mesh = ProcMesh.Frustum(r, r, len, 24, true); col = PayloadColor; break;
-                    default: mesh = ProcMesh.Frustum(r, r, len, 24, true); col = StageColor; break;
+                    default:
+                        // Ферма верхней ступени стоит в верхней части этой: корпус короче на её высоту, иначе ферма
+                        // целиком внутри обечайки и не видна. Длина в физике та же.
+                        mesh = ProcMesh.Frustum(r, r, Mathf.Max(len - TrussHeight(i + 1), len * 0.5f), 24, true);
+                        col = StageColor; break;
                 }
-                var bodyGo = go;
-                if (s.Kind == SectionKind.Capsule && s.Sphere && capsuleFbx != null)
+                var part = new Part { Index = i, Tr = go.transform };
+                // Своя модель аппарата целиком заменяет процедурный корпус; у отсеков с двигателем в ней и сопло.
+                Mesh model = s.Model == SectionModel.Sputnik ? sputnikFbx : s.Model == SectionModel.VostokService ? serviceFbx
+                           : s.Model == SectionModel.Luna9 ? luna9Fbx : null;
+                if (model != null)
+                {
+                    var m = AddChild(go, "Model");
+                    Color[] palette;
+                    switch (s.Model)
+                    {
+                        case SectionModel.Sputnik:
+                            // Начало — центр шара: ставим в середину секции. Антенны уходят вниз; под обтекателем их
+                            // не видно, после сброса — отогнуты вдоль ступени, как у ПС-1 на носителе.
+                            m.localPosition = new Vector3(0, len * 0.5f, 0);
+                            m.localScale = Vector3.one * (2 * r / SputnikModelDiameter);
+                            palette = new[] { PolishedColor, MetalColor };
+                            break;
+                        case SectionModel.VostokService:
+                            // Начало у верха (стык с СА), срез ТДУ — на днище секции.
+                            m.localPosition = new Vector3(0, len, 0);
+                            m.localScale = new Vector3(2 * r / ServiceModelDiameter, len / ServiceModelHeight, 2 * r / ServiceModelDiameter);
+                            palette = new[] { col, MetalColor, NozzleColor };
+                            break;
+                        default:
+                            // Е-6: начало у среза КТДУ = днище секции, опоры добавляются ниже как у процедурной.
+                            m.localScale = new Vector3(2 * r / Luna9ModelDiameter, len / Luna9ModelHeight, 2 * r / Luna9ModelDiameter);
+                            palette = new[] { NozzleColor, MetalColor, col, PolishedColor };
+                            break;
+                    }
+                    part.AddBody(AddRenderer(m.gameObject, model, palette), palette);
+                }
+                else if (s.Kind == SectionKind.Capsule && s.Sphere && capsuleFbx != null)
                 {
                     // СА «Восток» из Blender: начало у днища, шар процедурной версии стоит центром на len/2.
-                    mesh = capsuleFbx;
-                    bodyGo = new GameObject("Model");
-                    bodyGo.transform.SetParent(go.transform, false);
-                    bodyGo.transform.localPosition = new Vector3(0, len * 0.5f - r, 0);
-                    bodyGo.transform.localScale = Vector3.one * (2 * r / CapsuleModelDiameter);
+                    var m = AddChild(go, "Model");
+                    m.localPosition = new Vector3(0, len * 0.5f - r, 0);
+                    m.localScale = Vector3.one * (2 * r / CapsuleModelDiameter);
+                    var palette = new[] { col, MetalColor, NozzleColor };
+                    part.AddBody(AddRenderer(m.gameObject, capsuleFbx, palette), palette);
                 }
-                var part = new Part { Index = i, Tr = go.transform, BodyR = AddRenderer(bodyGo, mesh, col), BodyColor = col };
+                else if (s.Kind == SectionKind.Fairing && fairingFbx != null)
+                {
+                    // Створки из Blender (модель — половина со стороны −X). Целый обтекатель — две, сброшенная
+                    // створка (Vessel.FairingHalf ±1, сторона ±X) — одна; +X — та же модель, повёрнутая на 180°.
+                    var palette = new[] { FairingColor, MetalColor };
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        if (Vessel.FairingHalf != 0 && Vessel.FairingHalf != side) continue;
+                        var m = AddChild(go, side < 0 ? "Fairing −X" : "Fairing +X");
+                        m.localRotation = Quaternion.Euler(0, side < 0 ? 0 : 180, 0);
+                        m.localScale = new Vector3(r / FairingModelRadius, len / FairingModelHeight, r / FairingModelRadius);
+                        part.AddBody(AddRenderer(m.gameObject, fairingFbx, palette), palette);
+                    }
+                }
+                else
+                {
+                    var palette = new[] { col };
+                    part.AddBody(AddRenderer(go, mesh, palette), palette);
+                }
+                if (s.FinArea > 0 && finsFbx != null)
+                {
+                    // Хвостовой отсек Г-1 со стабилизаторами: начало у низа, корпус модели вписан в радиус секции.
+                    var f = AddChild(go, "Fins");
+                    f.localScale = Vector3.one * (r / FinsModelBodyRadius);
+                    var palette = new[] { col, MetalColor, NozzleColor };
+                    part.AddBody(AddRenderer(f.gameObject, finsFbx, palette), palette);
+                }
                 if (s.LandingLegs && legFbx != null)
                 {
                     // Четыре опоры по кромке: шарнир поднят на вынос стопы, чтобы стопы стояли в плоскости днища —
@@ -184,19 +276,42 @@ namespace Kare.Space.Game
                     float rr = ring > 0 ? r * NozzleRing : 0;
                     float nr = ring > 0 ? Mathf.Min(rr * Mathf.Sin(Mathf.PI / Mathf.Max(ring, 2)) * NozzleGap, r * 0.32f)
                                         : Mathf.Min(r * 0.45f, 1.2f);
+                    // Сопло уже в модели аппарата (ТДУ «Востока», КТДУ Е-6): факел — от днища секции.
+                    bool ownNozzle = model != null && s.Model != SectionModel.Sputnik;
+                    if (ownNozzle && s.Model == SectionModel.VostokService) nr = r * ServiceNozzleShare;
                     var nozzle = new GameObject("Nozzle");
                     nozzle.transform.SetParent(go.transform, false);
-                    nozzle.transform.localPosition = new Vector3(0, -nr * 1.4f, 0);
+                    nozzle.transform.localPosition = new Vector3(0, ownNozzle ? 0 : -nr * 1.4f, 0);
                     var bell = ProcMesh.Bell(nr, nr * 0.45f, nr * 1.4f, 16);
+                    if (ring == 0 && !ownNozzle && i > 0 && interstageFbx != null)
+                    {
+                        // Ферма горячего разделения вокруг двигателя верхней ступени (Блок Е «Востока», II ступень
+                        // «Кары»): от днища вниз на высоту колокола, до стыка с нижней ступенью.
+                        var t = AddChild(go, "Interstage");
+                        t.localPosition = new Vector3(0, -nr * 1.4f, 0);
+                        t.localScale = new Vector3(r / InterstageModelRadius, nr * 1.4f / InterstageModelHeight, r / InterstageModelRadius);
+                        var palette = new[] { col, MetalColor };
+                        part.AddBody(AddRenderer(t.gameObject, interstageFbx, palette), palette);
+                    }
                     // Связка (≥ 2) — блоки РД-107 из Blender: двигатель в 4 камеры, как у «семёрки». Одиночный
-                    // двигатель верхней ступени остаётся одним колоколом.
-                    bool blocks = ring > 0 && engineFbx != null;
-                    for (int k = 0; k < n; k++)
+                    // двигатель — РД-0110 (рама, ТНА, сопло), без модели — колокол.
+                    bool blocks = ring > 0 && engineFbx != null, upper = ring == 0 && upperEngineFbx != null;
+                    for (int k = 0; k < (ownNozzle ? 0 : n); k++)
                     {
                         var b = new GameObject(blocks ? "Engine" : "Bell");
                         b.transform.SetParent(nozzle.transform, false);
                         float a = 2 * Mathf.PI * k / Mathf.Max(ring, 1);
                         b.transform.localPosition = k < ring ? new Vector3(rr * Mathf.Cos(a), 0, rr * Mathf.Sin(a)) : Vector3.zero;
+                        if (upper)
+                        {
+                            // Начало модели у верха: поднята на высоту колокола, вписана в его габарит.
+                            b.name = "Engine";
+                            b.transform.localPosition = new Vector3(0, nr * 1.4f, 0);
+                            b.transform.localScale = new Vector3(2 * nr / UpperEngineModelDiameter, nr * 1.4f / UpperEngineModelHeight,
+                                                                 2 * nr / UpperEngineModelDiameter);
+                            AddRenderer(b, upperEngineFbx, StageColor, MetalColor, NozzleColor);
+                            continue;
+                        }
                         if (!blocks) { AddRenderer(b, bell, NozzleColor); continue; }
                         // Блок вписан в габарит колокола: ширина 2·nr, высота 1,4·nr от среза до днища ступени.
                         // Начало модели — у верха, поэтому поднят на высоту колокола; широкой стороной — по касательной.
@@ -345,16 +460,13 @@ namespace Kare.Space.Game
             k = on ? k * k * (3 - 2 * k) : 0;
             // Накал гаснет вместе с плазмой; MPB перезаписывается целиком, поэтому базовый цвет — заново.
             if (on || heatGlowOn)
+            {
+                // Альфа = 1: Color * float умножает и её (см. SetEmissive).
+                var glow = HeatGlowTint * (HeatGlowNits * k);
+                glow.a = 1;
                 foreach (var p in parts)
-                {
-                    mpb.Clear();
-                    mpb.SetColor("_BaseColor", p.BodyColor);
-                    // Альфа = 1: Color * float умножает и её (см. SetEmissive).
-                    var glow = HeatGlowTint * (HeatGlowNits * k);
-                    glow.a = 1;
-                    mpb.SetColor("_EmissiveColor", glow);
-                    p.BodyR.SetPropertyBlock(mpb);
-                }
+                    for (int j = 0; j < p.BodyR.Count; j++) Paint(p.BodyR[j], p.BodyColors[j], glow);
+            }
             heatGlowOn = on;
             plasma.gameObject.SetActive(on);
             if (!on) return;
@@ -400,6 +512,13 @@ namespace Kare.Space.Game
         }
 
         /// <summary>Купол и стропы: корень в точке крепления (верх секции), +Y — против набегающего потока.</summary>
+        static Transform AddChild(GameObject parent, string name)
+        {
+            var t = new GameObject(name).transform;
+            t.SetParent(parent.transform, false);
+            return t;
+        }
+
         void AddChute(Part part)
         {
             var root = new GameObject("Parachute");
@@ -528,7 +647,7 @@ namespace Kare.Space.Game
             r.SetPropertyBlock(mpb);
         }
 
-        Renderer AddRenderer(GameObject go, Mesh mesh, Color col)
+        Renderer AddRenderer(GameObject go, Mesh mesh, params Color[] palette)
         {
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
@@ -540,12 +659,27 @@ namespace Kare.Space.Game
                 mr.sharedMaterials = mats;
             }
             else mr.sharedMaterial = bodyMat;
-            // mpb общий с факелом: без Clear корпус после отделения ступени наследовал эмиссию факела
-            // (3·10³ нит) и ночью при EV −5 выбеливал кадр целиком.
-            mpb.Clear();
-            mpb.SetColor("_BaseColor", col);
-            mr.SetPropertyBlock(mpb);
+            Paint(mr, palette, Color.clear);
             return mr;
+        }
+
+        /// <summary>
+        /// Цвет корпуса и накал. Один цвет — блок на весь рендерер; несколько — по блоку на слот (порядок слотов
+        /// FBX — материалы Blender, см. Tooltip полей GameBootstrap): блок слота приоритетнее общего.
+        /// Эмиссия с альфой 0 не пишется.
+        /// </summary>
+        void Paint(Renderer mr, Color[] palette, Color emissive)
+        {
+            for (int i = 0; i < palette.Length; i++)
+            {
+                // mpb общий с факелом: без Clear корпус после отделения ступени наследовал эмиссию факела
+                // (3·10³ нит) и ночью при EV −5 выбеливал кадр целиком.
+                mpb.Clear();
+                mpb.SetColor("_BaseColor", palette[i]);
+                if (emissive.a > 0) mpb.SetColor("_EmissiveColor", emissive);
+                if (palette.Length == 1) mr.SetPropertyBlock(mpb);
+                else mr.SetPropertyBlock(mpb, i);
+            }
         }
 
         /// <summary>Самый яркий видимый факел за кадр, нит — SkyController поднимает по нему нижний предел EV

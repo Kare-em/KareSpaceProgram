@@ -15,8 +15,9 @@ namespace Kare.Space.Game
     {
         public Volume Volume;
 
-        /// <summary>Пределы EV100 §9.3; на карте экспозиция фиксированная (§9.6).</summary>
-        public const float EvMin = -5, EvMax = 16, MapEv = 13;
+        /// <summary>Пределы EV100 §9.3; на карте экспозиция фиксированная (§9.6). EvMin −7 (было −5): ночью свет
+        /// только луна и свечение неба (NightLight.SkyglowLux, 0,02 лк) — при −5 безлунный грунт был ≈ 3 % белого.</summary>
+        public const float EvMin = -7, EvMax = 16, MapEv = 13;
 
         VisualEnvironment env;
         PhysicallyBasedSky sky;
@@ -66,6 +67,7 @@ namespace Kare.Space.Game
                 enabled = false;
                 return;
             }
+            if (Volume.profile.TryGet(out RayTracingSettings rt)) rt.distantRayBias.Override(DistantRayBias);
             earth = EarthAir.Capture(sky);
             env.centerMode.Override(VisualEnvironment.PlanetMode.Manual);
             env.renderingSpace.Override(RenderingSpace.World);
@@ -136,10 +138,19 @@ namespace Kare.Space.Game
         /// (замер 02.10.2026). Пара: SunLight.ColorTemperature.</summary>
         public const float BloomScatter = 0.3f;
 
+        /// <summary>
+        /// Смещение RT-луча тени вдали, м (§9.3). Начало луча HDRP восстанавливает из глубины, и на десятках
+        /// километров ошибка — метры, а штатное смещение 0,001: луч стартует из-под грунта и упирается в сам патч.
+        /// Признак — тёмно-синие пятна по всему дальнему грунту при Солнце 47° (замер 02.10.2026, камера 30 км);
+        /// CPU-трассировка того же меша — 0 из 200 точек в тени. 5 м пятна не убрало, 50 — чисто. Ближнее смещение
+        /// (rayBias) штатное — иначе пропадает тень ракеты на столе.
+        /// </summary>
+        const float DistantRayBias = 50f;
+
         static float SunlitWeight(Vessel v) => (float)SunLight.Visible * AirWeight(v);
 
         /// <summary>0 у поверхности, 1 — выше DarkSkyAltitude (небо уже чёрное); без атмосферы всегда 1.</summary>
-        static float AirWeight(Vessel v) =>
+        public static float AirWeight(Vessel v) =>
             v.Body.HasAtmosphere ? (float)System.Math.Min(1, System.Math.Max(0, v.Altitude / DarkSkyAltitude)) : 1;
 
         /// <summary>Смена профиля по SOI (§9.2): Земля, Марс, остальное — без атмосферы.</summary>

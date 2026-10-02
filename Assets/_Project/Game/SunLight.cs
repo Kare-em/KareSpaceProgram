@@ -24,8 +24,11 @@ namespace Kare.Space.Game
 
         /// <summary>Доля незатенённого Солнца, 0..1 — для HUD и экспозиции.</summary>
         public static double Visible { get; private set; } = 1;
+        /// <summary>Солнечный свет включён. Пока он горит, каскадные тени заняты им (NightLight).</summary>
+        public static bool Shining => Visible > 1e-4;
 
         Light sun;
+        UnityEngine.Rendering.LensFlareComponentSRP flare;
 
         void Awake()
         {
@@ -37,6 +40,9 @@ namespace Kare.Space.Game
             // небо серо-белое R≈240, без ореола — R=0, а сам диск с bloom 0,2 — ровное пятно (замер 01.10.2026).
             var hd = GetComponent<UnityEngine.Rendering.HighDefinition.HDAdditionalLightData>();
             if (hd != null) { hd.flareSize = 0; hd.flareMultiplier = 0; }
+            // Вместо ореола — блик объектива, гаснущий к краю кадра (SunFlare); и ночной свет (NightLight).
+            flare = SunFlare.Attach(gameObject);
+            NightLight.Create();
         }
 
         void LateUpdate()
@@ -52,16 +58,23 @@ namespace Kare.Space.Game
             Visible = SunFraction(u.System, me, toSun / r, r);
             double au = Constants.AU / r;
             sun.intensity = (float)(IlluminanceAt1Au * au * au * Visible);
-            sun.enabled = Visible > 1e-4;
+            sun.enabled = Shining;
+            // На карте блика нет — там своя фиксированная экспозиция и Солнце-иконка (§9.6).
+            flare.intensity = MapView.IsOpen ? 0 : (float)Visible;
         }
 
         /// <summary>
         /// Видимая доля диска Солнца из точки me. Перекрытие дисков приближено плавной ступенью по
         /// расстоянию между центрами: полная тень при θ ≤ ρb − ρs, свет при θ ≥ ρb + ρs (полутень между).
         /// </summary>
-        public static double SunFraction(SolarSystem sys, Vector3d me, Vector3d dirSun, double distSun)
+        public static double SunFraction(SolarSystem sys, Vector3d me, Vector3d dirSun, double distSun) =>
+            DiscFraction(sys, me, dirSun, distSun, sys.Sun.Radius);
+
+        /// <summary>Видимая доля диска любого источника радиуса srcRadius (Солнце, Луна для NightLight).
+        /// Сам источник отсекается условием d ≥ distSun — его расстояние совпадает до бита.</summary>
+        public static double DiscFraction(SolarSystem sys, Vector3d me, Vector3d dirSun, double distSun, double srcRadius)
         {
-            double rs = System.Math.Asin(System.Math.Min(1, sys.Sun.Radius / distSun));
+            double rs = System.Math.Asin(System.Math.Min(1, srcRadius / distSun));
             double vis = 1;
             foreach (var b in sys.Bodies)
             {
