@@ -13,6 +13,15 @@ static class Program
         string only = args.Length > 0 ? args[0] : null;
         // В игре повреждения по умолчанию выключены; автопилоты проверяем по строгим правилам.
         FlightPhysics.AeroBreakup = FlightPhysics.HeatDamage = FlightPhysics.GLoadLimit = true;
+        // Та же карта суши, что в игре: посадки и приводнения проверяются на реальной географии.
+        string land = null;
+        for (var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory); dir != null && land == null; dir = dir.Parent)
+        {
+            var f = System.IO.Path.Combine(dir.FullName, "Assets/_Project/Data/EarthLand.bytes");
+            if (System.IO.File.Exists(f)) land = f;
+        }
+        if (land != null) SolarSystem.EarthLand = new LandMap(System.IO.File.ReadAllBytes(land));
+        else Console.WriteLine("   карта суши не найдена — процедурные материки");
         Run("math", TestMath, only);
         Run("orbit", TestOrbit, only);
         Run("moon", TestEphemeris, only);
@@ -27,6 +36,7 @@ static class Program
         Run("farside", () => TestLunar("farside", 8000e3, 2.6 * 86400), only);
         Run("vostok", TestVostok, only);
         Run("luna9", () => TestLunar("luna9", 1000e3, land: true), only);
+        Run("moondrop", TestMoonDrop, only);
         Console.WriteLine($"\nИтого: {passed} ok, {failed} fail");
         return failed == 0 ? 0 : 1;
     }
@@ -396,6 +406,32 @@ static class Program
             Fly(u, tr, 2, 3600, () => tr.Status == MissionStatus.Active);
         Console.WriteLine($"   итог: {(u.Active.Alive ? OrbitText(u.Active, u.Time) : u.Active.DestroyReason)}");
         Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
+    /// <summary>Чит меню Esc «Над Луной 15 км» + G: полный пакет со стола, падение из покоя, автопилот посадки.</summary>
+    static void TestMoonDrop()
+    {
+        foreach (var id in new[] { "luna9", "vostok" })
+        {
+            var (u, tr) = StartMission(id);
+            var moon = u.System.Get("moon");
+            u.Teleport(moon, 15e3, false);
+            u.Landing = new LandingAutopilot(moon);
+            var lp = (LandingAutopilot.PhaseType)(-1);
+            double nextLog = 0;
+            Fly(u, null, 0, 1200, () => u.Active.Alive && !u.Active.IsLanded, () =>
+            {
+                var a = u.Landing;
+                var lv = u.Active;
+                if (a == null || a.Phase == lp && u.Time < nextLog) return;
+                lp = a.Phase;
+                nextLog = u.Time + 10;
+                Console.WriteLine($"      {a.Phase,-9} h {moon.AltitudeAboveTerrain(lv.Position),8:F0} м  vs {lv.VerticalSpeed,7:F1}  {a.Status}");
+            });
+            var v = u.Active;
+            Console.WriteLine($"   {id}: {v.Situation} {v.DestroyReason}");
+            Check($"moondrop {id}: сел", v.Alive && v.IsLanded, v.DestroyReason ?? "");
+        }
     }
 
     static void TestVostok()

@@ -171,6 +171,18 @@ namespace Kare.Space.Core
 
         public bool IsEnclosed(int i) => EnclosingFairing(i) >= 0;
 
+        /// <summary>Чит «бесконечное топливо» (меню Esc): баки присоединённых секций полны, запуски не меньше штатных.</summary>
+        public void Refuel()
+        {
+            var secs = Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!Attached[i]) continue;
+                Propellant[i] = secs[i].Propellant;
+                if (secs[i].HasEngine) IgnitionsLeft[i] = Math.Max(IgnitionsLeft[i], secs[i].Engine.Ignitions);
+            }
+        }
+
         /// <summary>Масса секции, кг; у створки — половина обтекателя.</summary>
         double SectionMass(int i)
         {

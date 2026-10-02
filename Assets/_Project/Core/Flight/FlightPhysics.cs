@@ -47,6 +47,13 @@ namespace Kare.Space.Core
         /// правиле борт просто не разрушается. Тесты ядра включают оба: автопилоты обязаны проходить и по
         /// строгим правилам. Задаются из игры (GameBootstrap) — статика, т.к. правило одно на всю симуляцию.
         /// </summary>
+        /// <summary>
+        /// Продольное ускорение, которое осаживает топливо, м/с². У S-IVB и «Блока Д» двигатели осадки давали
+        /// ≈ 0,01–0,1 м/с². Было 0,05: РСУ полного пакета (≈ 13 кН на 500 т = 0,026 м/с²) не осаживала никогда,
+        /// и после чита «Над Луной» автопилот посадки ждал осадки до удара. Пара: Vessel.RcsThrust.
+        /// </summary>
+        const double SettleAccel = 0.01;
+
         public static bool AeroBreakup, HeatDamage;
         /// <summary>Гибель экипажа от перегрузки (§4.7): выключено — таймер упирается в предел, экипаж жив.</summary>
         public static bool GLoadLimit;
@@ -236,7 +243,7 @@ namespace Kare.Space.Core
             CheckCrew(v, dt);
 
             // Осадка топлива: продольное ускорение вперёд прижимает топливо к заборникам (GDD §6.3).
-            if (Vector3d.Dot(nonGrav, nose) > 0.05) v.SettledTimer = 3;
+            if (Vector3d.Dot(nonGrav, nose) > SettleAccel) v.SettledTimer = 3;
             else v.SettledTimer = Math.Max(0, v.SettledTimer - dt);
 
             CheckStructure(v, g, sinA, leadDef, dt);

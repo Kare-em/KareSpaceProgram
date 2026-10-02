@@ -86,6 +86,10 @@ namespace Kare.Space.Core
             return b;
         }
 
+        /// <summary>Реальная карта суши Земли (Data/EarthLand.bytes); ставит хост — игра из TextAsset, тесты из файла —
+        /// до CreateReal. null — процедурные материки.</summary>
+        public static LandMap EarthLand;
+
         static TerrainSettings Ter(double amp, int seed, bool ocean = false, double landBias = 0, double craters = 0) =>
             new TerrainSettings { Amplitude = amp, Seed = seed, Ocean = ocean, LandBias = landBias, Craters = craters };
 
@@ -119,6 +123,7 @@ namespace Kare.Space.Core
                 new[] { 1.00000261, 0.01671123, -0.00001531, 100.46457166, 102.93768193, 0.0 },
                 new[] { 0.00000562, -0.00004392, -0.01294668, 35999.37244981, 0.32327364, 0.0 }), sun);
             earth.Terrain = Ter(5000, 1, ocean: true, landBias: -0.06);
+            earth.Terrain.Land = EarthLand;
             earth.Atmosphere = new StandardAtmosphere1976();
 
             var moon = s.Add(Iau(Body("moon", "Луна", 4.9028e12, 1737.4), 269.9949, 0.0031, 66.5392, 0.0130, 38.3213, 13.17635815), earth);

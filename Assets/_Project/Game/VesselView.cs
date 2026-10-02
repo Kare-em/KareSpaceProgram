@@ -46,8 +46,12 @@ namespace Kare.Space.Game
         const float PlasmaNits = 1.2e3f, PlasmaWakeNits = 4e2f;
         /// <summary>Размеры в радиусах борта: ореол ударного слоя (полуширина спрайта), длина следа, дальность
         /// подсветки; вынос центра ореола вперёд от лба. Пара: PlasmaHalo − PlasmaHaloAhead ≥ 1 — ореол выходит
-        /// за силуэт шара (сзади виден кольцом), но центр впереди, и сбоку шар виден за ним.</summary>
-        const float PlasmaHalo = 1.8f, PlasmaHaloAhead = 0.6f, PlasmaWakeLength = 9, PlasmaLightRange = 15;
+        /// за силуэт шара (сзади виден кольцом), но центр впереди, и сбоку шар виден за ним.
+        /// Было 1,8 / 0,6 (+0,25 отступ ударной волны): центр свечения на 0,85 r перед лбом, и шар плазмы
+        /// летел «с упреждением» впереди аппарата. Отход ударной волны у сферы ≈ 0,1–0,2 r — отсюда 0,3 и 0,1.</summary>
+        const float PlasmaHalo = 1.5f, PlasmaHaloAhead = 0.3f, PlasmaWakeLength = 9, PlasmaLightRange = 15;
+        /// <summary>Отход ударной волны от лба, радиусов борта. Пара: PlasmaHaloAhead.</summary>
+        const float ShockStandoff = 0.1f;
         static readonly Color PlasmaTint = new Color(1f, 0.5f, 0.32f);
         /// <summary>Накал обшивки на входе, нит при полном нагреве: абляционное покрытие светится тёмно-красным
         /// (≈1500 K), заодно теневая сторона не чёрная дырой. Пара: PlasmaNits — накал вчетверо тусклее ореола,
@@ -59,6 +63,10 @@ namespace Kare.Space.Game
         /// <summary>След не подходит к камере ближе, радиусов борта: лента, прошедшая сквозь ближнюю плоскость,
         /// режется прямой кромкой на весь кадр (вид сзади, 01.10.2026). Конец ленты в текстуре гаснет в ноль.</summary>
         const float WakeCameraClearance = 2;
+        /// <summary>Размеры FBX-деталей из Tools/blender, м: диаметр СА, ширина и высота блока РД-107 (4 камеры),
+        /// вынос стопы опоры наружу и вниз от шарнира. Пара: границы мешей в Models/*.fbx — меняешь модель, сверяй.</summary>
+        const float CapsuleModelDiameter = 2.3f, EngineModelWidth = 1.96f, EngineModelHeight = 1.6f;
+        const float LegModelReach = 1.09f, LegModelDrop = 1.37f;
 
         public Vessel Vessel { get; private set; }
 
@@ -69,7 +77,7 @@ namespace Kare.Space.Game
             public Transform Plume, Glow;
             public Renderer CoreR, GlowR;
             public Light PlumeLight;
-            public float PlumeRadius;
+            public float PlumeRadius, Throttle;
             public Transform Chute, Canopy;
             public LineRenderer Lines;
             public Renderer BodyR;
@@ -122,6 +130,9 @@ namespace Kare.Space.Game
             parts.Clear();
             builtSignature = Signature();
             var secs = Vessel.Design.Sections;
+            var boot = GameBootstrap.Instance;
+            Mesh capsuleFbx = boot != null ? boot.CapsuleMesh : null, engineFbx = boot != null ? boot.EngineMesh : null;
+            Mesh legFbx = boot != null ? boot.LegMesh : null;
             for (int i = 0; i < secs.Count; i++)
             {
                 if (!Vessel.Attached[i] || Vessel.IsEnclosed(i)) continue;
@@ -139,7 +150,32 @@ namespace Kare.Space.Game
                     case SectionKind.Payload: mesh = ProcMesh.Frustum(r, r, len, 24, true); col = PayloadColor; break;
                     default: mesh = ProcMesh.Frustum(r, r, len, 24, true); col = StageColor; break;
                 }
-                var part = new Part { Index = i, Tr = go.transform, BodyR = AddRenderer(go, mesh, col), BodyColor = col };
+                var bodyGo = go;
+                if (s.Kind == SectionKind.Capsule && s.Sphere && capsuleFbx != null)
+                {
+                    // СА «Восток» из Blender: начало у днища, шар процедурной версии стоит центром на len/2.
+                    mesh = capsuleFbx;
+                    bodyGo = new GameObject("Model");
+                    bodyGo.transform.SetParent(go.transform, false);
+                    bodyGo.transform.localPosition = new Vector3(0, len * 0.5f - r, 0);
+                    bodyGo.transform.localScale = Vector3.one * (2 * r / CapsuleModelDiameter);
+                }
+                var part = new Part { Index = i, Tr = go.transform, BodyR = AddRenderer(bodyGo, mesh, col), BodyColor = col };
+                if (s.LandingLegs && legFbx != null)
+                {
+                    // Четыре опоры по кромке: шарнир поднят на вынос стопы, чтобы стопы стояли в плоскости днища —
+                    // ядро сажает борт по днищу (Vessel.PlaceOnSurface), опоры его не продлевают.
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var leg = new GameObject("Leg");
+                        leg.transform.SetParent(go.transform, false);
+                        // −X модели — наружу: поворот на 90·k + 45° ставит опоры между связями.
+                        var yaw = Quaternion.Euler(0, 90 * k + 45, 0);
+                        leg.transform.localRotation = yaw;
+                        leg.transform.localPosition = yaw * new Vector3(-r, Mathf.Min(LegModelDrop, len), 0);
+                        AddRenderer(leg, legFbx, NozzleColor);
+                    }
+                }
 
                 if (s.HasEngine)
                 {
@@ -152,13 +188,23 @@ namespace Kare.Space.Game
                     nozzle.transform.SetParent(go.transform, false);
                     nozzle.transform.localPosition = new Vector3(0, -nr * 1.4f, 0);
                     var bell = ProcMesh.Bell(nr, nr * 0.45f, nr * 1.4f, 16);
+                    // Связка (≥ 2) — блоки РД-107 из Blender: двигатель в 4 камеры, как у «семёрки». Одиночный
+                    // двигатель верхней ступени остаётся одним колоколом.
+                    bool blocks = ring > 0 && engineFbx != null;
                     for (int k = 0; k < n; k++)
                     {
-                        var b = new GameObject("Bell");
+                        var b = new GameObject(blocks ? "Engine" : "Bell");
                         b.transform.SetParent(nozzle.transform, false);
                         float a = 2 * Mathf.PI * k / Mathf.Max(ring, 1);
                         b.transform.localPosition = k < ring ? new Vector3(rr * Mathf.Cos(a), 0, rr * Mathf.Sin(a)) : Vector3.zero;
-                        AddRenderer(b, bell, NozzleColor);
+                        if (!blocks) { AddRenderer(b, bell, NozzleColor); continue; }
+                        // Блок вписан в габарит колокола: ширина 2·nr, высота 1,4·nr от среза до днища ступени.
+                        // Начало модели — у верха, поэтому поднят на высоту колокола; широкой стороной — по касательной.
+                        float w = 2 * nr / EngineModelWidth;
+                        b.transform.localPosition += new Vector3(0, nr * 1.4f, 0);
+                        b.transform.localRotation = Quaternion.Euler(0, 90 - a * Mathf.Rad2Deg, 0);
+                        b.transform.localScale = new Vector3(w, nr * 1.4f / EngineModelHeight, w);
+                        AddRenderer(b, engineFbx, NozzleColor);
                     }
                     // Общий факел на связку: струи у земли сливаются в один столб, отдельные 9 факелов
                     // дали бы 18 аддитивных слоёв и пересвет на стыках.
@@ -316,7 +362,7 @@ namespace Kare.Space.Game
             // Лоб — тот торец, что идёт первым; ударная волна стоит чуть впереди него.
             var nose = transform.up;
             float front = Vector3.Dot(nose, airflow) >= 0 ? (float)(length - com) : (float)-com;
-            var bow = transform.TransformPoint(0, front, 0) + airflow * (r * 0.25f);
+            var bow = transform.TransformPoint(0, front, 0) + airflow * (r * ShockStandoff);
             plasma.position = bow;
             float flicker = Flicker(PlasmaFlicker, 17);
             var cam = Camera.main;
@@ -339,12 +385,13 @@ namespace Kare.Space.Game
                 if (along > 0 && side < r * 3)
                     wakeLen = Mathf.Clamp(along - r * WakeCameraClearance, r * 0.5f, wakeLen);
             }
-            plasmaWake.SetPosition(0, bow + airflow * (r * 0.3f));
+            plasmaWake.SetPosition(0, bow + airflow * (r * ShockStandoff));
             plasmaWake.SetPosition(1, bow - airflow * (wakeLen * 0.25f));
             plasmaWake.SetPosition(2, bow - airflow * wakeLen);
             plasmaWake.widthMultiplier = r;
             float nits = PlasmaNits * k * flicker;
             ReportPlume(nits);
+            ReportPlasma(PlasmaNits * k);
             SetEmissive(plasmaHaloR, PlasmaTint * nits);
             SetEmissive(plasmaWake, PlasmaTint * (PlasmaWakeNits * k * wakeFade));
             // Сила света = яркость × видимая площадь ударного слоя (диск радиуса r).
@@ -485,7 +532,14 @@ namespace Kare.Space.Game
         {
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = bodyMat;
+            // У FBX слоты материалов — отдельные субмеши: с одним материалом рисовался бы только первый.
+            if (mesh.subMeshCount > 1)
+            {
+                var mats = new Material[mesh.subMeshCount];
+                for (int i = 0; i < mats.Length; i++) mats[i] = bodyMat;
+                mr.sharedMaterials = mats;
+            }
+            else mr.sharedMaterial = bodyMat;
             // mpb общий с факелом: без Clear корпус после отделения ступени наследовал эмиссию факела
             // (3·10³ нит) и ночью при EV −5 выбеливал кадр целиком.
             mpb.Clear();
@@ -505,6 +559,17 @@ namespace Kare.Space.Game
         {
             if (peakFrame != Time.frameCount) { peakFrame = Time.frameCount; peak = 0; }
             peak = Mathf.Max(peak, nits);
+        }
+
+        /// <summary>Яркость ударного слоя за этот кадр, нит (без дрожания) — для нижнего предела EV на входе.</summary>
+        public static float PlasmaPeakNits => Time.frameCount - plasmaFrame <= 1 ? plasmaPeak : 0;
+        static float plasmaPeak;
+        static int plasmaFrame;
+
+        static void ReportPlasma(float nits)
+        {
+            if (plasmaFrame != Time.frameCount) { plasmaFrame = Time.frameCount; plasmaPeak = 0; }
+            plasmaPeak = Mathf.Max(plasmaPeak, nits);
         }
 
         void LateUpdate()
@@ -535,6 +600,7 @@ namespace Kare.Space.Game
                 if (p.Plume == null) continue;
                 bool on = Vessel.Running[p.Index];
                 float thr = on ? (float)Vessel.EffectiveThrottle(p.Index) : 0;
+                p.Throttle = thr;
                 if (thr > 0.01f) ReportPlume(CoreNits * thr);
                 bool burning = thr > 0.01f;
                 p.Plume.gameObject.SetActive(burning);
@@ -557,6 +623,26 @@ namespace Kare.Space.Game
                 // миганием всей сцены.
                 p.PlumeLight.intensity = PlumeCandela * thr * (1 + (flicker - 1) * 0.3f);
             }
+        }
+
+        /// <summary>
+        /// Срез самой нижней работающей связки — источник дыма для ExhaustTrail (GDD §9.5): точка в осях Unity,
+        /// радиус общего факела, дроссель. Нижней — потому что дым у старта идёт из-под пакета, а верхние
+        /// работающие ступени в шлейфе неотличимы. false — ничего не горит или борт не виден.
+        /// </summary>
+        public bool ExhaustSource(out Vector3 pos, out float radius, out float throttle)
+        {
+            pos = default; radius = 0; throttle = 0;
+            if (!visible) return false;
+            Part best = null;
+            foreach (var p in parts)
+                if (p.Plume != null && p.Throttle > 0.01f && (best == null || p.Tr.localPosition.y < best.Tr.localPosition.y))
+                    best = p;
+            if (best == null) return false;
+            pos = best.Plume.position;
+            radius = best.PlumeRadius;
+            throttle = best.Throttle;
+            return true;
         }
 
         /// <summary>Дрожание факела и плазмы, доля. Было 1 + 0,05·sin 53t + 0,03·sin 31t: 8,4 Гц близко к

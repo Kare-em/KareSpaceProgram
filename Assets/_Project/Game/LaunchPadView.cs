@@ -18,6 +18,8 @@ namespace Kare.Space.Game
         const float ConcreteTile = 8;
         /// <summary>Где ферма касается корпуса над столом, сечение фермы, м.</summary>
         const float ArmReach = 9, ArmWidth = 0.9f;
+        /// <summary>Длина фермы в FBX, м (Tools/blender). Пара: ArmWidth — сечение модели 0,9 м, тянем только по длине.</summary>
+        const float TrussModelLength = 8.2f;
         /// <summary>Отвод ферм: на сколько градусов наружу и за сколько секунд.</summary>
         const float ReleaseAngle = 70, ReleaseTime = 1.6f;
         /// <summary>Дальше этого стол не рисуем — меньше пикселя.</summary>
@@ -34,7 +36,7 @@ namespace Kare.Space.Game
         float armTilt, release;
         Renderer[] renderers;
 
-        public void Init(Vessel v, Texture2D concrete, Material baseMat)
+        public void Init(Vessel v, Texture2D concrete, Material baseMat, Mesh truss = null)
         {
             vessel = v;
             body = v.Body;
@@ -75,7 +77,9 @@ namespace Kare.Space.Game
             armTilt = Mathf.Atan2(HoleHalf - hull, ArmReach) * Mathf.Rad2Deg;
             float len = Mathf.Sqrt(ArmReach * ArmReach + (HoleHalf - hull) * (HoleHalf - hull));
             var arm = new MeshBuilder(ConcreteTile);
-            arm.Box(new Vector3(-ArmWidth / 2, 0, -ArmWidth / 2), new Vector3(ArmWidth / 2, len, ArmWidth / 2));
+            // Решётчатая ферма из Blender (Models/Pad_Truss_Arm, сечение = ArmWidth, длина TrussModelLength) или брус.
+            if (truss == null)
+                arm.Box(new Vector3(-ArmWidth / 2, 0, -ArmWidth / 2), new Vector3(ArmWidth / 2, len, ArmWidth / 2));
             // Противовес под шарниром — им ферма и откидывается, когда ракета уходит.
             arm.Box(new Vector3(-ArmWidth, -2.5f, -ArmWidth), new Vector3(ArmWidth, 0, ArmWidth));
             var armMesh = arm.Build();
@@ -87,19 +91,25 @@ namespace Kare.Space.Game
                 float yaw = 90 * k;
                 pivot.localPosition = Quaternion.Euler(0, yaw, 0) * new Vector3(0, top, HoleHalf);
                 pivot.localRotation = Quaternion.Euler(0, yaw, 0);
-                AddPart("Truss", armMesh, steelMat, pivot);
+                AddPart(truss == null ? "Truss" : "Counterweight", armMesh, steelMat, pivot);
+                if (truss != null)
+                    AddPart("Truss", truss, steelMat, pivot).transform.localScale = new Vector3(1, len / TrussModelLength, 1);
                 arms.Add(pivot);
             }
             renderers = GetComponentsInChildren<Renderer>();
             Pose();
         }
 
-        static void AddPart(string name, Mesh mesh, Material mat, Transform parent)
+        static GameObject AddPart(string name, Mesh mesh, Material mat, Transform parent)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            // У FBX слоты материалов — отдельные субмеши: с одним материалом рисуется только первый.
+            var mats = new Material[Mathf.Max(1, mesh.subMeshCount)];
+            for (int i = 0; i < mats.Length; i++) mats[i] = mat;
+            go.AddComponent<MeshRenderer>().sharedMaterials = mats;
+            return go;
         }
 
         void LateUpdate()

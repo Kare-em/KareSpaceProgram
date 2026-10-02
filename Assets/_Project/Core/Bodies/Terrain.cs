@@ -18,6 +18,51 @@ namespace Kare.Space.Core
         public int Octaves = 9;
         /// <summary>Кратерированность для безатмосферных тел (0…1).</summary>
         public double Craters;
+        /// <summary>Реальная карта суши (Земля): если задана, материки и горные пояса берутся из неё, шум только
+        /// дорисовывает детали. Без неё — процедурные материки (тела без карты, headless-тесты без файла).</summary>
+        public LandMap Land;
+    }
+
+    /// <summary>
+    /// Карта суши в равнопромежуточной проекции (Tools/bake-earth-land.py → Data/EarthLand.bytes): поле суши
+    /// (0,5 — берег, к 1 — глубь материка, к 0 — открытый океан) и «горность» 0…1. Байты, билинейно, по долготе
+    /// по кругу. Формат: int32 W, int32 H, W·H байт поля, W·H байт горности; строка 0 — северный полюс, x = 0 — 180° з. д.
+    /// </summary>
+    public sealed class LandMap
+    {
+        public readonly int Width, Height;
+        readonly byte[] field, rough;
+
+        public LandMap(byte[] data)
+        {
+            Width = BitConverter.ToInt32(data, 0);
+            Height = BitConverter.ToInt32(data, 4);
+            int n = Width * Height;
+            if (Width <= 0 || Height <= 0 || data.Length < 8 + 2 * n) throw new ArgumentException("Повреждённая карта суши");
+            field = new byte[n];
+            rough = new byte[n];
+            Buffer.BlockCopy(data, 8, field, 0, n);
+            Buffer.BlockCopy(data, 8 + n, rough, 0, n);
+        }
+
+        public void Sample(Vector3d dirBodyFixed, out double landField, out double mountains)
+        {
+            CelestialBody.BodyFixedToLatLon(dirBodyFixed, out double lat, out double lon);
+            double fx = (lon + 180) / 360 * Width - 0.5, fy = (90 - lat) / 180 * Height - 0.5;
+            int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+            double tx = fx - x0, ty = fy - y0;
+            int xa = ((x0 % Width) + Width) % Width, xb = (xa + 1) % Width;
+            int ya = Math.Max(0, Math.Min(Height - 1, y0)), yb = Math.Max(0, Math.Min(Height - 1, y0 + 1));
+            landField = Bilinear(field, xa, xb, ya, yb, tx, ty);
+            mountains = Bilinear(rough, xa, xb, ya, yb, tx, ty);
+        }
+
+        double Bilinear(byte[] a, int xa, int xb, int ya, int yb, double tx, double ty)
+        {
+            double top = a[ya * Width + xa] + (a[ya * Width + xb] - a[ya * Width + xa]) * tx;
+            double bot = a[yb * Width + xa] + (a[yb * Width + xb] - a[yb * Width + xa]) * tx;
+            return (top + (bot - top) * ty) / 255.0;
+        }
     }
 
     /// <summary>Космодром: точка на теле, вокруг которой рельеф выровнен (GDD §6, реальные космодромы).</summary>
@@ -80,6 +125,7 @@ namespace Kare.Space.Core
         {
             var p = d * ts.BaseFrequency;
             var perm = Perm(ts.Seed);
+            if (ts.Land != null) return MappedHeight(ts, perm, d, p);
             // Континенты — низкая частота, горы — гребневый шум, растущий к центру материков.
             double continent = Fbm(perm, p * 0.6, 4, 0.5) + ts.LandBias;
             double detail = Fbm(perm, p * 3 + new Vector3d(17.3, -5.1, 9.7), ts.Octaves, 0.5);
@@ -88,6 +134,31 @@ namespace Kare.Space.Core
             double land = MathD.Smoothstep(-0.05, 0.25, continent);
             double h = continent * 0.6 + detail * 0.25 + ridge * land * 0.35;
             if (ts.Craters > 0) h += ts.Craters * Craters(perm, d * 8);
+            return h * ts.Amplitude;
+        }
+
+        /// <summary>Сила шума берега в долях поля суши. Пара: шаг карты ≈ 20 км (bake-earth-land.py) — шум
+        /// 0,06 двигает берег примерно на тексель, мельче карта берег не знает.</summary>
+        const double CoastNoise = 0.06;
+        /// <summary>Глубина открытого океана при поле 0 (поле −0,5 от берега), м — средняя реальная ≈ 3,7 км.</summary>
+        const double OceanDepth = 7400;
+
+        /// <summary>
+        /// Рельеф по реальной карте суши (§2.8): знак c — суша/океан, высота суши — равнинная ступень + плато и
+        /// хребты, растущие с «горностью» карты (Тибет, Анды); шум на суше только вверх, иначе у берега равнины
+        /// изрыты ложными озёрами (шум ±375 м при равнине в 100 м).
+        /// </summary>
+        static double MappedHeight(TerrainSettings ts, int[] perm, Vector3d d, Vector3d p)
+        {
+            ts.Land.Sample(d, out double f, out double m);
+            double c = f - 0.5 + CoastNoise * Fbm(perm, p * 20 + new Vector3d(4.1, -7.7, 2.9), 5, 0.55);
+            double detail = Fbm(perm, p * 3 + new Vector3d(17.3, -5.1, 9.7), ts.Octaves, 0.5);
+            if (c < 0) return c * OceanDepth + detail * 300 * MathD.Smoothstep(0, 0.1, -c);
+            double ridge = 1 - Math.Abs(Noise(perm, p * 5 + new Vector3d(-3.3, 8.8, 1.1)));
+            ridge *= ridge;
+            double coast = MathD.Smoothstep(0, 0.04, c);
+            double h = MathD.Smoothstep(0, 0.3, c) * 0.1 + m * 0.45
+                + coast * (Math.Abs(detail) * 0.15 * (0.4 + m) + ridge * m * 0.5);
             return h * ts.Amplitude;
         }
 

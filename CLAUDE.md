@@ -26,22 +26,24 @@ Tools/CoreTests         headless-тесты ядра (csproj подхватыв�
 Library/, Temp/, Logs/, UserSettings/ — не трогать и не коммитить.
 
 ## Состояние (01.10.2026)
-- Ядро (M0) готово, тесты 41/41 ✅, включая полный прогон «Луна-9» (мягкая посадка 3,3 м/с).
+- Ядро (M0) готово, тесты 43/43 ✅, включая «Луна-9» (мягкая посадка 3,3 м/с) и moondrop (чит «Над Луной» + G, 3,4 м/с).
 - Игровой слой написан; сцена `Scenes/Flight.unity` собирается меню **Kare/Build Flight Scene** (идемпотентно).
   Миссия по умолчанию — `GameBootstrap.MissionId = "vostok"`. Ввод — старый Input Manager.
 - Есть: HUD v2, стол с фермами, грунт и вода патча, биомы Земли, облака, парашют, меню Esc, манёвры (N/B/C…),
-  аэромомент и гибель экипажа. Подробности — `docs/STATE.md`.
+  аэромомент и гибель экипажа, навбол + кнопки SAS, читы и выбор миссии в Esc, G — посадка на теле без атмосферы,
+  шлейф выхлопа, текстуры грунта/обшивки, FBX-детали из Blender (капсула, РД-107, опоры, фермы). Подробности — `docs/STATE.md`.
 
 ## Тесты ядра
 ```bash
 D="/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Data/DotNetSdk/dotnet.exe"; P=/c/CocosGames/KareSpaceProgram/Tools/CoreTests/CoreTests.csproj; "$D" build $P -nologo -v q && "$D" run --no-build --project $P
 ```
-`-- <имя>` — один тест (math, orbit, moon, atmo, stats, stability, separation, karman, sputnik, mechta, vympel, farside, vostok, luna9).
+`-- <имя>` — один тест (math, orbit, moon, atmo, stats, stability, separation, karman, sputnik, mechta, vympel, farside, vostok, luna9, moondrop).
 Не собирать во время прогона — exe заблокирован, сборка падает.
 
 ## MCP
 MCP for Unity (CoplayDev), порт 8767 (`McpPortPin.cs`). Проверка: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8767/mcp` → 406 = жив.
 ECONNREFUSED при живом сервере — переподключить через /mcp. Детали и грабли — `docs/pitfalls-tools.md`.
+Blender MCP (`.mcp.json`, сокет 9876) — лоу-поли детали, экспорт FBX в `Assets/_Project/Models`; см. `docs/pitfalls-tools.md`.
 
 ## Соглашения
 - Кадр P = эклиптика J2000 (правая, z — полюс); Unity = P с SwapYZ. Нос борта = +Y.

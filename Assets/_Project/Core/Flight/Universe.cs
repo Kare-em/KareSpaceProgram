@@ -251,6 +251,41 @@ namespace Kare.Space.Core
             if (v == Active) eventValid = false;
         }
 
+        /// <summary>
+        /// Чит для тестов (меню Esc): перенести активный борт к телу body на высоту altitude над освещённой стороной.
+        /// orbital — круговая орбита на восток, иначе покой относительно вращающейся поверхности (падение / посадка).
+        /// Автопилоты, узел и ускорение сбрасываются: прежние расчёты относились к другой траектории.
+        /// </summary>
+        public void Teleport(CelestialBody body, double altitude, bool orbital)
+        {
+            var v = Active;
+            if (v == null || !v.Alive || body == null) return;
+            LeaveRails(v);
+            SetWarp(0);
+            Ascent = null;
+            NodePilot = null;
+            Landing = null;
+            v.Node = null;
+            // Над дневной стороной, чуть к утреннему терминатору — как FlightDebug.Reentry: и свет есть, и рельеф с тенями.
+            var s = (System.Sun.Position - body.Position).normalized;
+            var pole = body.Orientation * Vector3d.forward;
+            var dir = (s * 0.85 - Vector3d.Cross(pole, s) * 0.5).normalized;
+            var east = Vector3d.Cross(pole, dir);
+            if (east.sqrMagnitude < 1e-12) east = Vector3d.Cross(new Vector3d(1, 0, 0), dir);
+            east = east.normalized;
+            double r = body.Radius + altitude;
+            v.Body = body;
+            v.Site = null; // стол и подсказки взлёта к новому месту не относятся
+            v.Situation = Situation.Flying;
+            if (double.IsNaN(v.LaunchTime)) v.LaunchTime = Time;
+            v.Throttle = 0;
+            v.AngularVelocity = Vector3d.zero;
+            v.Position = dir * r;
+            v.Velocity = orbital ? east * Math.Sqrt(body.Mu / r) : Vector3d.Cross(body.AngularVelocity, v.Position);
+            eventValid = false;
+            Post($"Чит: {body.Name}, {altitude / 1000:0} км{(orbital ? ", круговая орбита" : "")}");
+        }
+
         void LeaveRails(Vessel v)
         {
             if (!v.OnRails) return;

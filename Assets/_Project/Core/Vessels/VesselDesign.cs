@@ -66,6 +66,8 @@ namespace Kare.Space.Core
         public int EnclosesBelow;
         /// <summary>Только вид: шар диаметром Diameter (СА «Восток»), а не конус капсулы. Физику не меняет.</summary>
         public bool Sphere;
+        /// <summary>Только вид: четыре посадочные опоры по кромке днища (станция Е-6К). Физику не меняет.</summary>
+        public bool LandingLegs;
         /// <summary>Мест экипажа: перегрузка (§4.7) убивает только живых, приборные капсулы её терпят.</summary>
         public int Crew;
 
@@ -297,7 +299,7 @@ namespace Kare.Space.Core
                 {
                     Name = "КТДУ-5К", ThrustVac = 16e3, ThrustSL = 12e3, IspVac = 277, MinThrottle = 0.25, Ignitions = 4,
                 },
-                EngineCount = 1, Length = 2.7, Diameter = 2.0, RcsTorque = 800, MaxHeatFlux = 2e5,
+                EngineCount = 1, Length = 2.7, Diameter = 2.0, RcsTorque = 800, MaxHeatFlux = 2e5, LandingLegs = true,
             });
             // КТДУ взводится отделением II ступени: на торможении у Луны ступень сменяется без лишнего шага (GDD §6.11).
             d.Sequence[d.Sequence.Count - 1] = new StageAction(StageActionType.Separate, 1, igniteNext: true);

@@ -65,9 +65,15 @@ namespace Kare.Space.Game
                 v.Sas = (SasMode)((int)v.Sas % (n - 1) + 1);
                 v.SasHoldValid = false;
             }
-            // Предложение §10.1, не зафиксировано: G — автопилот выведения на 200 км.
-            if (Input.GetKeyDown(KeyCode.G) && u.Ascent == null)
-                u.Ascent = new AscentAutopilot { TargetAltitude = 200000 };
+            // Предложение §10.1, не зафиксировано: G — автопилот выведения на 200 км; у тела без атмосферы в полёте —
+            // автопилот посадки (§6.12): сам сводит с орбиты, тормозит по прогнозу и садит. Повтор — снять.
+            if (Input.GetKeyDown(KeyCode.G))
+            {
+                if (!v.Body.HasAtmosphere && !v.IsLanded)
+                    u.Landing = u.Landing == null ? new LandingAutopilot(v.Body) : null;
+                else if (u.Ascent == null)
+                    u.Ascent = new AscentAutopilot { TargetAltitude = 200000 };
+            }
         }
 
         /// <summary>

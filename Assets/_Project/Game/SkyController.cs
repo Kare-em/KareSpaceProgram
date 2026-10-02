@@ -96,6 +96,8 @@ namespace Kare.Space.Game
                 float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active));
                 float plume = VesselView.PlumePeakNits;
                 if (plume > 0) evMin = Mathf.Max(evMin, Mathf.Log(plume / (1.2f * PreExposedMax), 2));
+                float plasma = VesselView.PlasmaPeakNits;
+                if (plasma > 0) evMin = Mathf.Max(evMin, Mathf.Log(plasma / (1.2f * PlasmaWhite), 2));
                 exposure.limitMin.Override(evMin);
             }
             // На карте bloom выключен: при фиксированной EV диск Солнца (≈1,6·10⁹ нит) с порогом 0 размазывался
@@ -120,6 +122,14 @@ namespace Kare.Space.Game
         /// аддитива (две стенки ядра + две свечения). Пара: VesselView.CoreNits.
         /// </summary>
         const float PreExposedMax = 1e4f;
+
+        /// <summary>
+        /// Ударный слой на входе — во столько раз ярче белого после экспозиции (§4.6, §9.3). Ночью предел EV — EvMin,
+        /// гистограмма видит чёрный кадр и держит EV ≈ −3: плазма 1,2·10³ нит давала 8·10³ при белом 1 — весь
+        /// кадр выжжен. Предел log2(нит / (1,2·2)) ≈ 9 при полном нагреве: ядро ореола чуть пересвечено, след
+        /// и накал корпуса читаются. Днём предел и так 12. Пара: VesselView.PlasmaNits.
+        /// </summary>
+        const float PlasmaWhite = 2f;
 
         /// <summary>Разлёт bloom. Штатные 0,7 растаскивали диск Солнца (≈1,9·10⁹ нит при пороге 0) в ореол
         /// ≈ 150 px на 1920 — серое пятно на орбите и оливковое на голубом небе; 0,3 — плотное белое пятно

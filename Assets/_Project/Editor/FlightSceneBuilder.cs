@@ -40,7 +40,9 @@ namespace Kare.Space.EditorTools
             var bodyMat = LitMaterial(SettingsDir + "/BodyLit.mat", Color.white, 0.15f);
             var vesselMat = LitMaterial(SettingsDir + "/VesselLit.mat", Color.white, 0.45f);
             vesselMat.SetFloat("_Metallic", 0.3f);
+            HullTexturing(vesselMat);
             var plumeMat = PlumeMaterial(SettingsDir + "/Plume.mat");
+            var smokeMat = SmokeMaterial(SettingsDir + "/Smoke.mat");
             var lineMat = UnlitMaterial(SettingsDir + "/MapLine.mat");
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -79,7 +81,14 @@ namespace Kare.Space.EditorTools
             boot.Volume = vol;
             boot.VesselMaterial = vesselMat;
             boot.PlumeMaterial = plumeMat;
+            boot.SmokeMaterial = smokeMat;
+            boot.EarthLand = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthLand.bytes");
             boot.PadTexture = GroundTexture("Concrete", false);
+            // Лоу-поли детали из Blender (Tools/blender); нет файла — вид берёт процедурный меш.
+            boot.CapsuleMesh = ModelMesh("Vostok_Capsule");
+            boot.EngineMesh = ModelMesh("RD107_Engine");
+            boot.LegMesh = ModelMesh("Lander_Leg");
+            boot.TrussMesh = ModelMesh("Pad_Truss_Arm");
             game.AddComponent<FloatingOrigin>();
             game.AddComponent<FlightInput>();
             game.AddComponent<FlightHud>().Icons = IconTexture(HudIconsPath);
@@ -90,11 +99,13 @@ namespace Kare.Space.EditorTools
             var bodies = new GameObject("Bodies");
             var bodyRenderer = bodies.AddComponent<BodyRenderer>();
             bodyRenderer.BaseMaterial = bodyMat;
-            bodyRenderer.EarthGround = GroundTexture("SteppeDetail", true);
+            // Грунт из паков ADG (§2.8): ground12 — сухая степь Байконура, ground13 — красный камень Марса.
+            // Пака нет — откат на свои тайлы, сцена собирается и без него.
+            bodyRenderer.EarthGround = PackTexture(Ground12 + "_Diffuse.tga", true, false) ?? GroundTexture("SteppeDetail", true);
             bodyRenderer.EarthMacro = GroundTexture("SteppeMacro", true);
             bodyRenderer.MoonGround = GroundTexture("Regolith", true);
-            bodyRenderer.MarsGround = GroundTexture("MarsSoil", true);
-            bodyRenderer.EarthGroundNormal = NormalTexture("GroundNormal");
+            bodyRenderer.MarsGround = PackTexture(Ground13 + "_Diffuse.tga", true, false) ?? GroundTexture("MarsSoil", true);
+            bodyRenderer.EarthGroundNormal = PackTexture(Ground12 + "_Normal.tga", false, true) ?? NormalTexture("GroundNormal");
             bodyRenderer.WaterNormal = NormalTexture("WaterNormal");
 
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -213,6 +224,29 @@ namespace Kare.Space.EditorTools
             return m;
         }
 
+        /// <summary>Первый меш FBX из Models; null — файла нет (детали не обязательны).</summary>
+        static Mesh ModelMesh(string name)
+        {
+            return AssetDatabase.LoadAssetAtPath<Mesh>("Assets/_Project/Models/" + name + ".fbx");
+        }
+
+        /// <summary>Дым (§9.5): Lit, прозрачный, альфа-смешение, двусторонний — освещён Солнцем, ночью тёмный.
+        /// Туман оставлен: дальний шлейф должен тонуть в дымке, как и грунт. Текстуру и цвет ставит ExhaustTrail
+        /// на рантайм-копии.</summary>
+        static Material SmokeMaterial(string path)
+        {
+            var m = LoadOrCreate(path, "HDRP/Lit");
+            m.SetFloat("_SurfaceType", 1);   // Transparent
+            m.SetFloat("_BlendMode", 0);     // Alpha
+            m.SetFloat("_DoubleSidedEnable", 1);
+            m.SetFloat("_TransparentZWrite", 0);
+            m.SetFloat("_Smoothness", 0);
+            m.SetFloat("_Metallic", 0);
+            HDMaterial.ValidateMaterial(m);
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
         /// <summary>Факел (§9.5): Unlit, прозрачный, аддитивный, двусторонний, без записи глубины.
         /// Цвет в нитах и градиент по длине ставит VesselView через MaterialPropertyBlock.</summary>
         static Material PlumeMaterial(string path)
@@ -254,6 +288,49 @@ namespace Kare.Space.EditorTools
                 ti.SaveAndReimport();
             }
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        const string Ground12 = "Assets/ADG_Textures/ground_vol1/ground12/ground12";
+        const string Ground13 = "Assets/ADG_Textures/ground_vol1/ground13/ground13";
+        const string HullMetal = "Assets/Realistic Metal Texture/Texture/Metal_30/Metal_30";
+        /// <summary>Тайл обшивки в метрах (§9.5): панели Metal_30 ≈ 2 м — на баке Ø 3 м видно 4–5 полос по кругу.</summary>
+        const float HullTileMeters = 2f;
+
+        /// <summary>Текстура из стороннего пака по пути: повтор, мипы, 1024. readable — для GetPixels в BodyRenderer
+        /// (тогда без сжатия: 4 МБ на 1024²). null, если пака нет.</summary>
+        static Texture2D PackTexture(string path, bool readable, bool normal)
+        {
+            if (!(AssetImporter.GetAtPath(path) is TextureImporter ti)) return null;
+            ti.textureType = normal ? TextureImporterType.NormalMap : TextureImporterType.Default;
+            if (!normal) ti.sRGBTexture = true;
+            ti.mipmapEnabled = true;
+            ti.wrapMode = TextureWrapMode.Repeat;
+            ti.anisoLevel = 8;
+            ti.maxTextureSize = 1024;
+            ti.isReadable = readable;
+            ti.textureCompression = readable ? TextureImporterCompression.Uncompressed : TextureImporterCompression.CompressedHQ;
+            ti.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        /// <summary>
+        /// Обшивка бортов и стола (§9.5): Metal_30 с нормалью трипланаром в пространстве объекта. У процедурных
+        /// Frustum/Bell нет UV, а трипланар их не требует; объектное пространство — чтобы рисунок не «плыл»
+        /// при сдвиге плавающего начала. Цвет ступеней по-прежнему даёт _BaseColor из MPB — он умножается на карту,
+        /// поэтому карта почти белая.
+        /// </summary>
+        static void HullTexturing(Material m)
+        {
+            var albedo = PackTexture(HullMetal + ".tga", false, false);
+            var normal = PackTexture(HullMetal + "_N.tga", false, true);
+            if (albedo == null) return;
+            m.SetTexture("_BaseColorMap", albedo);
+            if (normal != null) { m.SetTexture("_NormalMap", normal); m.SetFloat("_NormalScale", 0.6f); }
+            m.SetFloat("_UVBase", 5);                 // Triplanar
+            m.SetFloat("_ObjectSpaceUVMapping", 1);  // ObjectSpace
+            m.SetFloat("_TexWorldScale", 1f / HullTileMeters);
+            HDMaterial.ValidateMaterial(m); // ставит _MAPPING_TRIPLANAR, _NORMALMAP по свойствам
+            EditorUtility.SetDirty(m);
         }
 
         /// <summary>Нормаль-карта тайла (из Car_Train, GL-формат — как ждёт Unity), повтор и мипы.</summary>

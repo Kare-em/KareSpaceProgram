@@ -181,13 +181,13 @@ MonoBehaviour:
     m_Value: {fileID: 0}
   airDensityR:
     m_OverrideState: 1
-    m_Value: 0.04534
+    m_Value: 0
   airDensityG:
     m_OverrideState: 1
-    m_Value: 0.10237241
+    m_Value: 0
   airDensityB:
     m_OverrideState: 1
-    m_Value: 0.23264056
+    m_Value: 0
   airTint:
     m_OverrideState: 0
     m_Value: {r: 1, g: 1, b: 1, a: 1}
@@ -196,7 +196,7 @@ MonoBehaviour:
     m_Value: 55261.973
   aerosolDensity:
     m_OverrideState: 1
-    m_Value: 0.01192826
+    m_Value: 0
   aerosolTint:
     m_OverrideState: 1
     m_Value: {r: 0.9, g: 0.9, b: 0.9, a: 1}
@@ -208,7 +208,7 @@ MonoBehaviour:
     m_Value: 0.8
   ozoneDensityDimmer:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0
   ozoneMinimumAltitude:
     m_OverrideState: 0
     m_Value: 20000
@@ -217,7 +217,7 @@ MonoBehaviour:
     m_Value: 20000
   groundTint:
     m_OverrideState: 1
-    m_Value: {r: 0.2, g: 0.36, b: 0.14, a: 1}
+    m_Value: {r: 0.12, g: 0.15, b: 0.2, a: 1}
   groundColorTexture:
     m_OverrideState: 0
     m_Value: {fileID: 0}
@@ -451,8 +451,8 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 0.2
   scatter:
-    m_OverrideState: 0
-    m_Value: 0.7
+    m_OverrideState: 1
+    m_Value: 0.3
   tint:
     m_OverrideState: 0
     m_Value: {r: 1, g: 1, b: 1, a: 1}
@@ -602,7 +602,7 @@ MonoBehaviour:
     m_Value: 1
   planetCenter:
     m_OverrideState: 1
-    m_Value: {x: -2959.3274, y: -471.21628, z: -5733.7163}
+    m_Value: {x: -6048.8765, y: -1126.9042, z: 532.96075}
   windOrientation:
     m_OverrideState: 0
     m_Value: 0

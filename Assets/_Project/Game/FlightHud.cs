@@ -10,7 +10,7 @@ namespace Kare.Space.Game
     /// телеметрия — панель «Детали» по H (бывший HUD v1). Иконки — атлас 4×4 (Textures/UI/HudIcons).
     /// Масштаб — от высоты экрана (база 1080).
     /// </summary>
-    public sealed class FlightHud : MonoBehaviour
+    public sealed partial class FlightHud : MonoBehaviour
     {
         const float BaseHeight = 1080, PanelWidth = 360;
         /// <summary>Сообщения ядра висят столько секунд после последнего нового.</summary>
@@ -83,6 +83,7 @@ namespace Kare.Space.Game
             Warnings(u, v, w);
             StageStack(v, w, h);
             Bottom(u, v, w, h);
+            if (!MapView.IsOpen) NavBall(u, v, w, h - 138); // 138 — верх средней панели Bottom (ph + 32 + 14)
             Messages(boot, w, h);
             NodePanel(u, v, h);
             if (details) Details(u, v, boot);
@@ -90,7 +91,7 @@ namespace Kare.Space.Game
 
             GUI.color = Dim;
             GUI.Label(new Rect(10, h - 24, 1100, 22),
-                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот · N манёвр · ,/. время · M карта · H детали · Esc меню", small);
+                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот / посадка · N манёвр · ,/. время · M карта · H детали · Esc меню", small);
             GUI.color = Color.white;
         }
 

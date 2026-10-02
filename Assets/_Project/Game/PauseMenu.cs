@@ -1,3 +1,4 @@
+using Kare.Space.Core;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -13,7 +14,7 @@ namespace Kare.Space.Game
         public static bool IsOpen { get; private set; }
 
         const float Width = 420, Row = 34;
-        GUIStyle title, label, toggle, button;
+        GUIStyle title, label, toggle, button, small;
 
         void OnDestroy() => IsOpen = false; // статик переживает перезагрузку сцены
 
@@ -33,7 +34,8 @@ namespace Kare.Space.Game
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20;
+            int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
+            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + Row + 2 * (Row + 4) + 10;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -52,10 +54,56 @@ namespace Kare.Space.Game
             if (GUI.Button(new Rect(x, y, w, Row), "Начать миссию заново", button))
             {
                 IsOpen = false;
-                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex >= 0
-                    ? SceneManager.GetActiveScene().buildIndex : 0);
+                Reload();
             }
+            y += Row + 20;
+
+            // Выбор миссии: перезапуск сцены с другой миссией (MissionCatalog), например «Луна-9» для посадки.
+            GUI.Label(new Rect(x, y, w, 24), "Миссия (перезапуск)", label); y += 30;
+            float bw = (w - (MissionCols - 1) * 4) / MissionCols;
+            for (int i = 0; i < MissionCatalog.All.Count; i++)
+            {
+                var m = MissionCatalog.All[i];
+                var br = new Rect(x + (i % MissionCols) * (bw + 4), y + (i / MissionCols) * (Row + 4), bw, Row);
+                bool cur = boot.Mission != null && boot.Mission.Id == m.Id;
+                GUI.color = cur ? new Color(1f, 0.8f, 0.4f) : Color.white;
+                if (GUI.Button(br, m.Title, small) && !cur)
+                {
+                    GameBootstrap.NextMissionId = m.Id;
+                    IsOpen = false;
+                    Reload();
+                }
+                GUI.color = Color.white;
+            }
+            y += missionRows * (Row + 4) + 16;
+
+            // Читы для тестов: телепорт и бесконечное топливо. Миссия при этом не засчитывается честно — это отладка.
+            GUI.Label(new Rect(x, y, w, 24), "Читы (для тестов)", label); y += 30;
+            boot.InfiniteFuel = GUI.Toggle(new Rect(x, y, w, Row), boot.InfiniteFuel, "  Бесконечное топливо", toggle); y += Row;
+            var u = GameBootstrap.U;
+            var earth = u?.System.Get("earth");
+            var moon = u?.System.Get("moon");
+            var mars = u?.System.Get("mars");
+            float hw = (w - 4) / 2;
+            if (GUI.Button(new Rect(x, y, hw, Row), "Орбита Земли 200 км", small)) Jump(u, earth, 200e3, true);
+            if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Луны 100 км", small)) Jump(u, moon, 100e3, true);
+            y += Row + 4;
+            if (GUI.Button(new Rect(x, y, hw, Row), "Над Луной 15 км (G — посадка)", small)) Jump(u, moon, 15e3, false);
+            if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Марса 300 км", small)) Jump(u, mars, 300e3, true);
         }
+
+        /// <summary>Сколько кнопок миссий в ряду. Пара: Width — подписи «Пролёт Луны» должны влезать.</summary>
+        const int MissionCols = 4;
+
+        void Jump(Universe u, CelestialBody body, double alt, bool orbital)
+        {
+            if (u == null || body == null) return;
+            u.Teleport(body, alt, orbital);
+            IsOpen = false;
+        }
+
+        static void Reload() =>
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex >= 0 ? SceneManager.GetActiveScene().buildIndex : 0);
 
         void Styles()
         {
@@ -66,6 +114,7 @@ namespace Kare.Space.Game
             toggle = new GUIStyle(GUI.skin.toggle) { fontSize = 16 };
             toggle.normal.textColor = toggle.onNormal.textColor = toggle.hover.textColor = toggle.onHover.textColor = Color.white;
             button = new GUIStyle(GUI.skin.button) { fontSize = 16 };
+            small = new GUIStyle(GUI.skin.button) { fontSize = 13, wordWrap = true };
         }
     }
 }

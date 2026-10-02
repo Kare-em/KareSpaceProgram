@@ -19,6 +19,9 @@ namespace Kare.Space.Game
                  "По умолчанию «Восток» — старт днём по Байконуру, видно небо.")]
         public string MissionId = "vostok";
 
+        /// <summary>Миссия, выбранная в меню Esc: переживает перезагрузку сцены и перекрывает MissionId.</summary>
+        public static string NextMissionId;
+
         public Camera Camera;
         public Light Sun;
         public Volume Volume;
@@ -26,8 +29,19 @@ namespace Kare.Space.Game
         public Material VesselMaterial;
         [Tooltip("Эмиссионный материал факела.")]
         public Material PlumeMaterial;
+        [Tooltip("Дым шлейфа и облака у стола: HDRP/Lit прозрачный (§9.5).")]
+        public Material SmokeMaterial;
         [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
         public Texture2D PadTexture;
+        [Header("Лоу-поли детали (Tools/blender → Models/*.fbx); без них — процедурные меши")]
+        [Tooltip("СА «Восток»: начало у днища, Ø2,3 м.")]
+        public Mesh CapsuleMesh;
+        [Tooltip("Блок РД-107 из 4 камер: начало у верха, сопла вниз, ширина 1,96 м.")]
+        public Mesh EngineMesh;
+        [Tooltip("Посадочная опора: начало — шарнир, стопа на 1,37 м ниже и 1,09 м наружу (−X).")]
+        public Mesh LegMesh;
+        [Tooltip("Ферма стола: начало у шарнира, длина 8,2 м по +Y.")]
+        public Mesh TrussMesh;
 
         [Header("Правила (GDD §4.7); в игре — меню Esc")]
         [Tooltip("Разрушение от поперечной аэродинамической нагрузки q·sin α.")]
@@ -38,6 +52,10 @@ namespace Kare.Space.Game
         public bool GLoadLimit;
         [Tooltip("Подсказка по углу тангажа при ручном выведении.")]
         public bool AscentTutor = true;
+        [Tooltip("Чит для тестов: баки активного борта каждый кадр полны.")]
+        public bool InfiniteFuel;
+        [Tooltip("Карта суши Земли (Tools/bake-earth-land.py, §2.8). Без неё материки процедурные.")]
+        public TextAsset EarthLand;
 
         Universe universe;
         public MissionTracker Tracker { get; private set; }
@@ -52,7 +70,9 @@ namespace Kare.Space.Game
         void Awake()
         {
             Instance = this;
-            Mission = MissionCatalog.Get(MissionId) ?? MissionCatalog.Get("sputnik");
+            Mission = MissionCatalog.Get(NextMissionId ?? MissionId) ?? MissionCatalog.Get("sputnik");
+            // Карту читаем один раз: статическое поле переживает перезагрузку сцены (выбор миссии в Esc).
+            if (EarthLand != null && SolarSystem.EarthLand == null) SolarSystem.EarthLand = new LandMap(EarthLand.bytes);
             universe = MissionTracker.CreateUniverse(Mission, SolarSystem.CreateReal());
             Tracker = new MissionTracker(Mission);
             universe.Message += OnMessage;
@@ -61,7 +81,7 @@ namespace Kare.Space.Game
             gameObject.AddComponent<PauseMenu>();
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)
-                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial);
+                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh);
         }
 
         void OnDestroy()
@@ -82,6 +102,7 @@ namespace Kare.Space.Game
             FlightPhysics.HeatDamage = HeatDamage;
             FlightPhysics.GLoadLimit = GLoadLimit;
             // Advance сам режет realDt до 0,1 с и выбирает физику/рельсы по WarpIndex. В меню — пауза.
+            if (InfiniteFuel && universe.Active != null && universe.Active.Alive) universe.Active.Refuel();
             if (!PauseMenu.IsOpen) universe.Advance(Time.deltaTime);
             Tracker.Update(universe);
             FloatingOrigin.Refresh();
@@ -96,6 +117,8 @@ namespace Kare.Space.Game
                 var go = new GameObject(v.IsDebris ? $"Debris {v.Name}" : $"Vessel {v.Name}");
                 var view = go.AddComponent<VesselView>();
                 view.Init(v, VesselMaterial, PlumeMaterial);
+                if (!v.IsDebris && SmokeMaterial != null)
+                    new GameObject($"Trail {v.Name}").AddComponent<ExhaustTrail>().Init(view, SmokeMaterial);
                 views.Add(v, view);
             }
             gone.Clear();
