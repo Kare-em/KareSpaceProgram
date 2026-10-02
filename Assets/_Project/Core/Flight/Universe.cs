@@ -11,7 +11,10 @@ namespace Kare.Space.Core
     public sealed class Universe
     {
         public static readonly double[] Warps = { 1, 5, 10, 50, 100, 1e3, 1e4, 1e5, 1e6, 1e7 };
-        public const double MaxPhysicsWarp = 4;
+        /// <summary>Потолок физического ускорения (атмосфера, работа двигателя, автопилот). Шаг интегратора
+        /// остаётся MaxStep — ×10 только множит подшаги кадра (≈8 при 60 к/с), точность не теряется.
+        /// Пара: индекс 2 в Warps = ×10, до него WarpUp пускает при закрытых рельсах.</summary>
+        public const double MaxPhysicsWarp = 10;
         /// <summary>Ближе этого к активному кораблю обломки в атмосфере считаются физикой.</summary>
         public const double PassiveRange = 25000;
         /// <summary>За сколько секунд до запуска манёвра ускорение сбрасывается само.</summary>
@@ -102,7 +105,18 @@ namespace Kare.Space.Core
 
         // ---------------------------------------------------------------- ускорение времени
 
-        public void WarpUp() => SetWarp(WarpIndex + 1);
+        /// <summary>Выше физического потолка — только если рельсы открыты: иначе HUD показывал бы ×1000,
+        /// а время шло бы ×10.</summary>
+        public void WarpUp()
+        {
+            int next = WarpIndex + 1;
+            if (Active != null && RailsBlocker(Active) != null && next < Warps.Length && Warps[next] > MaxPhysicsWarp)
+            {
+                Post("Больше ×" + MaxPhysicsWarp + " нельзя: " + RailsBlocker(Active));
+                return;
+            }
+            SetWarp(next);
+        }
         public void WarpDown() => SetWarp(WarpIndex - 1);
 
         public void SetWarp(int index)

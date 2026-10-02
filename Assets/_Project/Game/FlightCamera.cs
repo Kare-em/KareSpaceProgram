@@ -94,7 +94,10 @@ namespace Kare.Space.Game
 
             var rot = frame * Quaternion.Euler(Pitch, Yaw, 0);
             var target = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v)) // ≈ 0 — борт и есть ноль
-                       + FloatingOrigin.ToQuaternion(v.Attitude) * new Vector3(0, (float)(length * (1 - FitBelow) * 0.5 - com), 0);
+                       + FloatingOrigin.ToQuaternion(v.Attitude) * new Vector3(0, (float)(length * (1 - FitBelow) * 0.5 - com), 0)
+                       // Купол висит над бортом по вертикали: цель на середину связки, иначе купол режется верхним краем
+                       // (кадр на 6 км, 01.10.2026). Пара: ChuteReach — та же высота, что и в подгонке дистанции.
+                       + up * (float)(VesselView.ChuteReach(v) * 0.5);
             transform.SetPositionAndRotation(target - rot * Vector3.forward * Distance, rot);
         }
     }

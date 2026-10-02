@@ -9,6 +9,9 @@ namespace Kare.Space.Game
     public struct BodyLook
     {
         public Color Low, High, Ocean, Ice;
+        /// <summary>Средний цвет диска из космоса (сферическое альбедо) — им подсвечен борт на орбите (§9.3).
+        /// Альфа 0 — не задан, берётся Low.</summary>
+        public Color Disc;
         /// <summary>Широта начала полярной шапки, °; 90 — без шапки.</summary>
         public float IceLatitude;
         /// <summary>Полосы газового гиганта: число полос и контраст.</summary>
@@ -26,7 +29,12 @@ namespace Kare.Space.Game
             {
                 case "earth":
                     return new BodyLook { Low = new Color(0.20f, 0.36f, 0.14f), High = new Color(0.55f, 0.48f, 0.36f),
-                        Ocean = new Color(0.03f, 0.10f, 0.28f), Ice = new Color(0.92f, 0.94f, 0.96f), IceLatitude = 72 };
+                        Ocean = new Color(0.03f, 0.10f, 0.28f), Ice = new Color(0.92f, 0.94f, 0.96f), IceLatitude = 72,
+                        // Голубоватый, а не зелень Low: та красила теневую сторону борта в болотный (35, 46, 28).
+                        // Не сферическое альбедо 0,30: PBSky берёт groundTint и в многократное рассеяние дымки,
+                        // при 0,3 океан с 200 км бледный (134, 166, 203), при 0 — (68, 100, 139) (замер 01.10.2026).
+                        // Поэтому альбедо поверхности под облаками (океан ≈ 0,06…0,1) с запасом на подсветку борта.
+                        Disc = new Color(0.12f, 0.15f, 0.20f, 1) };
                 case "moon":
                     return new BodyLook { Low = new Color(0.30f, 0.30f, 0.30f), High = new Color(0.58f, 0.57f, 0.55f), IceLatitude = 90 };
                 case "mars":

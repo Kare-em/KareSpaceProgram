@@ -23,7 +23,7 @@ namespace Kare.Space.Core
         Impact,
         /// <summary>Сесть на тело не быстрее MaxSpeed (физика разрушает выше 10 м/с).</summary>
         Landing,
-        /// <summary>Вернуть капсулу на тело целой; MaxG — предел перегрузки на спуске (0 — без предела).</summary>
+        /// <summary>Вернуть капсулу на тело целой; с экипажем — живым (предел перегрузки §4.7 — в FlightPhysics).</summary>
         Return,
     }
 
@@ -31,7 +31,7 @@ namespace Kare.Space.Core
     {
         public ObjectiveType Type;
         public string Body = "earth";
-        public double Min, Max, HoldSeconds, MaxG;
+        public double Min, Max, HoldSeconds;
         public double MaxSpeed = FlightPhysics.CrashSpeed;
 
         public string Describe(SolarSystem sys)
@@ -49,7 +49,8 @@ namespace Kare.Space.Core
                 case ObjectiveType.Impact: return $"Достичь поверхности: {b}";
                 case ObjectiveType.Landing: return $"Мягкая посадка: {b}, не быстрее {MaxSpeed:F0} м/с";
                 case ObjectiveType.Return:
-                    return $"Вернуть капсулу: {b}" + (MaxG > 0 && FlightPhysics.GLoadLimit ? $", перегрузка ≤ {MaxG:F0} g" : "");
+                    return $"Вернуть капсулу: {b}" + (FlightPhysics.GLoadLimit
+                        ? $", экипаж не дольше {FlightPhysics.CrewGTime:F0} с выше {FlightPhysics.CrewGLimit:F0} g" : "");
             }
             return Type.ToString();
         }
@@ -81,7 +82,6 @@ namespace Kare.Space.Core
         public string FailReason { get; private set; }
         public readonly bool[] Done;
         readonly double[] holdStart;
-        readonly double[] peakG;
         public event Action<string> Changed;
 
         public MissionTracker(MissionDef def)
@@ -90,7 +90,6 @@ namespace Kare.Space.Core
             int n = def.Objectives.Count;
             Done = new bool[n];
             holdStart = new double[n];
-            peakG = new double[n];
             for (int i = 0; i < n; i++) holdStart[i] = double.NaN;
         }
 
@@ -216,16 +215,15 @@ namespace Kare.Space.Core
                 case ObjectiveType.Return:
                 {
                     if (!launched) return false;
-                    if (v.Situation == Situation.Flying) peakG[i] = Math.Max(peakG[i], v.GForce);
                     if (!onBody || !v.IsLanded) return false;
                     if (!v.HasCapsule())
                     {
                         fail = "Капсулы нет на борту";
                         return false;
                     }
-                    if (FlightPhysics.GLoadLimit && o.MaxG > 0 && peakG[i] > o.MaxG)
+                    if (v.CrewLost)
                     {
-                        fail = $"Перегрузка на спуске {peakG[i]:F1} g > {o.MaxG:F0} g";
+                        fail = "Экипаж погиб от перегрузки";
                         return false;
                     }
                     return true;
@@ -307,7 +305,7 @@ namespace Kare.Space.Core
                 Rival = "12 апр 1961",
             };
             vostok.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Min = 150000, HoldSeconds = -1 });
-            vostok.Objectives.Add(new Objective { Type = ObjectiveType.Return, MaxG = 9 });
+            vostok.Objectives.Add(new Objective { Type = ObjectiveType.Return });
             list.Add(vostok);
 
             var luna9 = new MissionDef

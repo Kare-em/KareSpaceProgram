@@ -33,6 +33,8 @@ namespace Kare.Space.Game
         /// <summary>Гладкость для маски HDRP: океан даёт блик Солнца с орбиты, суша матовая.</summary>
         public const float OceanSmoothness = 0.85f, LandSmoothness = 0.15f, IceSmoothness = 0.4f;
         const int ClimateSeed = 911, CloudSeed = 4242;
+        // Таблицы перестановок — один раз: Terrain.Perm берёт lock, а текстуры строятся в Parallel.For.
+        static readonly int[] ClimatePerm = Terrain.Perm(ClimateSeed), CloudPerm = Terrain.Perm(CloudSeed);
 
         /// <summary>Цвет поверхности (sRGB) и гладкость в точке.</summary>
         public static Color Sample(CelestialBody b, double lat, double lon, out float smoothness)
@@ -40,7 +42,7 @@ namespace Kare.Space.Game
             var dir = CelestialBody.LatLonToBodyFixed(lat, lon);
             double h = b.SurfaceHeight(dir);
             double a = Math.Abs(lat);
-            var perm = Terrain.Perm(ClimateSeed);
+            var perm = ClimatePerm;
             double tn = Terrain.Fbm(perm, dir * 3, 5, 0.55);
             float temp = (float)(EquatorTemp - PoleDrop * Math.Pow(a / 90, 1.6) + 6 * tn - LapseRate * Math.Max(h, 0));
             float ice = Smooth(IceStart, IceFull, temp);
@@ -76,16 +78,16 @@ namespace Kare.Space.Game
         public static float Cloud(double lat, double lon)
         {
             var d = CelestialBody.LatLonToBodyFixed(lat, lon);
-            var perm = Terrain.Perm(CloudSeed);
+            var perm = CloudPerm;
             double a = Math.Abs(lat);
             double cover = 0.45 + 0.25 * Math.Exp(-Sq(a / 8)) - 0.2 * Math.Exp(-Sq((a - 25) / 9)) + 0.2 * Math.Exp(-Sq((a - 55) / 12));
-            var p = new Vector3d(d.x, d.y, d.z * 2.2) * 4;
+            var p = new Vector3d(d.x, d.y, d.z * 2.2) * 5;
             var warp = new Vector3d(Terrain.Fbm(perm, p * 0.5 + new Vector3d(5.2, 1.3, -7.7), 3, 0.5),
                                     Terrain.Fbm(perm, p * 0.5 + new Vector3d(-2.8, 9.1, 3.3), 3, 0.5), 0);
             double n = Terrain.Fbm(perm, p + warp * 1.5, 7, 0.55);
             // Fbm сосредоточен около 0 (σ ≈ 0,2): порог (0,5 − cover)/2 даёт долю покрытия ≈ cover.
             float thr = (float)((0.5 - cover) * 0.5);
-            return 0.92f * Smooth(thr, thr + 0.18f, (float)n);
+            return 0.92f * Smooth(thr, thr + 0.14f, (float)n);
         }
 
         static double Sq(double x) => x * x;

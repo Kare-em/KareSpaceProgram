@@ -93,26 +93,26 @@ namespace Kare.Space.Core
 
         // ---------------------------------------------------------------- шум
 
-        static readonly Dictionary<int, int[]> PermCache = new Dictionary<int, int[]>();
+        // Чтение без блокировки: высоты и цвета текстур считаются в Parallel.For, и lock на каждый
+        // вызов RawHeight выстраивал потоки в очередь.
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<int, int[]> PermCache =
+            new System.Collections.Concurrent.ConcurrentDictionary<int, int[]>();
 
-        public static int[] Perm(int seed)
+        public static int[] Perm(int seed) => PermCache.GetOrAdd(seed, BuildPerm);
+
+        static int[] BuildPerm(int seed)
         {
-            lock (PermCache)
+            var p = new int[512];
+            var src = new int[256];
+            for (int i = 0; i < 256; i++) src[i] = i;
+            var rng = new Random(seed);
+            for (int i = 255; i > 0; i--)
             {
-                if (PermCache.TryGetValue(seed, out var p)) return p;
-                p = new int[512];
-                var src = new int[256];
-                for (int i = 0; i < 256; i++) src[i] = i;
-                var rng = new Random(seed);
-                for (int i = 255; i > 0; i--)
-                {
-                    int j = rng.Next(i + 1);
-                    (src[i], src[j]) = (src[j], src[i]);
-                }
-                for (int i = 0; i < 512; i++) p[i] = src[i & 255];
-                PermCache[seed] = p;
-                return p;
+                int j = rng.Next(i + 1);
+                (src[i], src[j]) = (src[j], src[i]);
             }
+            for (int i = 0; i < 512; i++) p[i] = src[i & 255];
+            return p;
         }
 
         public static double Fbm(int[] perm, Vector3d p, int octaves, double gain)

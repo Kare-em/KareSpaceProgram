@@ -57,6 +57,8 @@ namespace Kare.Space.Core
         public string Name;
         public VesselDesign Design;
         public bool IsDebris;
+        /// <summary>Створка сброшенного обтекателя: +1 — половина со стороны +X связанных осей, −1 — со стороны −X, 0 — целый.</summary>
+        public int FairingHalf;
 
         // Секции.
         public bool[] Attached;
@@ -65,6 +67,8 @@ namespace Kare.Space.Core
         public bool[] Running;
         public int[] IgnitionsLeft;
         public bool[] ChuteDeployed, ChuteFailed;
+        /// <summary>Парашют взведён ступенью, но ещё ждёт высоты и безопасного напора (FlightPhysics.ChuteDeployAltitude).</summary>
+        public bool[] ChuteArmed;
         /// <summary>Секунды с ввода парашюта секции — для раскрытия с рифлением.</summary>
         public double[] ChuteOpenTime;
         /// <summary>Попытка запуска уже была при этой «подаче газа»: повтор — только после сброса РУД в 0.</summary>
@@ -104,6 +108,9 @@ namespace Kare.Space.Core
         public double Altitude, TerrainAltitude, SurfaceSpeed, VerticalSpeed, HorizontalSpeed;
         public double StaticPressure, Density, DynamicPressure, Mach, AngleOfAttack, HeatFlux, GForce;
         public double SettledTimer, OverheatTimer;
+        /// <summary>Секунды сверх предела перегрузки экипажа (§4.7) и итог: экипаж погиб, борт летит дальше.</summary>
+        public double HighGTimer;
+        public bool CrewLost;
         public double CurrentThrust;
 
         public event Action<Vessel, string> Event;
@@ -121,6 +128,7 @@ namespace Kare.Space.Core
             IgnitionsLeft = new int[n];
             ChuteDeployed = new bool[n];
             ChuteFailed = new bool[n];
+            ChuteArmed = new bool[n];
             ChuteOpenTime = new double[n];
             ignitionLatch = new bool[n];
             for (int i = 0; i < n; i++)
@@ -147,7 +155,7 @@ namespace Kare.Space.Core
             {
                 double m = 0;
                 for (int i = 0; i < Attached.Length; i++)
-                    if (Attached[i]) m += Design.Sections[i].DryMass + Propellant[i];
+                    if (Attached[i]) m += SectionMass(i);
                 return m;
             }
         }
@@ -162,6 +170,14 @@ namespace Kare.Space.Core
         }
 
         public bool IsEnclosed(int i) => EnclosingFairing(i) >= 0;
+
+        /// <summary>Масса секции, кг; у створки — половина обтекателя.</summary>
+        double SectionMass(int i)
+        {
+            var s = Design.Sections[i];
+            double m = s.DryMass + Propellant[i];
+            return FairingHalf != 0 && s.Kind == SectionKind.Fairing ? m * 0.5 : m;
+        }
 
         /// <summary>
         /// Раскладка пакета по высоте от низа нижней присоединённой секции. Секции под обтекателем
@@ -205,7 +221,7 @@ namespace Kare.Space.Core
             for (int i = 0; i < secs.Count; i++)
             {
                 if (!Attached[i]) continue;
-                double m = secs[i].DryMass + Propellant[i];
+                double m = SectionMass(i);
                 mass += m;
                 moment += m * (layoutBuf[i] + secs[i].Length * 0.5);
                 maxRadius = Math.Max(maxRadius, secs[i].Radius);
@@ -220,6 +236,9 @@ namespace Kare.Space.Core
             double lateral = m * (len * len / 12 + r * r / 4);
             return new Vector3d(lateral, Math.Max(m * r * r / 2, 1), lateral);
         }
+
+        /// <summary>Низ секции от низа пакета, м; верно после MassProperties того же кадра.</summary>
+        public double SectionBottom(int i) => layoutBuf[i];
 
         /// <summary>Доступный управляющий момент по осям (X, Y, Z), Н·м: качание двигателей + РСУ.</summary>
         public Vector3d MaxTorque(double pressure)
@@ -270,6 +289,13 @@ namespace Kare.Space.Core
             for (int i = 0; i < Attached.Length; i++)
                 if (Attached[i]) return i;
             return -1;
+        }
+
+        public bool HasCrew()
+        {
+            for (int i = 0; i < Attached.Length; i++)
+                if (Attached[i] && Design.Sections[i].Crew > 0) return true;
+            return false;
         }
 
         public bool HasCapsule()
@@ -452,16 +478,19 @@ namespace Kare.Space.Core
                     {
                         var mask = new bool[secs.Count];
                         mask[a.Section] = true;
-                        debris.Add(Split(mask, 0.5));
+                        var h = Split(mask, FairingPush);
+                        debris.Add(h);
+                        debris.Add(h.SplitFairing());
                         Raise("Сброс головного обтекателя");
                     }
                     break;
 
                 case StageActionType.DeployParachute:
-                    if (Attached[a.Section] && !ChuteDeployed[a.Section])
+                    // Ступень только взводит: раскрытие — по барометру (FlightPhysics.UpdateChutes), как у «Востока».
+                    if (Attached[a.Section] && !ChuteDeployed[a.Section] && !ChuteArmed[a.Section])
                     {
-                        ChuteDeployed[a.Section] = true;
-                        Raise("Парашют введён");
+                        ChuteArmed[a.Section] = true;
+                        Raise($"Парашют взведён: раскроется ниже {FlightPhysics.ChuteDeployAltitude / 1000:F0} км");
                     }
                     break;
             }
@@ -476,15 +505,70 @@ namespace Kare.Space.Core
             ignitionLatch[i] = false;
         }
 
-        /// <summary>Отделить секции по маске в новый корабль-обломок, толкнув его вдоль оси на dv, м/с.</summary>
+        /// <summary>
+        /// Сброс обтекателя (§5): толчок вперёд, м/с. Он меньше, чем ракета набирает за долю секунды, поэтому
+        /// цельная оболочка оказалась бы пролётной — ракета проходила сквозь неё. Отсюда раскрытие на створки.
+        /// </summary>
+        const double FairingPush = 0.5;
+        /// <summary>
+        /// Створки расходятся вбок FairingSideSpeed, м/с, и откидываются верхом наружу FairingTumble, рад/с.
+        /// Пара: низ створки идёт наружу со скоростью Side − Tumble·L/2 (L = 13 м → 2 − 0,2·6,5 = 0,7 м/с) — должна
+        /// остаться > 0, иначе низ створки качнётся внутрь, на ступень.
+        /// </summary>
+        const double FairingSideSpeed = 2, FairingTumble = 0.2;
+
+        /// <summary>
+        /// Раскрыть сброшенный обтекатель на две створки: этот борт становится створкой +X, возвращается створка −X.
+        /// Импульс сохраняется: боковые толчки равны и противоположны, масса делится пополам.
+        /// </summary>
+        Vessel SplitFairing()
+        {
+            var t = new Vessel(Design, Name)
+            {
+                IsDebris = true,
+                Body = Body,
+                Position = Position,
+                Velocity = Velocity,
+                Attitude = Attitude,
+                AngularVelocity = AngularVelocity,
+                Situation = Situation,
+                AnchorBodyFixed = AnchorBodyFixed,
+                AttitudeBodyFixed = AttitudeBodyFixed,
+                Throttle = 0,
+                Sas = SasMode.Off,
+                LaunchTime = LaunchTime,
+                NextStage = NextStage,
+            };
+            Array.Copy(Attached, t.Attached, Attached.Length);
+            Array.Copy(Propellant, t.Propellant, Propellant.Length);
+            FairingHalf = 1;
+            t.FairingHalf = -1;
+            Name = t.Name = "Створка обтекателя";
+            var side = LocalToWorld(new Vector3d(1, 0, 0));
+            Velocity += side * FairingSideSpeed;
+            t.Velocity -= side * FairingSideSpeed;
+            // ω × (0, h, 0) по Z даёт −ω·h по X: створке +X нужен ω_z < 0, чтобы верх уходил наружу.
+            AngularVelocity += new Vector3d(0, 0, -FairingTumble);
+            t.AngularVelocity += new Vector3d(0, 0, FairingTumble);
+            return t;
+        }
+
+        /// <summary>
+        /// Отделить секции по маске в новый корабль-обломок, толкнув его вдоль оси на dv, м/с (§5).
+        /// Position борта — его центр масс, а вид рисует секции вокруг своего ЦМ. Поэтому обе части после
+        /// разделения встают каждая на свой новый ЦМ, а не на общий старый — иначе меши налезали друг на друга
+        /// (первая ступень оказывалась внутри второй, 01.10.2026). Толчок — с отдачей: импульс сохраняется.
+        /// </summary>
         Vessel Split(bool[] mask, double dv)
         {
+            MassProperties(out _, out double com0, out _, out _);
+            var base0 = (double[])layoutBuf.Clone();
             var d = new Vessel(Design, $"{Name} — обломок")
             {
                 IsDebris = true,
                 Body = Body,
                 Position = Position,
-                Velocity = Velocity + NoseP * dv,
+                Velocity = Velocity,
                 Attitude = Attitude,
                 AngularVelocity = AngularVelocity,
                 Situation = Situation,
@@ -501,6 +585,7 @@ namespace Kare.Space.Core
                 d.IgnitionsLeft[i] = IgnitionsLeft[i];
                 d.ChuteDeployed[i] = ChuteDeployed[i];
                 d.ChuteFailed[i] = ChuteFailed[i];
+                d.ChuteArmed[i] = ChuteArmed[i];
                 d.ChuteOpenTime[i] = ChuteOpenTime[i];
                 if (mask[i])
                 {
@@ -511,6 +596,25 @@ namespace Kare.Space.Core
             d.NextStage = Design.Sequence.Count;
             for (int i = 0; i < mask.Length; i++)
                 if (mask[i]) { d.Name = $"{Design.Sections[i].Name} (обломок)"; break; }
+            // Сдвиг ЦМ частей в связанных осях. Раскладка каждой части — жёсткий сдвиг старой (Layout считает
+            // от нижней присоединённой секции), поэтому низ части в старых координатах — base0[нижней секции].
+            var w = AngularVelocity;
+            void Recenter(Vessel p)
+            {
+                int low = Array.IndexOf(p.Attached, true);
+                if (low < 0) return;
+                p.MassProperties(out _, out double com, out _, out _);
+                var r = new Vector3d(0, base0[low] + com - com0, 0);
+                p.Position += LocalToWorld(r);
+                // Точка жёсткого тела на плече r летит со скоростью v + ω × r.
+                p.Velocity += LocalToWorld(Vector3d.Cross(w, r));
+            }
+            Recenter(d);
+            Recenter(this);
+            d.MassProperties(out double md, out _, out _, out _);
+            MassProperties(out double mv, out _, out _, out _);
+            d.Velocity += NoseP * dv;
+            if (mv > 0) Velocity -= NoseP * (dv * md / mv);
             SasHoldValid = false;
             return d;
         }

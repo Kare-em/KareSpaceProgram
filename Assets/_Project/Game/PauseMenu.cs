@@ -44,7 +44,7 @@ namespace Kare.Space.Game
             GUI.Label(new Rect(x, y, w, 24), "Правила полёта", label); y += 30;
             boot.AeroBreakup = GUI.Toggle(new Rect(x, y, w, Row), boot.AeroBreakup, "  Разрушение от аэронагрузки (Qα)", toggle); y += Row;
             boot.HeatDamage = GUI.Toggle(new Rect(x, y, w, Row), boot.HeatDamage, "  Разрушение от перегрева", toggle); y += Row;
-            boot.GLoadLimit = GUI.Toggle(new Rect(x, y, w, Row), boot.GLoadLimit, "  Предел перегрузок в задачах миссии", toggle); y += Row;
+            boot.GLoadLimit = GUI.Toggle(new Rect(x, y, w, Row), boot.GLoadLimit, "  Гибель экипажа от перегрузки (> 9 g, 10 с)", toggle); y += Row;
             boot.AscentTutor = GUI.Toggle(new Rect(x, y, w, Row), boot.AscentTutor, "  Подсказка по углу на взлёте", toggle); y += Row + 20;
 
             if (GUI.Button(new Rect(x, y, w, Row), "Продолжить (Esc)", button)) IsOpen = false;

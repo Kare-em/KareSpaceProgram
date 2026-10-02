@@ -23,7 +23,7 @@ namespace Kare.Space.EditorTools
 
         /// <summary>Пара: SunLight.IlluminanceAt1Au — стартовое значение до первого кадра.</summary>
         const float SunLux = 127000;
-        const float SunTemperature = 5778;
+        const float SunTemperature = SunLight.ColorTemperature;
         /// <summary>Угловой диаметр Солнца с 1 а.е., градусы (§9.3: мягкость тени).</summary>
         const float SunAngularDiameter = 0.53f;
         /// <summary>Пара: дальность теней ↔ размер борта/патча рельефа вблизи камеры.</summary>
@@ -170,6 +170,7 @@ namespace Kare.Space.EditorTools
 
             Get<Tonemapping>(profile).mode.Override(TonemappingMode.ACES);
             Get<Bloom>(profile).intensity.Override(0.2f);
+            Get<Bloom>(profile).scatter.Override(SkyController.BloomScatter);
             Get<Fog>(profile).enabled.Override(false);
 
             var sh = Get<HDShadowSettings>(profile);

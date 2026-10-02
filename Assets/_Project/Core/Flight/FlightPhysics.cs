@@ -25,6 +25,12 @@ namespace Kare.Space.Core
         public const double QAlphaLimit = 4000;
         public const double ChuteMaxQ = 25000;
         /// <summary>
+        /// Автоматика ввода (GDD §4.8): взведённый парашют раскрывается ниже ChuteDeployAltitude, когда напор
+        /// не выше ChuteSafeQ. Ручной ввод в нужное окно игрок пропускал: на 4× от 7 км до земли ≈ 15 с.
+        /// Пара: ChuteSafeQ &lt; ChuteMaxQ — иначе купол рвётся в момент раскрытия; 7 км — высота ввода у «Востока».
+        /// </summary>
+        public const double ChuteDeployAltitude = 7000, ChuteSafeQ = 20000;
+        /// <summary>
         /// Раскрытие купола с рифлением (GDD §4.8): за 1 с — 3% площади, так висит 4 с, гася скорость,
         /// затем за 4 с дораскрывается (рост площади ~t²). Мгновенный купол 600 м² на 170 м/с давал
         /// бы сотни g; с рифлением пик ~6 g (оценка интегрированием: 7 км, 170 м/с, 2,5 т).
@@ -42,8 +48,35 @@ namespace Kare.Space.Core
         /// строгим правилам. Задаются из игры (GameBootstrap) — статика, т.к. правило одно на всю симуляцию.
         /// </summary>
         public static bool AeroBreakup, HeatDamage;
-        /// <summary>Предел перегрузки целей миссий (Objective.MaxG): выключен — превышение не проваливает задачу.</summary>
+        /// <summary>Гибель экипажа от перегрузки (§4.7): выключено — таймер упирается в предел, экипаж жив.</summary>
         public static bool GLoadLimit;
+
+        /// <summary>
+        /// Предел экипажа эры I (§4.7): дольше CrewGTime секунд выше CrewGLimit — гибель. Таймер копится только
+        /// сверх предела и тает вдвое медленнее (короткий провал ниже 9 g не обнуляет накопленное).
+        /// Пара: баллистический спуск «Востока» — пик ≈ 8–9 g, т.е. штатный вход проходит впритык.
+        /// </summary>
+        public const double CrewGLimit = 9, CrewGTime = 10;
+
+        /// <summary>
+        /// Аэродинамический момент пакета (§4.6, M2). Подъёмная сила носа по теории тонкого тела — CNα = 2 /рад
+        /// на площадь миделя — приложена у торца, впереди ЦМ: ракета без стабилизаторов статически неустойчива
+        /// и без управления кувыркается. Поперечное обтекание (Cd 1,2) — в середине длины, при больших углах
+        /// разворачивает борт поперёк потока. Пара: StackCrossflowCd и боковая площадь — те же, что в Drag.
+        /// </summary>
+        public const double StackNormalSlope = 2, StackCrossflowCd = 1.2;
+        /// <summary>Центр давления носа — столько радиусов от торца (≈ 2/3 конуса длиной 3R).</summary>
+        const double NoseCpRadii = 2;
+        /// <summary>
+        /// Демпфирование по тангажу |Cmq|: момент −q·S·L·(L/2V)·Cmq·ω. Оценка для гладкого корпуса; на
+        /// «Востоке» в max-Q даёт затухание ≈ 0,03 /с против раскачки ≈ 0,3 /с — неустойчивость остаётся.
+        /// </summary>
+        const double StackPitchDamping = 4;
+        /// <summary>
+        /// CNα стабилизаторов малого удлинения, 1/рад на их площадь; ЦД — FinCpHeight над низом секции.
+        /// Пара: «Кара-Г» FinArea 3 м² — запас устойчивости ≈ 1 калибр против носа (CNα 2 на мидель 2,1 м²).
+        /// </summary>
+        public const double FinNormalSlope = 3, FinCpHeight = 0.6;
 
         /// <summary>Превышен ли предел поперечной нагрузки — и для разрушения, и для предупреждения HUD.
         /// Шар капсулы (длина ≤ 4 радиусов) ей не подвержен; ниже 2 кПа не ломается ничего.</summary>
@@ -145,6 +178,7 @@ namespace Kare.Space.Core
             v.MassProperties(out double mass, out double com, out double len, out double maxR);
             var nose = v.NoseP;
             UpdateAir(v, body, v.Position, v.Velocity, spin);
+            UpdateChutes(v);
             double thrust = v.Thrust(v.StaticPressure, out _);
             v.CurrentThrust = thrust;
 
@@ -177,7 +211,7 @@ namespace Kare.Space.Core
             v.Position = r0 + (u0 + u1 * 2 + u2 * 2 + u3) * (dt / 6);
             v.Velocity = u0 + (a1 + a2 * 2 + a3 * 2 + a4) * (dt / 6);
 
-            // Вращение: момент регулятора, обрезанный по возможностям, + аэродинамика капсулы.
+            // Вращение: момент регулятора, обрезанный по возможностям, + аэродинамика (капсула или пакет).
             var inertia = v.Inertia();
             var tmax = v.MaxTorque(v.StaticPressure);
             var cmd = v.TorqueCommand;
@@ -185,7 +219,7 @@ namespace Kare.Space.Core
                 MathD.Clamp(cmd.x, -tmax.x, tmax.x),
                 MathD.Clamp(cmd.y, -tmax.y, tmax.y),
                 MathD.Clamp(cmd.z, -tmax.z, tmax.z));
-            torque += CapsuleAeroTorque(v, vAir0, g, inertia);
+            torque += CapsuleAeroTorque(v, vAir0, g, inertia) + StackAeroTorque(v, vAir0, g);
             var w = v.AngularVelocity;
             w = new Vector3d(w.x + torque.x / inertia.x * dt, w.y + torque.y / inertia.y * dt, w.z + torque.z / inertia.z * dt);
             v.AngularVelocity = w;
@@ -199,6 +233,7 @@ namespace Kare.Space.Core
             var drag = Drag(body, spin, nose, g, v.Position, v.Velocity, out _, out _, out double sinA);
             var nonGrav = thrustAcc + drag / mass;
             v.GForce = nonGrav.magnitude / Constants.G0;
+            CheckCrew(v, dt);
 
             // Осадка топлива: продольное ускорение вперёд прижимает топливо к заборникам (GDD §6.3).
             if (Vector3d.Dot(nonGrav, nose) > 0.05) v.SettledTimer = 3;
@@ -243,6 +278,18 @@ namespace Kare.Space.Core
         }
 
         /// <summary>Давление, плотность, скорость звука, нагрев и скорости относительно поверхности.</summary>
+        static void UpdateChutes(Vessel v)
+        {
+            if (v.Altitude > ChuteDeployAltitude || v.DynamicPressure > ChuteSafeQ) return;
+            for (int i = 0; i < v.Attached.Length; i++)
+            {
+                if (!v.Attached[i] || !v.ChuteArmed[i] || v.ChuteDeployed[i]) continue;
+                v.ChuteArmed[i] = false;
+                v.ChuteDeployed[i] = true;
+                v.Raise("Парашют раскрыт");
+            }
+        }
+
         static void UpdateAir(Vessel v, CelestialBody body, Vector3d r, Vector3d u, Vector3d spin)
         {
             double rm = r.magnitude;
@@ -287,6 +334,59 @@ namespace Kare.Space.Core
             return restoring - new Vector3d(w.x * damp, 0, w.z * damp);
         }
 
+        /// <summary>
+        /// Момент пакета (не капсулы): подъёмная сила носа у ведущего торца + поперечное обтекание в середине
+        /// длины + демпфирование. Высоты — от низа пакета, как g.Com.
+        /// </summary>
+        static Vector3d StackAeroTorque(Vessel v, Vector3d vAirP, Geometry g)
+        {
+            double q = v.DynamicPressure;
+            if (q <= 0) return Vector3d.zero;
+            int bottom = v.BottomSection();
+            if (bottom < 0 || v.Design.Sections[bottom].Kind == SectionKind.Capsule) return Vector3d.zero;
+            // Скорость борта относительно воздуха в связанных осях; поток набегает навстречу ей.
+            var flow = v.WorldToLocal(vAirP);
+            double sp = flow.magnitude;
+            if (sp < 1) return Vector3d.zero;
+            var dir = flow / sp;
+            var cross = new Vector3d(dir.x, 0, dir.z);
+            double sinA = cross.magnitude, cosA = dir.y;
+            double front = Math.PI * g.Radius * g.Radius;
+            double side = g.Length * 2 * g.Radius * 0.8;
+            // Ведущий торец: носом вперёд — верх, хвостом — низ (ступень после отделения летит как попало).
+            double cp = Math.Min(NoseCpRadii * g.Radius, g.Length * 0.5);
+            double leadY = cosA >= 0 ? g.Length - cp : cp;
+            var fNose = cross * (-q * front * StackNormalSlope * Math.Abs(cosA));
+            var fCross = cross * (-q * StackCrossflowCd * side * sinA);
+            var torque = Vector3d.Cross(new Vector3d(0, leadY - g.Com, 0), fNose)
+                       + Vector3d.Cross(new Vector3d(0, g.Length * 0.5 - g.Com, 0), fCross);
+            // Стабилизаторы: та же сила по направлению, но за ЦМ — момент возвращает нос к потоку.
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!v.Attached[i] || secs[i].FinArea <= 0) continue;
+                var fFin = cross * (-q * secs[i].FinArea * FinNormalSlope * Math.Abs(cosA));
+                torque += Vector3d.Cross(new Vector3d(0, v.SectionBottom(i) + FinCpHeight - g.Com, 0), fFin);
+            }
+            var w = v.AngularVelocity;
+            double damp = q * front * g.Length * g.Length / (2 * sp) * StackPitchDamping;
+            return torque - new Vector3d(w.x * damp, 0, w.z * damp);
+        }
+
+        static void CheckCrew(Vessel v, double dt)
+        {
+            if (v.CrewLost || !v.HasCrew()) return;
+            if (v.GForce > CrewGLimit) v.HighGTimer += dt;
+            else v.HighGTimer = Math.Max(0, v.HighGTimer - dt * 0.5);
+            // Без правила таймер упирается в предел: HUD показывает «перегрузка 100 %», экипаж жив.
+            if (!GLoadLimit) v.HighGTimer = Math.Min(v.HighGTimer, CrewGTime);
+            else if (v.HighGTimer > CrewGTime)
+            {
+                v.CrewLost = true;
+                v.Raise($"Экипаж погиб: перегрузка {v.GForce:F1} g дольше {CrewGTime:F0} с");
+            }
+        }
+
         static void CheckStructure(Vessel v, Geometry g, double sinA, SectionDef lead, double dt)
         {
             double q = v.DynamicPressure;
@@ -320,6 +420,24 @@ namespace Kare.Space.Core
                 v.Destroy($"Сгорел в атмосфере: тепловой поток {v.HeatFlux / 1e6:F2} МВт/м² ({lead.Name})");
         }
 
+        /// <summary>Плотность морской воды, кг/м³.</summary>
+        const double SeaWaterDensity = 1025;
+        /// <summary>Осадку не глубже этой доли диаметра: тяжёлый корпус (ступень) иначе «тонет» целиком под гладь.</summary>
+        const double MaxDraftFraction = 0.8;
+
+        /// <summary>
+        /// Осадка на воде (§6.4): борт плавает погружённым на долю объёма m/(ρV), а не лежит на глади —
+        /// капсула стояла на воде «бильярдным шаром» (01.10.2026). Объём — шар радиуса корпуса; для шара доля
+        /// объёма ≈ доля диаметра (точно при ½). «Восток» 2,4 т, ⌀2,3 м → 0,38 → осадка ≈ 0,9 м.
+        /// Касание и взлёт с воды считаются от той же ватерлинии — порог отрыва не меняется.
+        /// </summary>
+        static double Draft(Geometry g)
+        {
+            double vol = 4.0 / 3.0 * Math.PI * g.Radius * g.Radius * g.Radius;
+            double f = Math.Min(MaxDraftFraction, g.Mass / (SeaWaterDensity * Math.Max(vol, 1e-3)));
+            return 2 * g.Radius * f;
+        }
+
         static void CheckContact(Vessel v, CelestialBody body, Vector3d spin, Geometry g, double t)
         {
             var r = v.Position;
@@ -337,6 +455,9 @@ namespace Kare.Space.Core
             double h = body.SurfaceHeight(bf);
             double cosUp = Math.Abs(Vector3d.Dot(v.NoseP, up));
             double offset = g.Com * cosUp + g.Radius * Math.Sqrt(Math.Max(0, 1 - cosUp * cosUp));
+            bool water = body.Terrain != null && body.Terrain.Ocean && h <= 0 &&
+                         Terrain.RawHeight(body.Terrain, bf.normalized) < 0;
+            if (water) offset -= Draft(g);
             v.TerrainAltitude = rm - body.Radius - h - offset;
             if (v.TerrainAltitude > 0) return;
 
@@ -352,8 +473,6 @@ namespace Kare.Space.Core
                 v.Destroy($"Удар о поверхность: {body.Name}, {speed:F0} м/с");
                 return;
             }
-            bool water = body.Terrain != null && body.Terrain.Ocean && h <= 0 &&
-                         Terrain.RawHeight(body.Terrain, bf.normalized) < 0;
             var snapped = up * (body.Radius + h + offset);
             v.Situation = water ? Situation.Splashed : Situation.Landed;
             v.AnchorBodyFixed = o.Inverse * snapped;

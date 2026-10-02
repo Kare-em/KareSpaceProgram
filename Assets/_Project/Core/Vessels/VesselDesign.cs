@@ -51,6 +51,11 @@ namespace Kare.Space.Core
         public double Length, Diameter;
         /// <summary>Момент от РСУ/маховиков, Н·м — управляет ориентацией без тяги.</summary>
         public double RcsTorque;
+        /// <summary>
+        /// Стабилизаторы у низа секции, м² (сумма плоскостей). Неуправляемой ракете (§4.6) только они
+        /// переносят центр давления за ЦМ; пара — FlightPhysics.FinNormalSlope.
+        /// </summary>
+        public double FinArea;
         /// <summary>Площадь купола, м² (0 — парашюта нет).</summary>
         public double ParachuteArea;
         /// <summary>Множитель Cd: тупое тело капсулы тормозит сильнее ракеты.</summary>
@@ -59,6 +64,10 @@ namespace Kare.Space.Core
         public double MaxHeatFlux = 3e5;
         /// <summary>Только обтекатель: сколько секций под ним он закрывает.</summary>
         public int EnclosesBelow;
+        /// <summary>Только вид: шар диаметром Diameter (СА «Восток»), а не конус капсулы. Физику не меняет.</summary>
+        public bool Sphere;
+        /// <summary>Мест экипажа: перегрузка (§4.7) убивает только живых, приборные капсулы её терпят.</summary>
+        public int Crew;
 
         public double Mass => DryMass + Propellant;
         public double Radius => Diameter * 0.5;
@@ -269,7 +278,7 @@ namespace Kare.Space.Core
                 new SectionDef
                 {
                     Name = "СА «Восток»", Kind = SectionKind.Capsule, DryMass = 2460, Length = 2.3, Diameter = 2.3,
-                    RcsTorque = 300, ParachuteArea = 600, DragScale = 2.6, MaxHeatFlux = 3e6,
+                    RcsTorque = 300, ParachuteArea = 600, DragScale = 2.6, MaxHeatFlux = 3e6, Sphere = true, Crew = 1,
                 });
             // ТДУ — на тормозной импульс, затем отстрел приборного отсека и парашют.
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 2));
@@ -303,7 +312,7 @@ namespace Kare.Space.Core
             {
                 Name = "Ступень Г-1", Kind = SectionKind.Stage, DryMass = 4000, Propellant = 8800,
                 Engine = new EngineDef { Name = "РД-Г", ThrustVac = 310e3, ThrustSL = 270e3, IspVac = 245, Ignitions = 1 },
-                EngineCount = 1, Length = 13, Diameter = 1.65, MaxHeatFlux = 2e5,
+                EngineCount = 1, Length = 13, Diameter = 1.65, MaxHeatFlux = 2e5, FinArea = 3,
             });
             d.Sections.Add(new SectionDef
             {

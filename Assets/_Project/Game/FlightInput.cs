@@ -13,6 +13,14 @@ namespace Kare.Space.Game
     {
         /// <summary>Скорость дросселя Shift/Ctrl, доля в секунду.</summary>
         public const double ThrottleRate = 0.5;
+        /// <summary>Правка импульса удержанием (§6.11): база, м/с за секунду, и разгон — скорость растёт как
+        /// 1 + (t·NodeAccel)² от времени удержания: тонко в начале, сотни м/с за пару секунд. Alt — ×NodeFine.</summary>
+        public const double NodeDvRate = 2, NodeAccel = 1.5, NodeFine = 0.1;
+        /// <summary>Сдвиг узла [ ] — доля периода в секунду (у гиперболы — от NodePlanner.AheadTime).</summary>
+        public const double NodeTimeRate = 0.02;
+
+        NodeAnchor anchor;
+        float nodeHeld;
 
         void Update()
         {
@@ -23,7 +31,10 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.M)) MapView.Toggle();
             if (Input.GetKeyDown(KeyCode.Period)) u.WarpUp();
             if (Input.GetKeyDown(KeyCode.Comma)) u.WarpDown();
+            // «/» — сброс ускорения сразу в ×1, как в KSP.
+            if (Input.GetKeyDown(KeyCode.Slash) || Input.GetKeyDown(KeyCode.KeypadDivide)) u.SetWarp(0);
             if (!v.Alive) return;
+            Maneuver(u, v);
 
             // Ось: x тангаж (W = +1), y рыскание (D = +1), z крен (E = +1) — соглашение Core.
             var pilot = new Vector3d(
@@ -57,6 +68,71 @@ namespace Kare.Space.Game
             // Предложение §10.1, не зафиксировано: G — автопилот выведения на 200 км.
             if (Input.GetKeyDown(KeyCode.G) && u.Ascent == null)
                 u.Ascent = new AscentAutopilot { TargetAltitude = 200000 };
+        }
+
+        /// <summary>
+        /// Узел манёвра (§6.11): N — поставить / перенести (Ap → Pe → +10 мин), I/K — по скорости, L/J — нормаль,
+        /// O/U — радиально, [ ] — время, C — скруглить, B — выполнить / прервать, Backspace — удалить.
+        /// Пока узел исполняет автопилот, правки закрыты: остаток уже тает, а B прерывает исполнение.
+        /// </summary>
+        void Maneuver(Universe u, Vessel v)
+        {
+            double now = u.Time;
+            if (Input.GetKeyDown(KeyCode.Backspace) || Input.GetKeyDown(KeyCode.Delete))
+            {
+                v.Node = null;
+                u.NodePilot = null;
+                return;
+            }
+            if (Input.GetKeyDown(KeyCode.N) && u.NodePilot == null)
+            {
+                if (v.Node == null)
+                {
+                    anchor = NodeAnchor.Apoapsis;
+                    for (int k = 0; k < 3 && !NodePlanner.Create(v, now, anchor); k++) anchor = (NodeAnchor)(((int)anchor + 1) % 3);
+                    if (v.Node == null) u.Post("Манёвр можно планировать только в полёте");
+                }
+                else anchor = NodePlanner.Cycle(v, now, anchor);
+            }
+            if (v.Node == null) return;
+            if (Input.GetKeyDown(KeyCode.B))
+            {
+                if (u.NodePilot != null)
+                {
+                    u.NodePilot = null;
+                    FlightControl.Cutoff(v);
+                    // Прерванный прожиг: компоненты — из остатка, иначе следующая правка вернёт импульс целиком.
+                    NodePlanner.SyncFromRemaining(v, now);
+                    u.Post("Исполнение манёвра прервано");
+                }
+                else if (v.Node.Total > 0.1)
+                {
+                    u.Ascent = null;
+                    u.Landing = null;
+                    u.NodePilot = new NodeAutopilot();
+                }
+            }
+            if (u.NodePilot != null) return;
+            if (Input.GetKeyDown(KeyCode.C)) NodePlanner.Circularize(v, now);
+
+            var dv = new Vector3d(
+                Axis(KeyCode.I, KeyCode.K),
+                Axis(KeyCode.L, KeyCode.J),
+                Axis(KeyCode.O, KeyCode.U));
+            double shift = Axis(KeyCode.RightBracket, KeyCode.LeftBracket);
+            if (dv.sqrMagnitude == 0 && shift == 0) { nodeHeld = 0; return; }
+            nodeHeld += Time.unscaledDeltaTime;
+            double accel = 1 + (nodeHeld * NodeAccel) * (nodeHeld * NodeAccel);
+            if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)) accel *= NodeFine;
+            double step = accel * Time.unscaledDeltaTime;
+            if (dv.sqrMagnitude > 0)
+                NodePlanner.Adjust(v, now, dv.x * NodeDvRate * step, dv.y * NodeDvRate * step, dv.z * NodeDvRate * step);
+            if (shift != 0)
+            {
+                var o = NodePlanner.CurrentOrbit(v, now);
+                double span = o.IsElliptic ? o.Period : NodePlanner.AheadTime;
+                NodePlanner.Shift(v, now, shift * span * NodeTimeRate * step);
+            }
         }
 
         static double Axis(KeyCode plus, KeyCode minus) => (Input.GetKey(plus) ? 1 : 0) - (Input.GetKey(minus) ? 1 : 0);

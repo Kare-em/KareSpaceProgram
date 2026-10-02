@@ -13,13 +13,31 @@ namespace Kare.Space.Game
     {
         /// <summary>Освещённость на 1 а.е., лк (§9.1).</summary>
         public const double IlluminanceAt1Au = 127000;
+        /// <summary>
+        /// Цветовая температура света, К. Не 5778 (фотосфера): в HDRP белая точка — D65, и 5778 К даёт желтоватый
+        /// диск, а вместе с голубым небом PBSky ореол bloom вокруг него выходит оливковым — G ≥ R > B
+        /// (замер 02.10.2026 у стола: (169,173,166) в 120 px от центра). 6500 К — белый диск, ореол сразу
+        /// уходит в голубое: (180,177,172) → (119,122,128) → (98,103,115). Солнце вне атмосферы и есть белое.
+        /// Пара: SkyController.BloomScatter — ширина того же ореола.
+        /// </summary>
+        public const float ColorTemperature = 6500;
 
         /// <summary>Доля незатенённого Солнца, 0..1 — для HUD и экспозиции.</summary>
         public static double Visible { get; private set; } = 1;
 
         Light sun;
 
-        void Awake() => sun = GetComponent<Light>();
+        void Awake()
+        {
+            sun = GetComponent<Light>();
+            sun.useColorTemperature = true;
+            sun.colorTemperature = ColorTemperature;
+            // Ореол (flare) PBSky — имитация рассеяния в воздухе, в вакууме его нет (§9.3). Его яркость берётся от
+            // диска (≈1,9·10⁹ нит), и bloom растаскивал 2° ореола на весь кадр: на орбите при Солнце у края кадра
+            // небо серо-белое R≈240, без ореола — R=0, а сам диск с bloom 0,2 — ровное пятно (замер 01.10.2026).
+            var hd = GetComponent<UnityEngine.Rendering.HighDefinition.HDAdditionalLightData>();
+            if (hd != null) { hd.flareSize = 0; hd.flareMultiplier = 0; }
+        }
 
         void LateUpdate()
         {
@@ -50,8 +68,10 @@ namespace Kare.Space.Game
                 if (b.Parent == null) continue;
                 var tb = b.Position - me;
                 double d = tb.magnitude;
-                if (d >= distSun || d < b.Radius) continue;
-                double rb = System.Math.Asin(b.Radius / d);
+                if (d >= distSun) continue;
+                // Внутри сферы (приводнение с осадкой, суша ниже уровня моря) тело — полнеба, а не «нет тела»:
+                // раньше оно пропускалось, ночью Солнце светило сквозь Землю и мигало при качке на воде.
+                double rb = System.Math.Asin(System.Math.Min(1, b.Radius / d));
                 double theta = Vector3d.Angle(tb / d, dirSun);
                 if (theta >= rb + rs) continue;
                 double area = rb >= rs ? 1 : (rb * rb) / (rs * rs); // кольцевое затмение не гасит полностью

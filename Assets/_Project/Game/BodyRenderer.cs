@@ -42,6 +42,11 @@ namespace Kare.Space.Game
         const float WaterNormalScale = 0.25f, GroundNormalScale = 0.6f;
         /// <summary>Вода вблизи: гладкость как у океана на сфере (EarthSurface.OceanSmoothness), но рябь ещё и рассеивает блик.</summary>
         const float WaterSmoothness = 0.92f;
+        /// <summary>Дно под водой патча, м: узлы ниже уровня моря опускаются до RawHeight, но не глубже —
+        /// плоскость воды (h = 0) накрывает дно, и берег — пересечение склона с водой, а не ступенька сетки
+        /// (у треугольника «весь в воде / нет» берег шёл зубцами по 600 м). Пара: шаг патча у края ≈ 1,2 км —
+        /// склон 200 м на ячейку не даёт z-конфликта воды с дном на дальности патча.</summary>
+        const double ShoreDepth = 200;
         /// <summary>Облака Земли: высота слоя, м. Пара: ниже потолка патча PatchMaxAltitude (40 км) — с борта
         /// слой виден сверху; снизу (камера внутри сферы) отсекается задними гранями.</summary>
         const double CloudAltitude = 8000;
@@ -194,6 +199,9 @@ namespace Kare.Space.Game
             m.SetColor("_BaseColor", Color.white);
             m.SetFloat("_Smoothness", 0);
             m.SetFloat("_Metallic", 0);
+            // Туман на прозрачных добавляет рассеяние атмосферы и там, где альфа 0: вся сфера облаков с орбиты
+            // была сплошь бирюзовой (замер 01.10.2026).
+            m.SetFloat("_EnableFogOnTransparent", 0);
             HDMaterial.SetSurfaceType(m, true); // внутри — ValidateMaterial
             mr.sharedMaterial = m;
             mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -257,10 +265,10 @@ namespace Kare.Space.Game
             }
             UpdatePatch(u.Active);
             // Снос ряби: только дробная часть, чтобы смещение не копило ошибку float.
-            float k = (float)(GroundTile / WaterTile);
+            float wk = (float)(GroundTile / WaterTile);
             waterOffset.x = Frac(waterOffset.x + Time.deltaTime * WaterDrift / WaterTile);
             waterOffset.y = Frac(waterOffset.y + Time.deltaTime * WaterDrift * 0.6 / WaterTile);
-            waterMat.SetVector("_BaseColorMap_ST", new Vector4(k, k, waterOffset.x, waterOffset.y));
+            waterMat.SetVector("_BaseColorMap_ST", new Vector4(wk, wk, waterOffset.x, waterOffset.y));
         }
 
         // ---------------------------------------------------------------- патч под бортом
@@ -294,11 +302,13 @@ namespace Kare.Space.Game
             var e2 = Vector3d.Cross(centerBf, e1).normalized;
 
             int n = PatchN + 1;
-            var verts = new Vector3[n * n];
-            var uvs = new Vector2[n * n];
-            var e = byBody[b];
-            var macro = e.Ground ? new Vector2[n * n] : null;
             bool ocean = b.Terrain.Ocean;
+            // У тел с океаном вторая половина вершин — плоскость воды на уровне моря.
+            int nv = ocean ? 2 * n * n : n * n, wb = n * n;
+            var verts = new Vector3[nv];
+            var uvs = new Vector2[nv];
+            var e = byBody[b];
+            var macro = e.Ground ? new Vector2[nv] : null;
             var wet = ocean ? new bool[n * n] : null;
             // Метрические UV от широты/долготы, а не от осей патча: оси патча меняются при каждой
             // перестройке, и текстура прыгала бы под ракетой. Опорная точка округлена до градуса, а её
@@ -326,7 +336,12 @@ namespace Kare.Space.Game
                 double y = PatchHalf * ty * System.Math.Abs(ty) / b.Radius;
                 var dir = (centerBf + e1 * x + e2 * y).normalized;
                 double hgt = b.SurfaceHeight(dir);
-                if (ocean) wet[j * n + i] = hgt <= 0;
+                if (ocean) verts[wb + j * n + i] = FloatingOrigin.ToVector3((dir * b.Radius - patchCenterLocal).SwapYZ);
+                if (ocean && hgt <= 0)
+                {
+                    wet[j * n + i] = true;
+                    hgt = System.Math.Max(Kare.Space.Core.Terrain.RawHeight(b.Terrain, dir), -ShoreDepth);
+                }
                 var p = dir * (b.Radius + hgt) - patchCenterLocal;
                 verts[j * n + i] = FloatingOrigin.ToVector3(p.SwapYZ);
                 if (e.Ground)
@@ -340,15 +355,21 @@ namespace Kare.Space.Game
                 }
                 else uvs[j * n + i] = LatLonUv(dir);
             }
-            // Суша и вода — разные субмеши: вода — треугольник, у которого все три узла на уровне моря.
+            if (ocean)
+            {
+                System.Array.Copy(uvs, 0, uvs, wb, wb);
+                if (macro != null) System.Array.Copy(macro, 0, macro, wb, wb);
+            }
+            // Суша и вода — разные субмеши. Суша — треугольники с сухим узлом, вода — с мокрым (на своих
+            // вершинах уровня моря); на берегу рисуются оба, видимую кромку режет глубина.
             var land = new List<int>(PatchN * PatchN * 6);
             var water = new List<int>();
             for (int j = 0; j < PatchN; j++)
             for (int i = 0; i < PatchN; i++)
             {
                 int a = j * n + i, c = a + n;
-                AddTri(ocean && wet[a] && wet[c] && wet[a + 1] ? water : land, a, c, a + 1);
-                AddTri(ocean && wet[a + 1] && wet[c] && wet[c + 1] ? water : land, a + 1, c, c + 1);
+                Classify(land, water, wet, wb, a, c, a + 1);
+                Classify(land, water, wet, wb, a + 1, c, c + 1);
             }
             var mesh = patchMf.sharedMesh;
             mesh.Clear();
@@ -368,9 +389,10 @@ namespace Kare.Space.Game
 
         static float Frac(double x) => (float)(x - System.Math.Floor(x));
 
-        static void AddTri(List<int> list, int a, int b, int c)
+        static void Classify(List<int> land, List<int> water, bool[] wet, int wb, int a, int b, int c)
         {
-            list.Add(a); list.Add(b); list.Add(c);
+            if (wet == null || !(wet[a] && wet[b] && wet[c])) { land.Add(a); land.Add(b); land.Add(c); }
+            if (wet != null && (wet[a] || wet[b] || wet[c])) { water.Add(wb + a); water.Add(wb + b); water.Add(wb + c); }
         }
 
         /// <summary>
@@ -506,8 +528,13 @@ namespace Kare.Space.Game
                 if (n.sqrMagnitude < 1e-12f) continue;
                 var outward = outwardHint == Vector3d.zero ? v[tri[i]] : FloatingOrigin.ToVector3(outwardHint);
                 if (Vector3.Dot(n, outward) >= 0) return;
-                for (int k = 0; k < tri.Length; k += 3) (tri[k + 1], tri[k + 2]) = (tri[k + 2], tri[k + 1]);
-                mesh.triangles = tri;
+                // По субмешам: присваивание mesh.triangles склеило бы сушу и воду в одну субмеш.
+                for (int s = 0; s < mesh.subMeshCount; s++)
+                {
+                    var st = mesh.GetTriangles(s);
+                    for (int k = 0; k < st.Length; k += 3) (st[k + 1], st[k + 2]) = (st[k + 2], st[k + 1]);
+                    mesh.SetTriangles(st, s);
+                }
                 return;
             }
         }

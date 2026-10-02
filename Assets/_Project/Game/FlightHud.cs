@@ -84,12 +84,13 @@ namespace Kare.Space.Game
             StageStack(v, w, h);
             Bottom(u, v, w, h);
             Messages(boot, w, h);
+            NodePanel(u, v, h);
             if (details) Details(u, v, boot);
             else if (boot.AscentTutor) Tutor(u, v);
 
             GUI.color = Dim;
             GUI.Label(new Rect(10, h - 24, 1100, 22),
-                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот · ,/. время · M карта · H детали · Esc меню", small);
+                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот · N манёвр · ,/. время · M карта · H детали · Esc меню", small);
             GUI.color = Color.white;
         }
 
@@ -109,7 +110,8 @@ namespace Kare.Space.Game
             GUI.Label(new Rect(r.x + 8, r.y + 40, pw - 16, 26), task, c);
             if (u.WarpIndex > 0)
             {
-                string warp = "×" + Universe.Warps[u.WarpIndex].ToString("0") + (u.RailsActive ? " рельсы" : "");
+                // Фактический множитель, а не выбранный: в физике выше MaxPhysicsWarp время не идёт.
+                string warp = "×" + u.EffectiveWarp.ToString("0") + (u.RailsActive ? " рельсы" : "");
                 GUI.color = Accent;
                 GUI.Label(new Rect(r.xMax + 10, r.y + 6, 160, 30), warp, mid);
                 GUI.color = Color.white;
@@ -135,7 +137,16 @@ namespace Kare.Space.Game
                 string tail = over && !FlightPhysics.AeroBreakup ? " (разрушение выкл.)" : "";
                 Warning(ref y, x, Icon.Stability, over ? Danger : Warn, $"Угол атаки {v.AngleOfAttack:0}°{tail}");
             }
-            if (v.GForce > GWarn)
+            if (v.CrewLost)
+                Warning(ref y, x, Icon.GLoad, Danger, "Экипаж погиб от перегрузки");
+            else if (v.HighGTimer > 0)
+            {
+                // Счётчик §4.7: сколько секунд из 10 уже набрано сверх 9 g — игрок видит запас до гибели.
+                string tail = FlightPhysics.GLoadLimit ? "" : " (гибель выкл.)";
+                Warning(ref y, x, Icon.GLoad, Danger,
+                    $"Перегрузка {v.GForce:0.0} g · экипаж {v.HighGTimer:0}/{FlightPhysics.CrewGTime:0} с{tail}");
+            }
+            else if (v.GForce > GWarn)
                 Warning(ref y, x, Icon.GLoad, v.GForce > 2 * GWarn ? Danger : Warn, $"Перегрузка {v.GForce:0.0} g");
             if (u.WarpIndex > 0 && !u.RailsActive)
             {
@@ -274,6 +285,68 @@ namespace Kare.Space.Game
             }
         }
 
+        // ---------------------------------------------------------------- узел манёвра (§6.11)
+
+        /// <summary>Прогноз после узла пересчитывается не каждый кадр: склейка коник — тысячи шагов.</summary>
+        const float NodePredictPeriod = 0.25f;
+        System.Collections.Generic.List<OrbitPatch> nodePatches;
+        float nodePredictAt = -1;
+
+        void NodePanel(Universe u, Vessel v, float h)
+        {
+            var n = v.Node;
+            if (n == null) { nodePatches = null; return; }
+            if (Time.unscaledTime >= nodePredictAt)
+            {
+                nodePredictAt = Time.unscaledTime + NodePredictPeriod;
+                nodePatches = u.PredictActive();
+            }
+            var r = new Rect(12, h - 138 - 172, 250, 166);
+            Fill(r, Panel);
+            float y = r.y + 6, x = r.x + 12;
+            GUI.color = Accent;
+            DrawIcon(new Rect(x, y, 24, 24), Icon.Maneuver);
+            GUI.Label(new Rect(x + 30, y, 210, 24), "<b>МАНЁВР</b>", label);
+            GUI.color = Color.white;
+            y += 26;
+            double burn = FlightControl.BurnTime(v, n.Total);
+            string burnText = double.IsInfinity(burn) || double.IsNaN(burn) ? "<color=#ff6050>нет тяги</color>" : $"{burn:0} с работы";
+            GUI.Label(new Rect(x, y, 230, 22), $"Δv <b>{n.Total:0.0}</b> м/с · {burnText}", label);
+            y += 22;
+            double tLeft = n.Time - u.Time;
+            string when = tLeft >= 0 ? "через " + GameCalendar.FormatDuration(tLeft) : "<color=#ffc840>узел пропущен — Bksp или N</color>";
+            GUI.Label(new Rect(x, y, 230, 22), when, label);
+            y += 22;
+            GUI.color = Dim;
+            GUI.Label(new Rect(x, y, 236, 20), $"скор. {n.Prograde:0.0} · норм. {n.Normal:0.0} · рад. {n.Radial:0.0}", small);
+            GUI.color = Color.white;
+            y += 22;
+            GUI.Label(new Rect(x, y, 236, 22), AfterNode(), small);
+            y += 24;
+            GUI.color = Dim;
+            GUI.Label(new Rect(x, y, 236, 20), "N апсида · I/K J/L O/U Δv · [ ] время · C круг", small);
+            GUI.Label(new Rect(x, y + 18, 236, 20), "B выполнить · Bksp удалить · Alt точно", small);
+            GUI.color = Color.white;
+        }
+
+        /// <summary>Орбита после узла — ради неё узел и ставят: Ap/Pe или переход в другую сферу влияния.</summary>
+        string AfterNode()
+        {
+            if (nodePatches == null) return "";
+            for (int i = 0; i < nodePatches.Count; i++)
+            {
+                var p = nodePatches[i];
+                if (!p.AfterNode) continue;
+                var o = p.Orbit;
+                string pe = Km(o.PeriapsisRadius - p.Body.Radius);
+                string tail = p.EndType == TransitionType.Atmosphere ? " · <color=#ffc840>вход в атм.</color>"
+                            : p.NextBody != null ? $" · → {p.NextBody.Name}" : "";
+                string ap = o.IsElliptic ? Km(o.ApoapsisRadius - p.Body.Radius) : "∞";
+                return $"После: Ap {ap} · Pe {pe}{tail}";
+            }
+            return "";
+        }
+
         void ThrustFuel(Vessel v, float h)
         {
             var r = new Rect(12, h - 138, 250, 104);
@@ -321,6 +394,9 @@ namespace Kare.Space.Game
         void Tutor(Universe u, Vessel v)
         {
             if (u.Ascent != null || u.NodePilot != null || u.Landing != null || !v.Body.HasAtmosphere) return;
+            // На воде полёт окончен: Splashed не Landed, и без этой проверки после приводнения (vs = 0, двигатель
+            // молчит, ниже атмосферы) снова вылезала «2. Вертикальный подъём» (замер 01.10.2026).
+            if (v.Situation == Situation.Splashed) return;
             bool landed = v.Situation == Situation.Landed;
             if (landed && v.Site == null) return;
             double atm = v.Body.AtmosphereTop;

@@ -18,6 +18,8 @@ static class Program
         Run("moon", TestEphemeris, only);
         Run("atmo", TestAtmosphere, only);
         Run("stats", TestStats, only);
+        Run("stability", TestStability, only);
+        Run("separation", TestSeparation, only);
         Run("karman", TestKarman, only);
         Run("sputnik", TestSputnik, only);
         Run("mechta", () => TestLunar("mechta", 30e6), only);
@@ -214,6 +216,81 @@ static class Program
         return v.Alive && u.Ascent == null && !v.IsLanded;
     }
 
+    /// <summary>§4.6: пакет без стабилизаторов в плотных слоях неустойчив — без управления угол атаки растёт.</summary>
+    static void TestStability()
+    {
+        double Run(SasMode sas)
+        {
+            var (u, tr) = StartMission("vostok");
+            u.Ascent = new AscentAutopilot { TargetAltitude = 220000 };
+            Fly(u, tr, 2, 200, () => u.Active.Alive && u.Active.Altitude < 9000);
+            var v = u.Active;
+            u.Ascent = null;
+            v.Sas = sas;
+            double maxA = 0;
+            Fly(u, tr, 2, 20, () => v.Alive, () => maxA = Math.Max(maxA, v.AngleOfAttack));
+            if (!v.Alive) maxA = Math.Max(maxA, 90);
+            Console.WriteLine($"   SAS {sas}: max α {maxA:F1}° за 20 с, q {v.DynamicPressure / 1000:F1} кПа, {(v.Alive ? "цел" : v.DestroyReason)}");
+            return maxA;
+        }
+        double free = Run(SasMode.Off), held = Run(SasMode.Prograde);
+        Check("Без управления пакет кувыркается (§4.6)", free > 10, $"{free:F1}°");
+        Check("SAS по вектору скорости держит пакет", held < 5, $"{held:F1}°");
+    }
+
+    /// <summary>
+    /// §5: после разделения каждая часть стоит там, где была в пакете (Position — ЦМ части), импульс сохранён.
+    /// До исправления обломок и борт вставали в старый общий ЦМ — I ступень оказывалась внутри II.
+    /// </summary>
+    static void TestSeparation()
+    {
+        var (u, _) = StartMission("vostok");
+        var v = u.Active;
+        v.Situation = Situation.Flying;
+        v.AngularVelocity = new Vector3d(0.02, 0, -0.01);
+        var secs = v.Design.Sections;
+        double worstPos = 0, worstMom = 0, worstOut = double.MaxValue;
+        int parts = 0, halves = 0;
+        while (v.HasNextStage)
+        {
+            var h0 = new double[secs.Count];
+            v.Layout(h0);
+            v.MassProperties(out double m0, out double com0, out _, out _);
+            var bottom0 = v.Position - v.NoseP * com0;
+            var nose = v.NoseP;
+            var mom0 = v.Velocity * m0;
+            var mom = Vector3d.zero;
+            var list = v.Stage();
+            if (list.Count == 0) continue;
+            list.Add(v);
+            foreach (var w in list)
+            {
+                int low = Array.IndexOf(w.Attached, true);
+                w.MassProperties(out double m, out double com, out _, out _);
+                double err = (w.Position - nose * com - (bottom0 + nose * h0[low])).magnitude;
+                Console.WriteLine($"   {w.Name}: ЦМ {com:F1} м от своего низа, низ в пакете {h0[low]:F1} м, ошибка {err:F4} м");
+                worstPos = Math.Max(worstPos, err);
+                if (w.FairingHalf != 0)
+                {
+                    // Низ створки относительно ракеты должен уходить наружу, иначе ступень пройдёт сквозь неё.
+                    var outward = v.LocalToWorld(new Vector3d(w.FairingHalf, 0, 0));
+                    var rel = w.Velocity - v.Velocity
+                              + w.LocalToWorld(Vector3d.Cross(w.AngularVelocity - v.AngularVelocity, new Vector3d(0, -com, 0)));
+                    worstOut = Math.Min(worstOut, Vector3d.Dot(rel, outward));
+                    halves++;
+                }
+                mom += w.Velocity * m;
+                parts++;
+            }
+            // Вращение тоже меняет импульс частей (ω × r), но в сумме по ЦМ — ноль; остаётся только погрешность.
+            worstMom = Math.Max(worstMom, (mom - mom0).magnitude / m0);
+        }
+        Check("Отделение: части остаются на своих местах в пакете", parts >= 6 && worstPos < 1e-3, $"{parts} частей, {worstPos:F4} м");
+        Check("Отделение: импульс сохраняется", worstMom < 1e-6, $"{worstMom:E1} м/с");
+        Check("Обтекатель раскрывается на две створки, низ уходит наружу", halves == 2 && worstOut > 0.3,
+            $"{halves} створки, низ наружу {worstOut:F2} м/с");
+    }
+
     static void TestKarman()
     {
         var (u, tr) = StartMission("karman");
@@ -339,6 +416,7 @@ static class Program
         u.Stage(); // отделение приборного отсека
         v = u.Active;
         v.Sas = SasMode.Off;
+        u.Stage(); // парашют взводится в космосе — раскрывает автоматика (FlightPhysics.ChuteDeployAltitude)
         double maxG = 0, maxHeat = 0, maxEntryG = 0, entryAlt = 0;
         bool chute = false;
         Fly(u, tr, 2, 6 * 3600, () => tr.Status == MissionStatus.Active, () =>
@@ -349,9 +427,8 @@ static class Program
                 maxG = Math.Max(maxG, v.GForce);
                 maxHeat = Math.Max(maxHeat, v.HeatFlux);
             }
-            if (!chute && v.Altitude < 7000 && v.DynamicPressure < 20000 && v.Situation == Situation.Flying)
+            if (!chute && v.ChuteDeployed[v.Design.Sections.Count - 1])
             {
-                u.Stage();
                 chute = true;
                 Console.WriteLine($"      парашют на {v.Altitude / 1000:F1} км, {v.SurfaceSpeed:F0} м/с");
             }

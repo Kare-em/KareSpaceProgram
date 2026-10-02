@@ -602,7 +602,7 @@ MonoBehaviour:
     m_Value: 1
   planetCenter:
     m_OverrideState: 1
-    m_Value: {x: -4533.941, y: -3812.0005, z: -2844.2263}
+    m_Value: {x: -2959.3274, y: -471.21628, z: -5733.7163}
   windOrientation:
     m_OverrideState: 0
     m_Value: 0

@@ -11,6 +11,8 @@ namespace Kare.Space.Game
     /// Ниже верха атмосферы прогноз Core обрывается (дальше только физика) — карта дорисовывает
     /// баллистику без сопротивления до поверхности и ставит «Падение»: иначе суборбита выглядит
     /// оборванной линией, и непонятно, куда летишь.
+    /// Фокус камеры переключается между бортом и телами (§9.6): Tab / Shift+Tab, список слева, клик по
+    /// подписи тела. Линии орбиты от фокуса не зависят — меняется только центр облёта.
     /// </summary>
     [DefaultExecutionOrder(110)]
     public sealed class MapView : MonoBehaviour
@@ -35,6 +37,12 @@ namespace Kare.Space.Game
         const float HiddenAlpha = 0.35f;
         /// <summary>Пересчёт прогноза, с: он дорогой (поиск встреч), а коника за 0,25 с не меняется.</summary>
         const float PredictPeriod = 0.25f;
+        /// <summary>Дистанция при фокусе на теле — в радиусах: тело занимает ≈ треть высоты кадра при FOV 60°.</summary>
+        const float BodyFocusRadii = 4;
+        /// <summary>Фокус на борту: стартовая дистанция и ближний предел, м (борт — метка, меш на карте скрыт).</summary>
+        const float VesselFocusDistance = 2e6f, VesselFocusMin = 1e3f;
+        /// <summary>Дальний предел зума, м: ≈ 3,3 а. е. — от Солнца видны орбиты до пояса астероидов.</summary>
+        const float MaxDistance = 5e11f;
 
         static readonly Color[] PatchColors =
         {
@@ -42,6 +50,8 @@ namespace Kare.Space.Game
         };
         /// <summary>Баллистика внутри атмосферы — красная: это оценка без сопротивления.</summary>
         static readonly Color DescentColor = new Color(1f, 0.35f, 0.25f);
+        /// <summary>Узел манёвра — цвет как у вектора манёвра в SAS (§4.9).</summary>
+        static readonly Color NodeColor = new Color(0.3f, 0.6f, 1f);
         static readonly Color AtmosphereColor = new Color(0.35f, 0.55f, 1f, 1f) * 0.6f;
 
         float distance, yaw = 20, pitch = 50;
@@ -54,7 +64,13 @@ namespace Kare.Space.Game
         readonly List<Rect> placed = new List<Rect>();
         GUIStyle markStyle;
 
-        struct Mark { public Vector3 World; public string Text; public Color Color; }
+        struct Mark { public Vector3 World; public string Text; public Color Color; public CelestialBody Body; }
+        static readonly Color BodyMarkColor = new Color(0.75f, 0.75f, 0.8f);
+
+        /// <summary>Фокус камеры: тело или null — борт.</summary>
+        CelestialBody focus;
+        readonly List<CelestialBody> focusList = new List<CelestialBody>();
+        GUIStyle listStyle;
 
         void Awake()
         {
@@ -84,6 +100,7 @@ namespace Kare.Space.Game
                 near0 = Camera.nearClipPlane;
                 far0 = Camera.farClipPlane;
                 var v = u.Active;
+                focus = v.Body;
                 distance = (float)System.Math.Max(v.Body.Radius * 4, v.Position.magnitude * 2.5);
                 // Камера — со стороны борта и чуть сверху: иначе борт и вход в атмосферу часто оказывались у лимба
                 // или за планетой, и траектория читалась наполовину.
@@ -106,7 +123,9 @@ namespace Kare.Space.Game
             var u = GameBootstrap.U;
             if (!IsOpen || u?.Active == null || Camera == null) return;
             var v = u.Active;
-            var body = v.Body;
+            if (Input.GetKeyDown(KeyCode.Tab)) CycleFocus(u, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1);
+            // Ось облёта — полюс тела в фокусе; у борта — полюс тела, вокруг которого он летит.
+            var body = focus ?? v.Body;
 
             if (Input.GetMouseButton(1))
             {
@@ -114,12 +133,13 @@ namespace Kare.Space.Game
                 pitch = Mathf.Clamp(pitch - Input.GetAxis("Mouse Y") * 3, -89, 89);
             }
             float wheel = Input.mouseScrollDelta.y;
-            if (wheel != 0) distance = Mathf.Clamp(distance * Mathf.Pow(0.85f, wheel), (float)body.Radius * 1.2f, 5e11f);
+            float minDist = focus != null ? (float)focus.Radius * 1.2f : VesselFocusMin;
+            if (wheel != 0) distance = Mathf.Clamp(distance * Mathf.Pow(0.85f, wheel), minDist, MaxDistance);
 
             // Ось карты — полюс тела, чтобы экватор лежал «горизонтально».
             var pole = FloatingOrigin.DirToUnity(body.Orientation * Vector3d.forward);
             var rot = Quaternion.FromToRotation(Vector3.up, pole) * Quaternion.Euler(pitch, yaw, 0);
-            var center = FloatingOrigin.ToUnity(body.Position);
+            var center = FloatingOrigin.ToUnity(focus != null ? focus.Position : FloatingOrigin.WorldP(v));
             Camera.transform.SetPositionAndRotation(center - rot * Vector3.forward * distance, rot);
             Camera.nearClipPlane = Mathf.Max(1, distance * 1e-4f);
             Camera.farClipPlane = Mathf.Max(distance * 20, 1e9f);
@@ -148,6 +168,9 @@ namespace Kare.Space.Game
                     int n = Sample(p.Orbit, p.Body, System.Math.Max(p.StartTime, u.Time), EndOf(p, u.Time), buf);
                     SetLine(used++, n, col, width);
                     MarkApsides(p, u.Time, col);
+                    // Узел — начало первого куска «после импульса» (§6.11): там и рисуем ромб с Δv.
+                    if (p.AfterNode && v.Node != null && (i == 0 || !patches[i - 1].AfterNode))
+                        marks.Add(new Mark { World = At(p, p.StartTime), Text = $"◆ Манёвр {v.Node.Total:0.0} м/с", Color = NodeColor });
 
                     if (p.EndType == TransitionType.Atmosphere) Descent(p, ref used, width);
                     else if (p.NextBody != null && !double.IsInfinity(p.EndTime))
@@ -162,6 +185,50 @@ namespace Kare.Space.Game
                     SetLine(used++, n, AtmosphereColor, width * 0.5f);
             }
             for (int i = used; i < lines.Count; i++) lines[i].gameObject.SetActive(false);
+            BuildFocusList(u, v);
+            // Подписи тел из списка фокуса: по ним видно, где Луна или Марс, и по клику — облёт вокруг.
+            foreach (var b in focusList)
+                if (b != null && b != focus)
+                    marks.Add(new Mark { World = FloatingOrigin.ToUnity(b.Position), Text = "● " + b.Name, Color = BodyMarkColor, Body = b });
+        }
+
+        /// <summary>Кандидаты фокуса: борт (null), Солнце, планеты и спутники системы, где сейчас борт или фокус.
+        /// Все 24 тела сразу — список на полэкрана, а луны Юпитера из окрестностей Земли всё равно не разглядеть.</summary>
+        void BuildFocusList(Universe u, Vessel v)
+        {
+            focusList.Clear();
+            focusList.Add(null);
+            var sun = u.System.Sun;
+            var local = SystemOf(focus ?? v.Body, sun);
+            var own = SystemOf(v.Body, sun);
+            foreach (var b in u.System.Bodies)
+            {
+                var root = SystemOf(b, sun);
+                if (b == sun || b.Parent == sun || root == local || root == own) focusList.Add(b);
+            }
+        }
+
+        /// <summary>Планета, к системе которой относится тело (для Солнца — само Солнце).</summary>
+        static CelestialBody SystemOf(CelestialBody b, CelestialBody sun)
+        {
+            while (b.Parent != null && b.Parent != sun) b = b.Parent;
+            return b;
+        }
+
+        void CycleFocus(Universe u, int dir)
+        {
+            BuildFocusList(u, u.Active);
+            int i = focusList.IndexOf(focus);
+            SetFocus(u.Active, focusList[((i + dir) % focusList.Count + focusList.Count) % focusList.Count]);
+        }
+
+        void SetFocus(Vessel v, CelestialBody b)
+        {
+            focus = b;
+            distance = b != null ? (float)b.Radius * BodyFocusRadii : VesselFocusDistance;
+            // Борт у своего тела: дистанцию берём как при открытии карты — видна вся орбита.
+            if (b == v.Body) distance = (float)System.Math.Max(b.Radius * BodyFocusRadii, v.Position.magnitude * 2.5);
+            distance = Mathf.Min(distance, MaxDistance);
         }
 
         /// <summary>Вход в атмосферу: метка и баллистика до поверхности (оценка без сопротивления).</summary>
@@ -303,12 +370,39 @@ namespace Kare.Space.Game
                 GUI.color = new Color(1, 1, 1, alpha);
                 markStyle.normal.textColor = Color.Lerp(m.Color, Color.white, 0.4f);
                 GUI.Label(r, m.Text, markStyle);
+                if (m.Body != null && Event.current.type == EventType.MouseDown && Event.current.button == 0 && r.Contains(Event.current.mousePosition))
+                {
+                    SetFocus(u.Active, m.Body);
+                    Event.current.Use();
+                }
             }
+            FocusPanel(u);
             GUI.color = Color.white;
             markStyle.normal.textColor = Color.white;
-            var hint = "КАРТА · ПКМ — вращать, колесо — масштаб, M — назад";
+            var hint = "КАРТА · ПКМ — вращать, колесо — масштаб, Tab — фокус, N — манёвр, M — назад";
             float hw = markStyle.CalcSize(new GUIContent(hint)).x;
             GUI.Label(new Rect((Screen.width - hw) * 0.5f, Screen.height - 165, hw, 22), hint, markStyle); // над нижними панелями HUD
+        }
+
+        /// <summary>Список фокуса слева, под подсказками туториала (они занимают верх до ≈ 210 px).</summary>
+        void FocusPanel(Universe u)
+        {
+            if (listStyle == null)
+                listStyle = new GUIStyle(GUI.skin.button) { fontSize = 14, alignment = TextAnchor.MiddleLeft, padding = new RectOffset(8, 6, 1, 1) };
+            var sun = u.System.Sun;
+            float x = 12, y = 230, rowH = 22, wdt = 170;
+            GUI.color = Color.white;
+            GUI.Label(new Rect(x, y, wdt, rowH), "Фокус (Tab)", markStyle);
+            y += rowH + 2;
+            foreach (var b in focusList)
+            {
+                string name = b == null ? "▲ " + u.Active.Name : (b.Parent != null && b.Parent != sun ? "    " : "") + b.Name;
+                bool on = b == focus;
+                GUI.color = on ? new Color(0.45f, 0.85f, 1f) : Color.white;
+                if (GUI.Button(new Rect(x, y, wdt, rowH), name, listStyle)) SetFocus(u.Active, b);
+                y += rowH;
+            }
+            GUI.color = Color.white;
         }
     }
 }

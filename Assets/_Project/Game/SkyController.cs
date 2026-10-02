@@ -55,7 +55,11 @@ namespace Kare.Space.Game
             Volume.profile.TryGet(out env);
             Volume.profile.TryGet(out sky);
             Volume.profile.TryGet(out exposure);
-            if (Volume.profile.TryGet(out bloom)) bloomFlight = bloom.intensity.value;
+            if (Volume.profile.TryGet(out bloom))
+            {
+                bloomFlight = bloom.intensity.value;
+                bloom.scatter.Override(BloomScatter);
+            }
             if (env == null || sky == null)
             {
                 Debug.LogError("[Sky] В профиле нет VisualEnvironment/PhysicallyBasedSky — пересобери сцену (Kare/Build Flight Scene).");
@@ -74,6 +78,11 @@ namespace Kare.Space.Game
             FloatingOrigin.Refresh();
             var b = u.Active.Body;
             if (b != profileBody) ApplyProfile(b);
+            // Цвет земли PBSky — это и подсветка борта снизу (ambient). У поверхности под бортом местный грунт,
+            // выше воздуха — весь диск планеты: тот же вес высоты, что у предела EV (DarkSkyAltitude).
+            var look = BodyVisuals.Get(b.Id);
+            var disc = look.Disc.a > 0 ? look.Disc : look.Low;
+            sky.groundTint.Override(Color.Lerp(look.Low, disc, AirWeight(u.Active)));
 
             // HDRP ждёт центр и радиус планеты в КИЛОМЕТРАХ (VisualEnvironment), сцена — в метрах.
             var c = BodyRenderer.Project(b, out double k);
@@ -112,11 +121,16 @@ namespace Kare.Space.Game
         /// </summary>
         const float PreExposedMax = 1e4f;
 
-        static float SunlitWeight(Vessel v)
-        {
-            double air = v.Body.HasAtmosphere ? System.Math.Min(1, System.Math.Max(0, v.Altitude / DarkSkyAltitude)) : 1;
-            return (float)(SunLight.Visible * air);
-        }
+        /// <summary>Разлёт bloom. Штатные 0,7 растаскивали диск Солнца (≈1,9·10⁹ нит при пороге 0) в ореол
+        /// ≈ 150 px на 1920 — серое пятно на орбите и оливковое на голубом небе; 0,3 — плотное белое пятно
+        /// (замер 02.10.2026). Пара: SunLight.ColorTemperature.</summary>
+        public const float BloomScatter = 0.3f;
+
+        static float SunlitWeight(Vessel v) => (float)SunLight.Visible * AirWeight(v);
+
+        /// <summary>0 у поверхности, 1 — выше DarkSkyAltitude (небо уже чёрное); без атмосферы всегда 1.</summary>
+        static float AirWeight(Vessel v) =>
+            v.Body.HasAtmosphere ? (float)System.Math.Min(1, System.Math.Max(0, v.Altitude / DarkSkyAltitude)) : 1;
 
         /// <summary>Смена профиля по SOI (§9.2): Земля, Марс, остальное — без атмосферы.</summary>
         void ApplyProfile(CelestialBody b)
@@ -152,7 +166,6 @@ namespace Kare.Space.Game
                     sky.ozoneDensityDimmer.Override(0);
                     break;
             }
-            sky.groundTint.Override(BodyVisuals.Get(b.Id).Low);
         }
     }
 }

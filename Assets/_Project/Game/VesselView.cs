@@ -37,6 +37,28 @@ namespace Kare.Space.Game
         const float ChuteRiser = 1.3f, ChuteDomeAngle = 75, ChuteLineWidth = 0.06f;
         /// <summary>Число полотнищ (клиньев) купола: полосы оранжевый/белый, как у «Востока».</summary>
         const int ChuteGores = 16;
+        /// <summary>Плазма входа (GDD §4.6): видна с PlasmaStart, полная яркость с PlasmaFull, Вт/м². Пара: «Восток»
+        /// на 65 км — 0,7 МВт/м², пик ≈ 1,5 МВт/м² на 46 км (прогон 01.10.2026); MaxHeatFlux СА 3 МВт/м².</summary>
+        const float PlasmaStart = 1e5f, PlasmaFull = 1.2e6f;
+        /// <summary>Яркость ударного слоя у лба и хвоста, нит. Пара: CoreNits — плазма не ярче ядра факела,
+        /// иначе днём при EV 14 выбеливает кадр так же, как физичный факел.</summary>
+        /// Ореол 2,5·10³ нит на 2,2 r накрывал шар целиком — вместо аппарата кремовый диск (01.10.2026).
+        const float PlasmaNits = 1.2e3f, PlasmaWakeNits = 4e2f;
+        /// <summary>Размеры в радиусах борта: ореол ударного слоя (полуширина спрайта), длина следа, дальность
+        /// подсветки; вынос центра ореола вперёд от лба. Пара: PlasmaHalo − PlasmaHaloAhead ≥ 1 — ореол выходит
+        /// за силуэт шара (сзади виден кольцом), но центр впереди, и сбоку шар виден за ним.</summary>
+        const float PlasmaHalo = 1.8f, PlasmaHaloAhead = 0.6f, PlasmaWakeLength = 9, PlasmaLightRange = 15;
+        static readonly Color PlasmaTint = new Color(1f, 0.5f, 0.32f);
+        /// <summary>Накал обшивки на входе, нит при полном нагреве: абляционное покрытие светится тёмно-красным
+        /// (≈1500 K), заодно теневая сторона не чёрная дырой. Пара: PlasmaNits — накал вчетверо тусклее ореола,
+        /// иначе силуэт аппарата тонет в плазме.
+        /// Эмиссия HDRP/Lit на корпусе экспозицией почти не гасится: при EV 14,3 замер 01.10.2026 — 20 нит → R≈20
+        /// (тёмно-красный), 100 нит → R≈172, 527 нит → белый «кремовый диск». Поэтому десятки нит, а не сотни.</summary>
+        const float HeatGlowNits = 60f;
+        static readonly Color HeatGlowTint = new Color(1f, 0.3f, 0.1f);
+        /// <summary>След не подходит к камере ближе, радиусов борта: лента, прошедшая сквозь ближнюю плоскость,
+        /// режется прямой кромкой на весь кадр (вид сзади, 01.10.2026). Конец ленты в текстуре гаснет в ноль.</summary>
+        const float WakeCameraClearance = 2;
 
         public Vessel Vessel { get; private set; }
 
@@ -50,10 +72,17 @@ namespace Kare.Space.Game
             public float PlumeRadius;
             public Transform Chute, Canopy;
             public LineRenderer Lines;
+            public Renderer BodyR;
+            public Color BodyColor;
         }
 
         readonly List<Part> parts = new List<Part>();
         Material bodyMat, plumeMat;
+        Transform plasma, plasmaHalo;
+        Renderer plasmaHaloR;
+        LineRenderer plasmaWake;
+        Light plasmaLight;
+        bool heatGlowOn;
         string builtSignature;
         double[] baseHeight;
         MaterialPropertyBlock mpb;
@@ -103,13 +132,14 @@ namespace Kare.Space.Game
                 Mesh mesh; Color col;
                 switch (s.Kind)
                 {
-                    case SectionKind.Capsule: mesh = ProcMesh.Frustum(r, r * 0.35f, len, 24, true); col = CapsuleColor; break;
-                    case SectionKind.Fairing: mesh = ProcMesh.Fairing(r, len, 24); col = FairingColor; break;
+                    case SectionKind.Capsule:
+                        mesh = s.Sphere ? ProcMesh.Sphere(r, len * 0.5f, 32, 16) : ProcMesh.Frustum(r, r * 0.35f, len, 24, true);
+                        col = CapsuleColor; break;
+                    case SectionKind.Fairing: mesh = ProcMesh.Fairing(r, len, 24, Vessel.FairingHalf); col = FairingColor; break;
                     case SectionKind.Payload: mesh = ProcMesh.Frustum(r, r, len, 24, true); col = PayloadColor; break;
                     default: mesh = ProcMesh.Frustum(r, r, len, 24, true); col = StageColor; break;
                 }
-                AddRenderer(go, mesh, col);
-                var part = new Part { Index = i, Tr = go.transform };
+                var part = new Part { Index = i, Tr = go.transform, BodyR = AddRenderer(go, mesh, col), BodyColor = col };
 
                 if (s.HasEngine)
                 {
@@ -121,7 +151,7 @@ namespace Kare.Space.Game
                     var nozzle = new GameObject("Nozzle");
                     nozzle.transform.SetParent(go.transform, false);
                     nozzle.transform.localPosition = new Vector3(0, -nr * 1.4f, 0);
-                    var bell = ProcMesh.Frustum(nr, nr * 0.45f, nr * 1.4f, 16, false);
+                    var bell = ProcMesh.Bell(nr, nr * 0.45f, nr * 1.4f, 16);
                     for (int k = 0; k < n; k++)
                     {
                         var b = new GameObject("Bell");
@@ -163,6 +193,163 @@ namespace Kare.Space.Game
                 if (s.ParachuteArea > 0) AddChute(part);
                 parts.Add(part);
             }
+            AddPlasma();
+        }
+
+        /// <summary>
+        /// Плазма входа (GDD §4.6). Первая версия — конусы с градиентом по длине — давала жёсткие кромки
+        /// силуэта (01.10.2026): у HDRP/Unlit нет френеля, и спад к краю можно задать только текстурой поперёк
+        /// взгляда. Поэтому ореол — спрайт к камере с радиальным спадом (виден с любого ракурса, сзади —
+        /// кольцом вокруг шара), след — LineRenderer (лента к камере вдоль оси, спад поперёк в V).
+        /// Плюс точечный свет: плазма подсвечивает лоб аппарата, иначе теневая сторона чёрная.
+        /// </summary>
+        void AddPlasma()
+        {
+            var root = new GameObject("Plasma");
+            root.transform.SetParent(transform, false);
+            var halo = new GameObject("Halo");
+            halo.transform.SetParent(root.transform, false);
+            halo.AddComponent<MeshFilter>().sharedMesh = ProcMesh.Billboard();
+            var mr = halo.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = PlasmaMaterial(PlasmaHaloTexture());
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            plasmaHaloR = mr;
+            plasmaHalo = halo.transform;
+
+            var wake = new GameObject("Wake");
+            wake.transform.SetParent(root.transform, false);
+            plasmaWake = wake.AddComponent<LineRenderer>();
+            plasmaWake.sharedMaterial = PlasmaMaterial(PlasmaWakeTexture());
+            plasmaWake.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            plasmaWake.receiveShadows = false;
+            plasmaWake.useWorldSpace = true;
+            plasmaWake.textureMode = LineTextureMode.Stretch;
+            plasmaWake.alignment = LineAlignment.View;
+            plasmaWake.positionCount = 3;
+            // Ширина в радиусах борта: у лба шире аппарата (обтекает), к хвосту сходится.
+            plasmaWake.widthCurve = new AnimationCurve(new Keyframe(0, 2.6f), new Keyframe(0.2f, 2.2f), new Keyframe(1, 0.7f));
+
+            var lgo = new GameObject("Plasma Light");
+            lgo.transform.SetParent(root.transform, false);
+            plasmaLight = lgo.AddComponent<Light>();
+            plasmaLight.type = LightType.Point;
+            lgo.AddComponent<HDAdditionalLightData>();
+            plasmaLight.lightUnit = UnityEngine.Rendering.LightUnit.Candela;
+            plasmaLight.color = PlasmaTint;
+            plasmaLight.shadows = LightShadows.None;
+            plasma = root.transform;
+            root.SetActive(false);
+        }
+
+        Material PlasmaMaterial(Texture2D tex)
+        {
+            var m = new Material(plumeMat) { name = "Plasma (runtime)" };
+            m.SetTexture("_EmissiveColorMap", tex);
+            m.EnableKeyword("_EMISSIVE_COLOR_MAP");
+            return m;
+        }
+
+        /// <summary>Ореол: горячее ядро у центра, край гаснет в ноль (спад — квадрат, без кромки).</summary>
+        static Texture2D haloTex, wakeTex;
+        static Texture2D PlasmaHaloTexture()
+        {
+            if (haloTex != null) return haloTex;
+            const int n = 64;
+            haloTex = new Texture2D(n, n, TextureFormat.RGBAHalf, false, true) { name = "Plasma Halo", wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+            {
+                float dx = (x + 0.5f) / n * 2 - 1, dy = (y + 0.5f) / n * 2 - 1;
+                float r = Mathf.Sqrt(dx * dx + dy * dy);
+                float f = Mathf.Clamp01(1 - r);
+                f = f * f * f;
+                var c = Color.Lerp(new Color(1f, 0.6f, 0.45f), new Color(1f, 0.92f, 0.8f), f);
+                haloTex.SetPixel(x, y, new Color(c.r * f, c.g * f, c.b * f, 1));
+            }
+            haloTex.Apply(false, true);
+            return haloTex;
+        }
+
+        /// <summary>След: U — вдоль (0 у лба, горячо → красное → ноль), V — поперёк (гаусс, края в ноль).</summary>
+        static Texture2D PlasmaWakeTexture()
+        {
+            if (wakeTex != null) return wakeTex;
+            const int nu = 64, nv = 32;
+            wakeTex = new Texture2D(nu, nv, TextureFormat.RGBAHalf, false, true) { name = "Plasma Wake", wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < nv; y++)
+            for (int x = 0; x < nu; x++)
+            {
+                float t = x / (nu - 1f), v = (y + 0.5f) / nv * 2 - 1;
+                float across = Mathf.Exp(-v * v * 5) * (1 - v * v);
+                float along = Mathf.Clamp01(t * 8) * Mathf.Exp(-3f * t) * (1 - t);
+                var c = Color.Lerp(new Color(1f, 0.75f, 0.55f), new Color(0.9f, 0.3f, 0.2f), Mathf.Clamp01(t * 1.6f));
+                float f = across * along;
+                wakeTex.SetPixel(x, y, new Color(c.r * f, c.g * f, c.b * f, 1));
+            }
+            wakeTex.Apply(false, true);
+            return wakeTex;
+        }
+
+        void UpdatePlasma(Vector3 airflow, double com, double length, double radius)
+        {
+            float heat = (float)Vessel.HeatFlux;
+            float k = Mathf.Clamp01((heat - PlasmaStart) / (PlasmaFull - PlasmaStart));
+            bool on = k > 0.001f && Vessel.SurfaceSpeed > 100;
+            k = on ? k * k * (3 - 2 * k) : 0;
+            // Накал гаснет вместе с плазмой; MPB перезаписывается целиком, поэтому базовый цвет — заново.
+            if (on || heatGlowOn)
+                foreach (var p in parts)
+                {
+                    mpb.Clear();
+                    mpb.SetColor("_BaseColor", p.BodyColor);
+                    // Альфа = 1: Color * float умножает и её (см. SetEmissive).
+                    var glow = HeatGlowTint * (HeatGlowNits * k);
+                    glow.a = 1;
+                    mpb.SetColor("_EmissiveColor", glow);
+                    p.BodyR.SetPropertyBlock(mpb);
+                }
+            heatGlowOn = on;
+            plasma.gameObject.SetActive(on);
+            if (!on) return;
+            float r = (float)radius;
+            // Лоб — тот торец, что идёт первым; ударная волна стоит чуть впереди него.
+            var nose = transform.up;
+            float front = Vector3.Dot(nose, airflow) >= 0 ? (float)(length - com) : (float)-com;
+            var bow = transform.TransformPoint(0, front, 0) + airflow * (r * 0.25f);
+            plasma.position = bow;
+            float flicker = Flicker(PlasmaFlicker, 17);
+            var cam = Camera.main;
+            if (cam != null) plasmaHalo.rotation = cam.transform.rotation;
+            plasmaHalo.position = bow + airflow * (r * PlasmaHaloAhead);
+            plasmaHalo.localScale = Vector3.one * (r * PlasmaHalo * (0.7f + 0.3f * k));
+            float wakeLen = r * PlasmaWakeLength * (0.3f + 0.7f * k) * flicker + (float)length;
+            float wakeFade = 1;
+            if (cam != null)
+            {
+                // Лента к камере вдоль оси: глядя по оси, она разворачивается в диск во всю ширину и закрывает
+                // аппарат светлым пятном (01.10.2026). Гасим по sin² угла между взглядом и потоком.
+                float axial = Vector3.Dot(cam.transform.forward, airflow);
+                wakeFade = 1 - axial * axial;
+                wakeFade *= wakeFade;
+                // Камера внутри «трубы» следа — укоротить ленту, чтобы её гаснущий конец был перед камерой.
+                var rel = cam.transform.position - bow;
+                float along = -Vector3.Dot(rel, airflow);
+                float side = (rel + airflow * along).magnitude;
+                if (along > 0 && side < r * 3)
+                    wakeLen = Mathf.Clamp(along - r * WakeCameraClearance, r * 0.5f, wakeLen);
+            }
+            plasmaWake.SetPosition(0, bow + airflow * (r * 0.3f));
+            plasmaWake.SetPosition(1, bow - airflow * (wakeLen * 0.25f));
+            plasmaWake.SetPosition(2, bow - airflow * wakeLen);
+            plasmaWake.widthMultiplier = r;
+            float nits = PlasmaNits * k * flicker;
+            ReportPlume(nits);
+            SetEmissive(plasmaHaloR, PlasmaTint * nits);
+            SetEmissive(plasmaWake, PlasmaTint * (PlasmaWakeNits * k * wakeFade));
+            // Сила света = яркость × видимая площадь ударного слоя (диск радиуса r).
+            plasmaLight.intensity = nits * Mathf.PI * r * r;
+            plasmaLight.range = r * PlasmaLightRange;
         }
 
         /// <summary>Купол и стропы: корень в точке крепления (верх секции), +Y — против набегающего потока.</summary>
@@ -282,16 +469,19 @@ namespace Kare.Space.Game
             return gradient;
         }
 
-        void SetPlumeColor(Renderer r, float nits)
+        void SetPlumeColor(Renderer r, float nits) => SetEmissive(r, new Color(nits, nits, nits));
+
+        void SetEmissive(Renderer r, Color nits)
         {
             mpb.Clear();
             // Через эмиссию, а не _UnlitColor: цвет Unlit HDRP не умножается на экспозицию (1 нит уже белый),
             // эмиссия — умножается. Альфа 1: аддитив HDRP умножает цвет на альфу. Градиент — в материале.
-            mpb.SetColor("_EmissiveColor", new Color(nits, nits, nits, 1));
+            nits.a = 1;
+            mpb.SetColor("_EmissiveColor", nits);
             r.SetPropertyBlock(mpb);
         }
 
-        void AddRenderer(GameObject go, Mesh mesh, Color col)
+        Renderer AddRenderer(GameObject go, Mesh mesh, Color col)
         {
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
@@ -301,6 +491,7 @@ namespace Kare.Space.Game
             mpb.Clear();
             mpb.SetColor("_BaseColor", col);
             mr.SetPropertyBlock(mpb);
+            return mr;
         }
 
         /// <summary>Самый яркий видимый факел за кадр, нит — SkyController поднимает по нему нижний предел EV
@@ -327,7 +518,7 @@ namespace Kare.Space.Game
             if (!show) return;
 
             if (Signature() != builtSignature) Rebuild();
-            Vessel.MassProperties(out _, out double com, out _, out _);
+            Vessel.MassProperties(out _, out double com, out double vesselLen, out double vesselR);
             Vessel.Layout(baseHeight);
             transform.SetPositionAndRotation(pos, FloatingOrigin.ToQuaternion(Vessel.Attitude));
 
@@ -336,6 +527,7 @@ namespace Kare.Space.Game
             var air = Vessel.Velocity - Vessel.Body.SurfaceVelocity(Vessel.Position);
             var airflow = air.magnitude > 1 ? FloatingOrigin.DirToUnity(air).normalized
                                             : -FloatingOrigin.DirToUnity(Vessel.Position).normalized;
+            UpdatePlasma(airflow, com, vesselLen, vesselR);
             foreach (var p in parts)
             {
                 p.Tr.localPosition = new Vector3(0, (float)(baseHeight[p.Index] - com), 0);
@@ -353,7 +545,7 @@ namespace Kare.Space.Game
                 float vac = 1 - Mathf.Clamp01(pressure);
                 float spread = 1 + vac * PlumeVacuumGrowth;
                 float len = p.PlumeRadius * PlumeLengthSL * (0.4f + 0.6f * thr) * spread;
-                float flicker = 1 + 0.05f * Mathf.Sin(Time.time * 53f + p.Index) + 0.03f * Mathf.Sin(Time.time * 31f);
+                float flicker = Flicker(PlumeFlicker, p.Index);
                 float coreR = p.PlumeRadius * (1 + vac * PlumeVacuumGrowth * CoreSpread);
                 p.Plume.localScale = new Vector3(coreR, len * flicker, coreR);
                 p.Glow.localScale = new Vector3(p.PlumeRadius * spread, len * GlowLength * flicker, p.PlumeRadius * spread);
@@ -361,9 +553,19 @@ namespace Kare.Space.Game
                 float bright = thr * Mathf.Lerp(1, VacuumBrightness, vac) * flicker;
                 SetPlumeColor(p.CoreR, CoreNits * bright);
                 SetPlumeColor(p.GlowR, GlowNits * bright / spread);
-                p.PlumeLight.intensity = PlumeCandela * thr * flicker;
+                // Свет факела дрожит слабее струи: им освещён весь стол и дым, и та же амплитуда читалась
+                // миганием всей сцены.
+                p.PlumeLight.intensity = PlumeCandela * thr * (1 + (flicker - 1) * 0.3f);
             }
         }
+
+        /// <summary>Дрожание факела и плазмы, доля. Было 1 + 0,05·sin 53t + 0,03·sin 31t: 8,4 Гц близко к
+        /// половине частоты кадров, и при 15–30 к/с синус шёл через кадр «ярко/тускло» — замер 02.10.2026 на взлёте:
+        /// средняя яркость кадра скакала ±4,5 из 57 (8 %) кадр к кадру. Шум Перлина ≈ 4 Гц алиасинга не даёт.</summary>
+        const float PlumeFlicker = 0.04f, PlasmaFlicker = 0.06f, FlickerHz = 4f;
+
+        static float Flicker(float amp, int seed) =>
+            1 + amp * (2 * Mathf.PerlinNoise(Time.time * FlickerHz, seed * 7.31f) - 1);
 
         bool visible = true;
 
@@ -378,6 +580,9 @@ namespace Kare.Space.Game
     /// <summary>Процедурные тела вращения вокруг +Y для бортов.</summary>
     public static class ProcMesh
     {
+        /// <summary>Внутренняя стенка створки обтекателя — доля внешнего радиуса (толщина оболочки ≈ 2 %).</summary>
+        const float FairingInner = 0.98f;
+
         /// <summary>Усечённый конус от y=0 (радиус r0) до y=h (радиус r1); h &lt; 0 — вниз. caps — торцы.</summary>
         public static Mesh Frustum(float r0, float r1, float h, int seg, bool caps)
         {
@@ -401,6 +606,56 @@ namespace Kare.Space.Game
                 Cap(verts, tris, r1, h, seg, true);
             }
             return Finish(verts, tris, "Frustum");
+        }
+
+        /// <summary>Стенка раструба изнутри — доля внешнего радиуса (толщина ≈ 6 %).</summary>
+        const float BellInner = 0.94f;
+
+        /// <summary>
+        /// Раструб сопла: срез радиуса rExit на y = 0, горло rThroat на y = h. Наружная стенка, внутренняя
+        /// (обратный обход), кромка среза и дно у горла. Прежний односторонний Frustum снизу и сбоку под углом
+        /// был виден только наружной половиной: HDRP/Lit режет изнанку, и сопло «пропадало» с части ракурсов.
+        /// </summary>
+        public static Mesh Bell(float rExit, float rThroat, float h, int seg)
+        {
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+            // 0 — наружная стенка, 1 — внутренняя; вершины раздельные, чтобы нормали не усреднялись.
+            for (int w = 0; w < 2; w++)
+            {
+                int start = verts.Count;
+                float k = w == 0 ? 1 : BellInner;
+                for (int i = 0; i <= seg; i++)
+                {
+                    float a = 2 * Mathf.PI * i / seg;
+                    var d = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                    verts.Add(d * rExit * k);
+                    verts.Add(d * rThroat * k + Vector3.up * h);
+                }
+                for (int i = 0; i < seg; i++)
+                {
+                    int a = start + i * 2;
+                    Quad(tris, a, a + 2, a + 3, a + 1, w == 0);
+                }
+            }
+            // Кромка среза: кольцо в плоскости y = 0 лицом вниз.
+            int lip = verts.Count;
+            for (int i = 0; i <= seg; i++)
+            {
+                float a = 2 * Mathf.PI * i / seg;
+                var d = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                verts.Add(d * rExit);
+                verts.Add(d * rExit * BellInner);
+            }
+            for (int i = 0; i < seg; i++)
+            {
+                int a = lip + i * 2;
+                tris.Add(a); tris.Add(a + 2); tris.Add(a + 1);
+                tris.Add(a + 1); tris.Add(a + 2); tris.Add(a + 3);
+            }
+            // Дно у горла лицом вниз: в раструб смотрим и видим тёмную камеру, а не небо сквозь сопло.
+            Cap(verts, tris, rThroat * BellInner, h, seg, false);
+            return Finish(verts, tris, "Bell");
         }
 
         /// <summary>
@@ -482,8 +737,47 @@ namespace Kare.Space.Game
             return m;
         }
 
-        /// <summary>Обтекатель: цилиндр на 55 % длины + оживальный нос.</summary>
-        public static Mesh Fairing(float r, float len, int seg)
+        /// <summary>Квадрат 2×2 в плоскости XY лицом к −Z: спрайт, повёрнутый как камера, смотрит на неё.</summary>
+        public static Mesh Billboard()
+        {
+            var m = new Mesh { name = "Billboard" };
+            m.SetVertices(new List<Vector3> { new Vector3(-1, -1, 0), new Vector3(1, -1, 0), new Vector3(1, 1, 0), new Vector3(-1, 1, 0) });
+            m.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+            m.SetTriangles(new[] { 0, 3, 2, 0, 2, 1 }, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Шар радиуса r с центром на высоте cy (UV-сфера: seg меридианов, rings поясов).</summary>
+        public static Mesh Sphere(float r, float cy, int seg, int rings)
+        {
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+            for (int i = 0; i <= seg; i++)
+            {
+                float a = 2 * Mathf.PI * i / seg;
+                for (int k = 0; k <= rings; k++)
+                {
+                    float t = Mathf.PI * k / rings;
+                    verts.Add(new Vector3(r * Mathf.Sin(t) * Mathf.Cos(a), cy + r * Mathf.Cos(t), r * Mathf.Sin(t) * Mathf.Sin(a)));
+                }
+            }
+            int rc = rings + 1;
+            for (int i = 0; i < seg; i++)
+            for (int k = 0; k < rings; k++)
+            {
+                int a = i * rc + k, b = (i + 1) * rc + k;
+                Quad(tris, a, b, b + 1, a + 1, false);
+            }
+            return Finish(verts, tris, "Sphere");
+        }
+
+        /// <summary>
+        /// Обтекатель: цилиндр на 55 % длины + оживальный нос. half ±1 — створка со стороны ±X: полуоболочка
+        /// с внутренней стенкой (HDRP/Lit режет изнанку, а у раскрытой створки изнанку видно).
+        /// </summary>
+        public static Mesh Fairing(float r, float len, int seg, int half = 0)
         {
             const int rings = 10;
             const float cyl = 0.55f;
@@ -496,20 +790,28 @@ namespace Kare.Space.Game
             var verts = new List<Vector3>();
             var tris = new List<int>();
             int pc = prof.Count;
-            for (int i = 0; i <= seg; i++)
+            // Створка — дуга π вокруг своей стороны ±X; изнанка — та же дуга чуть внутри с обратным обходом.
+            float arc = half == 0 ? 2 * Mathf.PI : Mathf.PI, a0 = half > 0 ? -Mathf.PI / 2 : Mathf.PI / 2;
+            int walls = half == 0 ? 1 : 2;
+            for (int w = 0; w < walls; w++)
             {
-                float a = 2 * Mathf.PI * i / seg;
-                var d = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
-                foreach (var p in prof) verts.Add(d * p.x + Vector3.up * p.y);
+                int start = verts.Count;
+                float k0 = w == 0 ? 1 : FairingInner;
+                for (int i = 0; i <= seg; i++)
+                {
+                    float a = a0 + arc * i / seg;
+                    var d = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                    foreach (var p in prof) verts.Add(d * p.x * k0 + Vector3.up * p.y);
+                }
+                for (int i = 0; i < seg; i++)
+                for (int k = 0; k < pc - 1; k++)
+                {
+                    int a = start + i * pc + k, b = start + (i + 1) * pc + k;
+                    Quad(tris, a, b, b + 1, a + 1, w == 0);
+                }
             }
-            for (int i = 0; i < seg; i++)
-            for (int k = 0; k < pc - 1; k++)
-            {
-                int a = i * pc + k, b = (i + 1) * pc + k;
-                Quad(tris, a, b, b + 1, a + 1, true);
-            }
-            Cap(verts, tris, r, 0, seg, false);
-            return Finish(verts, tris, "Fairing");
+            if (half == 0) Cap(verts, tris, r, 0, seg, false);
+            return Finish(verts, tris, half == 0 ? "Fairing" : "FairingHalf");
         }
 
         static void Quad(List<int> t, int a, int b, int c, int d, bool outward)
