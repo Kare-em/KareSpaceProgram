@@ -76,6 +76,13 @@
   и `Alive = false` (вид перестаёт перестраиваться). Брать 15 км, как чит в Esc.
 
 ## Как вызывать UnityMCP, если тулов нет в сессии
+- 03.10.2026: редактор в HTTP-режиме — stdio-тулы `unityMCP` отвечают «No Unity Editor instances found» (порт 6400 не
+  слушается, это нормально), а HTTP-коннектор сессии — ECONNREFUSED, если стартовал раньше сервера. Рабочий путь —
+  HTTP JSON-RPC клиент (`python mcp.py <тул> <json|файл.json>` в скретчпаде: initialize → initialized → tools/call,
+  `mcp-session-id`, SSE `data:`). Аргументы с C#-кодом — файлом JSON, иначе кавычки ломаются в bash.
+- `RenderProbe.Shot` (cam.Render в RT) в Play даёт чёрный кадр и EV NaN — снимать `manage_camera screenshot`
+  (`output_folder: Temp/Shots`), яркость считать PIL по уменьшенной копии.
+- Ночь для замеров: Play → `u.SetWarp(6)` на столе (×10⁴) → ждать `u.Time` +50 000 с (≈02:30 местного на Байконуре) → `SetWarp(0)`.
 - 02.10.2026: в сессии два набора тулов — `UnityMCP` (заглавные) отвечает `no_unity_session`, рабочий —
   `unityMCP` (строчные, stdio). Ресурсов у него нет (`editor/state` не читается) — состояние узнавать `execute_code`.
   Сразу после `play` — доменная перезагрузка, «No Unity Editor instances found»/таймаут: просто повторить вызов.
@@ -96,3 +103,9 @@
 - **`get_viewport_screenshot` в Blender отдаёт старый кадр после смены вида через bpy**; надёжно — рендер Workbench
   из служебной камеры. `hide_set` скрывает только во вьюпорте, для рендера ещё `hide_render = True`.
 - Namespace `execute_blender_code` между вызовами не сохраняется — в каждом вызове `exec(open(...).read())`.
+- **`PlayerPrefs` в инициализаторе поля MonoBehaviour** → UnityException (вызов из конструктора). Читать лениво
+  (`DetailSettings.Level`) или в `Awake`; в `MapView` буфер пустой и ресайзится в `Draw`.
+- **`Destroy` чужой текстуры** («Destroying object UnityWhite is not allowed»): при перестройке LOD освобождать только своё —
+  `BodyRenderer.Own/Free` с HashSet, плейсхолдер `Texture2D.whiteTexture` и ассеты не трогать.
+- **Долгий `execute_code` (генерация уровня «Ультра» ~70 с) отваливается по таймауту MCP**, а Unity доделывает работу.
+  Результат — `Debug.Log` и потом `read_console`, а не return.

@@ -50,8 +50,6 @@ namespace Kare.Space.Game
         /// <summary>Облака Земли: высота слоя, м. Пара: ниже потолка патча PatchMaxAltitude (40 км) — с борта
         /// слой виден сверху; снизу (камера внутри сферы) отсекается задними гранями.</summary>
         const double CloudAltitude = 8000;
-        /// <summary>Сетка сферы облаков. Пара: стрела прогиба R·Δθ²/8 при 256 ≈ 480 м — много меньше CloudAltitude.</summary>
-        const int CloudSegments = 256;
         /// <summary>Повтор тайла грунта и крупной вариации, м. Пара: шаг патча в центре ≈ 20 м — крупный
         /// масштаб много больше шага, иначе вариация не читается; мелкий — меньше камеры у стола (≈ 60 м).</summary>
         const double GroundTile = 6, MacroTile = 350;
@@ -61,12 +59,7 @@ namespace Kare.Space.Game
         /// <summary>Карта (§9.6) рисует без сжатия.</summary>
         public static bool Compression = true;
 
-        // Разрешение UV-сферы. Пара: стрела прогиба грани R·Δθ²/8 (у Земли при 384 — ≈ 210 м) —
-        // настолько же сфера опущена под истинную поверхность, чтобы её закрывал патч и не было z-fighting.
-        const int SegmentsDetailed = 384, SegmentsPlain = 96;
-        const int TextureDetailed = 1024, TexturePlain = 256;
-        /// <summary>Земля — 2048: тексель 20 км, береговая линия с орбиты не «ступеньками». Огни остаются 1024.</summary>
-        const int TextureEarth = 2048;
+        // Разрешение сфер, текстур и облаков — по уровню DetailSettings (меню Esc), см. BuildLod.
 
         // Патч под бортом: сетка PatchN², узлы сгущаются к центру (x = L·t·|t|), полуширина PatchHalf.
         // Пара: шаг в центре ≈ L·(2/N)² — при 80 км и 128 это ≈ 20 м.
@@ -87,6 +80,11 @@ namespace Kare.Space.Game
             /// <summary>Есть свой грунт: UV патча — метры, цвет подгоняется к цвету тела в точке.</summary>
             public bool Ground;
             public Color GroundMean;
+            /// <summary>Земля, Луна, Марс — густая сетка и крупные текстуры, сфера опущена под патч.</summary>
+            public bool Detailed;
+            public MeshFilter Mf;
+            public MeshFilter CloudMf;
+            public Material CloudMat;
         }
 
         Material waterMat;
@@ -113,36 +111,29 @@ namespace Kare.Space.Game
             foreach (var b in u.System.Bodies)
             {
                 if (b.Parent == null) continue; // Солнце рисует PBSky по углу Directional Light (§9.1)
-                bool detailed = b.Id == "earth" || b.Id == "moon" || b.Id == "mars";
                 var go = new GameObject(b.Name);
                 go.transform.SetParent(transform, false);
-                var e = new Entry { Body = b, Tr = go.transform };
-                int seg = detailed ? SegmentsDetailed : SegmentsPlain;
-                double dTheta = 2 * Mathf.PI / seg;
-                double sag = b.Radius * dTheta * dTheta / 8;
-                e.SphereRadius = b.Radius - (detailed ? sag * 1.5 : 0);
-                go.AddComponent<MeshFilter>().sharedMesh = BuildSphere(b, seg, e.SphereRadius);
+                var e = new Entry { Body = b, Tr = go.transform, Detailed = b.Id == "earth" || b.Id == "moon" || b.Id == "mars" };
+                e.Mf = go.AddComponent<MeshFilter>();
                 var mr = go.AddComponent<MeshRenderer>();
                 e.Mat = new Material(BaseMaterial) { name = $"Body {b.Id}" };
                 bool earth = b.Id == "earth";
-                e.Mat.SetTexture("_BaseColorMap", BuildTexture(b, earth ? TextureEarth : detailed ? TextureDetailed : TexturePlain, out var mask));
                 e.Mat.SetColor("_BaseColor", Color.white);
                 e.Mat.SetFloat("_Smoothness", 0.15f);
+                // Копия до текстур: огни и маска блика — только у сферы (у патча своя вода, тексель огней светился бы пятном).
                 e.PatchMat = new Material(e.Mat) { name = $"Patch {b.Id}" };
                 if (earth)
                 {
-                    AddNightLights(e.Mat, b, TextureDetailed);
-                    // Блик Солнца на океане (§9.4): гладкость из маски, только у сферы — у патча своя вода.
-                    e.Mat.SetTexture("_MaskMap", mask);
+                    AddClouds(e);
+                    // Блик Солнца на океане (§9.4): гладкость из маски (BuildLod), только у сферы — у патча своя вода.
                     e.Mat.SetFloat("_MetallicRemapMin", 0);
                     e.Mat.SetFloat("_MetallicRemapMax", 0);
                     e.Mat.SetFloat("_AORemapMin", 1);
                     e.Mat.SetFloat("_AORemapMax", 1);
                     e.Mat.SetFloat("_SmoothnessRemapMin", 0);
                     e.Mat.SetFloat("_SmoothnessRemapMax", 1);
-                    // Текстуры лежат на материале — Validate ставит _MASKMAP и _EMISSIVE_COLOR_MAP сам.
-                    HDMaterial.ValidateMaterial(e.Mat);
                 }
+                BuildLod(e);
                 SetupGround(e);
                 mr.sharedMaterial = e.Mat;
                 // Тени от планеты на планету рисовать бессмысленно (каскады 2 км), затмения — SunLight.
@@ -150,7 +141,6 @@ namespace Kare.Space.Game
                 e.Rend = mr;
                 entries.Add(e);
                 byBody[b] = e;
-                if (earth) AddClouds(e);
             }
 
             var p = new GameObject("Terrain Patch");
@@ -162,6 +152,87 @@ namespace Kare.Space.Game
             patchMf.sharedMesh = new Mesh { name = "Patch", indexFormat = IndexFormat.UInt32 };
             p.SetActive(false);
             waterMat = BuildWaterMaterial();
+        }
+
+        /// <summary>
+        /// Всё, что зависит от DetailSettings: сетка сферы и её радиус, текстура тела (у Земли ещё маска блика и огни),
+        /// сетка и текстура облаков. Старое освобождается: текстура Земли на Ультра — 170 МБ, утечка при каждой смене
+        /// уровня копилась бы. Грунт патча не трогаем — он от уровня не зависит.
+        /// </summary>
+        void BuildLod(Entry e)
+        {
+            var b = e.Body;
+            bool earth = b.Id == "earth";
+            int seg = e.Detailed ? DetailSettings.SegmentsDetailed : DetailSettings.SegmentsPlain;
+            // Стрела прогиба грани R·Δθ²/8: на полторы стрелы сфера опущена под истинную поверхность, чтобы её
+            // закрывал патч и не было z-fighting. Радиус меняется с уровнем — масштаб в LateUpdate берёт его отсюда.
+            double dTheta = 2 * Mathf.PI / seg;
+            double sag = b.Radius * dTheta * dTheta / 8;
+            e.SphereRadius = b.Radius - (e.Detailed ? sag * 1.5 : 0);
+            Free(e.Mf.sharedMesh);
+            e.Mf.sharedMesh = Own(BuildSphere(b, seg, e.SphereRadius));
+
+            // Текстуры — из дискового кеша (TextureCache), генерация только при первом запуске уровня.
+            int w = earth ? DetailSettings.TextureEarth : e.Detailed ? DetailSettings.TextureDetailed : DetailSettings.TexturePlain;
+            string colorKey = $"{b.Id}_color_{w}", maskKey = $"{b.Id}_mask_{w}";
+            var tex = TextureCache.Load(colorKey, false);
+            var mask = earth ? TextureCache.Load(maskKey, true) : null;
+            if (tex == null || earth && mask == null)
+            {
+                if (tex != null) Destroy(tex);
+                if (mask != null) Destroy(mask);
+                tex = TextureCache.Store(colorKey, BuildTexture(b, w, out mask));
+                if (mask != null) mask = TextureCache.Store(maskKey, mask);
+            }
+            Free(e.Mat.GetTexture("_BaseColorMap"));
+            e.Mat.SetTexture("_BaseColorMap", Own(tex));
+            if (!e.Ground) e.PatchMat.SetTexture("_BaseColorMap", tex);
+            if (!earth) return;
+
+            Free(e.Mat.GetTexture("_MaskMap"));
+            e.Mat.SetTexture("_MaskMap", Own(mask));
+            int lw = DetailSettings.TextureDetailed;
+            string lightsKey = $"{b.Id}_lights_{lw}";
+            var lights = TextureCache.Load(lightsKey, false) ?? TextureCache.Store(lightsKey, BuildNightLights(b, lw));
+            Free(e.Mat.GetTexture("_EmissiveColorMap"));
+            e.Mat.SetTexture("_EmissiveColorMap", Own(lights));
+            e.Mat.SetColor("_EmissiveColor", NightLightsColor * NightLightsNits);
+            // Текстуры лежат на материале — Validate ставит _MASKMAP и _EMISSIVE_COLOR_MAP сам.
+            HDMaterial.ValidateMaterial(e.Mat);
+
+            e.CloudMf.transform.localScale = Vector3.one * (float)((b.Radius + CloudAltitude) / e.SphereRadius);
+            Free(e.CloudMf.sharedMesh);
+            e.CloudMf.sharedMesh = Own(BuildSphere(b, DetailSettings.CloudSegments, 1, false));
+            Free(e.CloudMat.GetTexture("_BaseColorMap"));
+            int cw = DetailSettings.TextureClouds;
+            string cloudKey = $"clouds_{cw}";
+            var clouds = TextureCache.Load(cloudKey, false, CloudAniso) ?? TextureCache.Store(cloudKey, BuildClouds(cw), CloudAniso);
+            e.CloudMat.SetTexture("_BaseColorMap", Own(clouds));
+        }
+
+        /// <summary>Созданное BuildLod. Освобождаем только своё: на материалах бывают и ассеты (BaseMaterial, заглушки),
+        /// а Destroy ассета в Play — ошибка «not allowed».</summary>
+        readonly HashSet<Object> lod = new HashSet<Object>();
+
+        T Own<T>(T o) where T : Object
+        {
+            lod.Add(o);
+            return o;
+        }
+
+        /// <summary>Анизотропия облаков: слой с орбиты виден под скользящим углом у горизонта.</summary>
+        const int CloudAniso = 8;
+
+        void Free(Object o)
+        {
+            if (o != null && lod.Remove(o)) Destroy(o);
+        }
+
+        /// <summary>Перестроить тела под новый уровень детализации (меню Esc). Блокирует кадр на время генерации
+        /// текстур — секунды на Ультра; миссия при этом не перезапускается.</summary>
+        public void ApplyDetail()
+        {
+            foreach (var e in entries) BuildLod(e);
         }
 
         /// <summary>
@@ -191,17 +262,16 @@ namespace Kare.Space.Game
         {
             var go = new GameObject("Clouds");
             go.transform.SetParent(e.Tr, false);
-            go.transform.localScale = Vector3.one * (float)((e.Body.Radius + CloudAltitude) / e.SphereRadius);
-            go.AddComponent<MeshFilter>().sharedMesh = BuildSphere(e.Body, CloudSegments, 1, false);
+            e.CloudMf = go.AddComponent<MeshFilter>(); // сетку, масштаб и текстуру ставит BuildLod
             var mr = go.AddComponent<MeshRenderer>();
-            var m = new Material(BaseMaterial) { name = "Clouds" };
-            m.SetTexture("_BaseColorMap", BuildClouds(TextureEarth));
+            var m = e.CloudMat = new Material(BaseMaterial) { name = "Clouds" };
             m.SetColor("_BaseColor", Color.white);
             m.SetFloat("_Smoothness", 0);
             m.SetFloat("_Metallic", 0);
             // Туман на прозрачных добавляет рассеяние атмосферы и там, где альфа 0: вся сфера облаков с орбиты
             // была сплошь бирюзовой (замер 01.10.2026).
             m.SetFloat("_EnableFogOnTransparent", 0);
+            m.SetTexture("_BaseColorMap", Texture2D.whiteTexture); // заглушка до BuildLod: SetSurfaceType валидирует с картой
             HDMaterial.SetSurfaceType(m, true); // внутри — ValidateMaterial
             mr.sharedMaterial = m;
             mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -210,6 +280,8 @@ namespace Kare.Space.Game
         static Texture2D BuildClouds(int w)
         {
             int h = w / 2;
+            // Октава шума на каждое удвоение текстуры: мельчайшая октава ≈ 2 текселя. Пара: CloudBaseOctaves при 2048.
+            int octaves = EarthSurface.CloudBaseOctaves + Mathf.RoundToInt(Mathf.Log(w / 2048f, 2));
             var px = new Color32[w * h];
             System.Threading.Tasks.Parallel.For(0, h, y =>
             {
@@ -217,12 +289,12 @@ namespace Kare.Space.Game
                 for (int x = 0; x < w; x++)
                 {
                     double lon = -180 + 360.0 * (x + 0.5) / w;
-                    px[y * w + x] = new Color32(245, 247, 250, (byte)(255 * EarthSurface.Cloud(lat, lon)));
+                    px[y * w + x] = new Color32(245, 247, 250, (byte)(255 * EarthSurface.Cloud(lat, lon, octaves)));
                 }
             });
-            var tex = new Texture2D(w, h, TextureFormat.RGBA32, true) { name = "Clouds earth", wrapModeU = TextureWrapMode.Repeat, wrapModeV = TextureWrapMode.Clamp, anisoLevel = 4 };
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, true) { name = "Clouds earth", wrapModeU = TextureWrapMode.Repeat, wrapModeV = TextureWrapMode.Clamp, anisoLevel = CloudAniso };
             tex.SetPixels32(px);
-            tex.Apply(true, true);
+            tex.Apply(true, false);
             return tex;
         }
 
@@ -527,12 +599,13 @@ namespace Kare.Space.Game
             int rings = seg / 2, cols = seg + 1;
             int fr = rings * 2, fs = seg * 2, fcols = fs + 1;
             var fine = new double[fcols * (fr + 1)];
-            for (int r = 0; r <= fr; r++)
+            // Строки независимы, рельеф — чистая функция: параллельно (при 768 — 2,4 млн отсчётов, в один поток 1,5 с).
+            System.Threading.Tasks.Parallel.For(0, fr + 1, r =>
             {
                 double lat = -90 + 180.0 * r / fr;
                 for (int s = 0; s <= fs; s++)
                     fine[r * fcols + s] = b.SurfaceHeight(CelestialBody.LatLonToBodyFixed(lat, -180 + 360.0 * s / fs));
-            }
+            });
             // Радиус влияния площадки на вершину: зона выравнивания плюс диагональ грани на экваторе.
             double faceDiag = b.Radius * (2 * System.Math.PI / seg) * System.Math.Sqrt(2);
             var h = new double[cols * (rings + 1)];
@@ -590,7 +663,7 @@ namespace Kare.Space.Game
         /// пятнами по шуму + точки-города. Днём (EV 12+) их не видно, ночью (EV −5) — видно; экспозиция
         /// решает сама, переключать по терминатору не нужно.
         /// </summary>
-        static void AddNightLights(Material m, CelestialBody b, int w)
+        static Texture2D BuildNightLights(CelestialBody b, int w)
         {
             int h = w / 2;
             var look = BodyVisuals.Get(b.Id);
@@ -617,10 +690,8 @@ namespace Kare.Space.Game
                 }
             }
             tex.SetPixels32(px);
-            tex.Apply(true, true);
-            m.SetTexture("_EmissiveColorMap", tex);
-            m.SetColor("_EmissiveColor", NightLightsColor * NightLightsNits);
-            m.EnableKeyword("_EMISSIVE_COLOR_MAP");
+            tex.Apply(true, false); // читаемой: TextureCache сожмёт и выгрузит
+            return tex;
         }
 
         /// <summary>Яркость огней в пике, нит (порядок VIIRS для города, ≈1e-4 Вт/м²/ср). Пара: ночная экспозиция
@@ -654,13 +725,13 @@ namespace Kare.Space.Game
                 }
             });
             tex.SetPixels32(px);
-            tex.Apply(true, true);
+            tex.Apply(true, false);
             mask = null;
             if (earth)
             {
                 mask = new Texture2D(w, h, TextureFormat.RGBA32, true, true) { name = $"Mask {b.Id}", wrapModeU = TextureWrapMode.Repeat, wrapModeV = TextureWrapMode.Clamp };
                 mask.SetPixels32(mk);
-                mask.Apply(true, true);
+                mask.Apply(true, false);
             }
             return tex;
         }

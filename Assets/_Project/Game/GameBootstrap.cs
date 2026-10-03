@@ -94,6 +94,8 @@ namespace Kare.Space.Game
         public bool GLoadLimit;
         [Tooltip("Подсказка по углу тангажа при ручном выведении.")]
         public bool AscentTutor = true;
+        [Tooltip("Автоускорение (§6.11): пока ведёт автопилот, ступень ускорения выбирает он сам — рельсы до события, ×10 в физике.")]
+        public bool AutoWarp = true;
         [Tooltip("Чит для тестов: баки активного борта каждый кадр полны.")]
         public bool InfiniteFuel;
         [Tooltip("Карта суши Земли (Tools/bake-earth-land.py, §2.8). Без неё материки процедурные.")]
@@ -143,6 +145,7 @@ namespace Kare.Space.Game
             FlightPhysics.AeroBreakup = AeroBreakup;
             FlightPhysics.HeatDamage = HeatDamage;
             FlightPhysics.GLoadLimit = GLoadLimit;
+            universe.AutoWarp = AutoWarp;
             // Advance сам режет realDt до 0,1 с и выбирает физику/рельсы по WarpIndex. В меню — пауза.
             if (InfiniteFuel && universe.Active != null && universe.Active.Alive) universe.Active.Refuel();
             if (!PauseMenu.IsOpen) universe.Advance(Time.deltaTime);

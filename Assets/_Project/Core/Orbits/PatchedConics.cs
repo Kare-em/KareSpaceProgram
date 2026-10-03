@@ -121,8 +121,9 @@ namespace Kare.Space.Core
             double minStep = Math.Max(1, 1e-6 * Math.Min(orbit.Period, 1e9));
             double prev = t;
             // Сразу после выхода из сферы корабль стоит на её границе: сначала дать ему выйти,
-            // иначе граница засчитается как новый вход.
-            bool leaving = Gap(orbit, c, t, out _) < soi * 1.0001;
+            // иначе граница засчитается как новый вход. Только если расстояние растёт: на подлёте в нескольких км от
+            // границы (под автоускорением шаг сюда и попадает) «выход» проскакивал вход в сферу Луны целиком.
+            bool leaving = Gap(orbit, c, t, out _) < soi * 1.0001 && Receding(orbit, c, t);
             for (int i = 0; i < MaxSearchSteps && t <= tEnd; i++)
             {
                 double d = Gap(orbit, c, t, out double closing);
@@ -132,6 +133,14 @@ namespace Kare.Space.Core
                 t += leaving ? Math.Max(minStep, 60) : Math.Max(minStep, 0.5 * (d - soi) / closing);
             }
             return double.NaN;
+        }
+
+        /// <summary>Расстояние до спутника растёт (корабль удаляется от него).</summary>
+        static bool Receding(KeplerOrbit orbit, CelestialBody c, double t)
+        {
+            orbit.GetState(t, out var r, out var v);
+            c.LocalStateAt(t, out var rc, out var vc);
+            return Vector3d.Dot(r - rc, v - vc) > 0;
         }
 
         static double Gap(KeplerOrbit orbit, CelestialBody c, double t, out double closing)

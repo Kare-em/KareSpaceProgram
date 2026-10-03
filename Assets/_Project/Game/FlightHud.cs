@@ -87,11 +87,11 @@ namespace Kare.Space.Game
             Messages(boot, w, h);
             NodePanel(u, v, h);
             if (details) Details(u, v, boot);
-            else if (boot.AscentTutor) Tutor(u, v);
+            else if (boot.AscentTutor && !Tutor(u, v)) Guide(u, boot);
 
             GUI.color = Dim;
             GUI.Label(new Rect(10, h - 24, 1100, 22),
-                "Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G автопилот / посадка · N манёвр · ,/. время · M карта · H детали · Esc меню", small);
+                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G взлёт/посадка · R к Луне · N/B манёвр · ,/. время · M карта · H детали · Esc", small);
             GUI.color = Color.white;
         }
 
@@ -242,13 +242,15 @@ namespace Kare.Space.Game
         void Mode(Universe u, Vessel v, Rect r)
         {
             Icon icon; string title, status; Color col;
-            if (u.Ascent != null) { icon = Icon.Autopilot; title = "АВТОПИЛОТ"; status = u.Ascent.Status; col = Accent; }
+            // Автопилот миссии сам запускает частные — показываем его шаг, а их статус — строкой ниже.
+            if (u.Mission != null) { icon = Icon.Autopilot; title = "МИССИЯ"; status = u.Mission.Phase + (u.Mission.Status.Length > 0 ? ": " + u.Mission.Status : ""); col = Accent; }
+            else if (u.Ascent != null) { icon = Icon.Autopilot; title = "АВТОПИЛОТ"; status = u.Ascent.Status; col = Accent; }
             else if (u.NodePilot != null) { icon = Icon.Maneuver; title = "МАНЁВР"; status = u.NodePilot.Status; col = Accent; }
             else if (u.Landing != null) { icon = Icon.Autopilot; title = "ПОСАДКА"; status = u.Landing.Phase.ToString(); col = Accent; }
             else if (u.Docking != null) { icon = Icon.Maneuver; title = "СТЫКОВКА"; status = u.Docking.Status; col = Accent; }
             else if (u.Lunar != null) { icon = Icon.Autopilot; title = "К ЛУНЕ"; status = u.Lunar.Status; col = Accent; }
             else if (v.Sas != SasMode.Off) { icon = SasIcon(v.Sas); title = "SAS"; status = SasName(v.Sas); col = Color.white; }
-            else { icon = Icon.Stability; title = "РУЧНОЕ"; status = "G — автопилот, T — SAS"; col = Warn; }
+            else { icon = Icon.Stability; title = "РУЧНОЕ"; status = "Y — вся миссия, G — взлёт, T — SAS"; col = Warn; }
             GUI.color = col;
             DrawIcon(new Rect(r.center.x - 22, r.y + 8, 44, 44), icon);
             var c = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
@@ -394,14 +396,14 @@ namespace Kare.Space.Game
         /// Учебная подсказка ручного выведения (§10.2): какой тангаж держать сейчас — по тому же закону, что у
         /// автопилота, — где нос сейчас и какую клавишу жать. Видна, пока не ведёт автопилот и орбита не набрана.
         /// </summary>
-        void Tutor(Universe u, Vessel v)
+        bool Tutor(Universe u, Vessel v)
         {
-            if (u.Ascent != null || u.NodePilot != null || u.Landing != null || u.Lunar != null || u.Docking != null || !v.Body.HasAtmosphere) return;
+            if (u.Ascent != null || u.NodePilot != null || u.Landing != null || u.Lunar != null || u.Docking != null || u.Mission != null || !v.Body.HasAtmosphere) return false;
             // На воде полёт окончен: Splashed не Landed, и без этой проверки после приводнения (vs = 0, двигатель
             // молчит, ниже атмосферы) снова вылезала «2. Вертикальный подъём» (замер 01.10.2026).
-            if (v.Situation == Situation.Splashed) return;
+            if (v.Situation == Situation.Splashed) return false;
             bool landed = v.Situation == Situation.Landed;
-            if (landed && v.Site == null) return;
+            if (landed && v.Site == null) return false;
             double atm = v.Body.AtmosphereTop;
             double apAlt = 0, peAlt = 0, toAp = double.NaN;
             KeplerOrbit o = null;
@@ -412,8 +414,8 @@ namespace Kare.Space.Game
                 peAlt = o.PeriapsisRadius - v.Body.Radius;
                 toAp = o.TimeToApoapsis(u.Time);
                 // Орбита набрана или борт уже падает без тяги (спуск) — подсказка не нужна.
-                if (peAlt > atm) return;
-                if (!v.AnyEngineRunning && v.VerticalSpeed < 0 && v.Altitude < atm) return;
+                if (peAlt > atm) return false;
+                if (!v.AnyEngineRunning && v.VerticalSpeed < 0 && v.Altitude < atm) return false;
             }
 
             FlightControl.LocalFrame(v, u.Time, out var up, out _, out var east);
@@ -492,7 +494,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
             var wrap = new GUIStyle(small) { wordWrap = true, alignment = TextAnchor.UpperLeft };
             GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 58), hint, wrap);
-            if (double.IsNaN(target)) return;
+            if (double.IsNaN(target)) return true;
 
             // Угол носа в вертикальной плоскости «восток — зенит»: 0° — горизонт на восток, 90° — вверх.
             var nose = v.NoseP;
@@ -519,6 +521,21 @@ namespace Kare.Space.Game
             else { GUI.color = Warn; key = "жми " + KeyToward(v, want - nose); }
             GUI.Label(new Rect(tx, r.y + 158, 190, 30), key, mid);
             GUI.color = Color.white;
+            return true;
+        }
+
+        /// <summary>Тутор миссии (§10.2) после выведения: шаг и клавиши из MissionGuide — ручной полёт до Луны и обратно.</summary>
+        void Guide(Universe u, GameBootstrap boot)
+        {
+            if (u.Ascent != null || u.NodePilot != null || u.Landing != null || u.Lunar != null || u.Docking != null || u.Mission != null) return;
+            if (!MissionGuide.Next(u, boot.Tracker, out var step, out var hint)) return;
+            var r = new Rect(12, 12, 340, 104);
+            Fill(r, Panel);
+            GUI.color = Accent;
+            GUI.Label(new Rect(r.x + 12, r.y + 6, r.width - 24, 22), "ПОДСКАЗКА · " + step, label);
+            GUI.color = Color.white;
+            var wrap = new GUIStyle(small) { wordWrap = true, alignment = TextAnchor.UpperLeft };
+            GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 72), hint, wrap);
         }
 
         /// <summary>Клавиша, которая ведёт нос в сторону delta (P). Соглашение FlightControl.Update:

@@ -46,6 +46,11 @@ static class Program
         Run("luna17", () => TestLunar("luna17", 1000e3, land: true, afterLanding: DriveLunokhod), only);
         Run("apollo8", () => TestApollo("apollo8"), only);
         Run("apollo11", () => TestApollo("apollo11"), only);
+        Run("planets", TestPlanets, only);
+        Run("autoplan", TestAutoPlan, only);
+        // Миссии целиком автопилотом Y без рук и с автоускорением: «auto» — все, «auto_<id>» — одна.
+        foreach (var id in AutoMissions)
+            Run("auto_" + id, () => TestAuto(id), only == "auto" ? "auto_" + id : only);
         Console.WriteLine($"\nИтого: {passed} ok, {failed} fail");
         return failed == 0 ? 0 : 1;
     }
@@ -178,6 +183,102 @@ static class Program
         tr.Changed += m => Console.WriteLine($"   [{Clock(u.Time - t0)}] ★ {m}");
         Console.WriteLine($"   {def.Title}: {GameCalendar.Format(def.StartTime)}, {u.Active.Design.Name}, {u.Active.Mass / 1000:F1} т");
         return (u, tr);
+    }
+
+    static readonly string[] AutoMissions =
+    {
+        "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
+        "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
+    };
+
+    /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
+    static void TestAuto(string id)
+    {
+        var (u, tr) = StartMission(id);
+        u.AutoWarp = true;
+        u.Mission = new MissionAutopilot(u, tr);
+        Console.WriteLine($"   профиль: {u.Mission.Profile}");
+        // Кадры по 0,1 с реального времени; предел — 30 суток полёта или 200 тыс. кадров (≈ 5,5 ч в игре).
+        const int MaxFrames = 200000;
+        double end = u.Time + 30 * 86400, maxWarp = 1;
+        int frames = 0;
+        string phase = null;
+        while (tr.Status == MissionStatus.Active && u.Mission != null && u.Time < end && frames < MaxFrames)
+        {
+            u.Advance(0.1);
+            tr.Update(u);
+            frames++;
+            maxWarp = Math.Max(maxWarp, u.EffectiveWarp);
+            if (u.Mission != null && u.Mission.Phase != phase)
+            {
+                phase = u.Mission.Phase;
+                // Тутор ручного полёта на том же шаге: что он подсказал бы игроку без автопилота.
+                string tip = MissionGuide.Next(u, tr, out var step, out var hint) ? $"   · тутор: {step} — {hint}" : "";
+                Console.WriteLine($"   ▶ {phase}{tip}");
+            }
+        }
+        // Успех засчитывается раньше, чем «Аполлон-11» допристыкуется; дождаться конца сценария.
+        while (tr.Status == MissionStatus.Success && u.Mission != null && frames < MaxFrames)
+        {
+            u.Advance(0.1);
+            tr.Update(u);
+            frames++;
+        }
+        var v = u.Active;
+        Console.WriteLine($"   итог: {(v != null ? OrbitText(v, u.Time) : "нет борта")}; статус миссии: {u.Mission?.Status}");
+        Check($"auto_{id}: миссия выполнена без рук", tr.Status == MissionStatus.Success,
+            $"{tr.Status} {tr.FailReason}; кадров {frames} ({frames * 0.1 / 60:F1} мин реального времени), макс. ×{maxWarp:G}");
+    }
+
+    /// <summary>План перелёта к планетам с опорной орбиты Земли: прогноз склейки коник доходит до цели.</summary>
+    static void TestPlanets()
+    {
+        foreach (var target in new[] { "mars", "venus" })
+        {
+            var (u, tr) = StartMission("sputnik");
+            var earth = u.System.Get("earth");
+            var planet = u.System.Get(target);
+            u.Teleport(earth, 200e3, true);
+            var v = u.Active;
+            var sw = Stopwatch.StartNew();
+            double miss = Math.Max(0.1 * planet.SoiRadius, 3 * planet.Radius);
+            var plan = TransferPlanner.PlanInterplanetary(earth, v.Position, v.Velocity, u.Time, planet, miss);
+            long ms = sw.ElapsedMilliseconds;
+            Check($"planets: план к {planet.Name} найден", plan != null, $"{ms} мс");
+            if (plan == null) continue;
+            u.SetNode(plan.Time, plan.Prograde, plan.Normal, plan.Radial);
+            var ps = PatchedConics.Predict(v.Body, v.Position, v.Velocity, u.Time, v.Node, 6);
+            var at = ps.Find(p => p.Body == planet);
+            string route = string.Join(" → ", ps.ConvertAll(p => p.Body.Name));
+            Check($"planets: {planet.Name} — прогноз входит в сферу влияния", at != null,
+                $"старт через {(plan.Time - u.Time) / 86400:F0} сут, Δv {plan.DeltaV:F0} м/с (норм. {plan.Normal:F0}), перелёт {plan.TransferTime / 86400:F0} сут, " +
+                $"промах без притяжения {plan.Miss / 1000:F0} км (цель {miss / 1000:F0}); {route}; {ms} мс" +
+                (at != null ? $"; перицентр {(at.Orbit.PeriapsisRadius - planet.Radius) / 1000:F0} км" : ""));
+        }
+    }
+
+    /// <summary>Клавиша P: узел к Луне с орбиты Земли, к Земле с орбиты Луны, к Марсу — через ManeuverAutoPlan.</summary>
+    static void TestAutoPlan()
+    {
+        foreach (var (from, to, alt) in new[] { ("earth", "moon", 200e3), ("moon", "earth", 100e3), ("earth", "mars", 200e3) })
+        {
+            var (u, tr) = StartMission("sputnik");
+            var a = u.System.Get(from);
+            var b = u.System.Get(to);
+            u.Teleport(a, alt, true);
+            var v = u.Active;
+            var sw = Stopwatch.StartNew();
+            string msg = ManeuverAutoPlan.Plan(u, b, out var plan);
+            long ms = sw.ElapsedMilliseconds;
+            Console.WriteLine($"   {from} → {to}: {msg} ({ms} мс)");
+            Check($"autoplan: {from} → {to} — узел поставлен", plan != null && v.Node != null, $"{ms} мс");
+            if (plan == null) continue;
+            var at = PatchedConics.Predict(v.Body, v.Position, v.Velocity, u.Time, v.Node, 6).Find(p => p.Body == b);
+            double pe = at != null ? at.Orbit.PeriapsisRadius - b.Radius : double.NaN;
+            double want = to == "moon" ? ManeuverAutoPlan.MoonPeriapsis : to == "earth" ? MissionAutopilot.ReturnPerigee : double.NaN;
+            bool ok = at != null && (double.IsNaN(want) || Math.Abs(pe - want) < (to == "moon" ? 200e3 : 30e3));
+            Check($"autoplan: {from} → {to} — прогноз у цели", ok, $"перицентр {pe / 1000:F0} км" + (double.IsNaN(want) ? "" : $" (цель {want / 1000:F0})"));
+        }
     }
 
     static string Clock(double s)

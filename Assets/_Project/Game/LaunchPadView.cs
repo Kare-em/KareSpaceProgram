@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Kare.Space.Core;
 using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace Kare.Space.Game
 {
@@ -13,6 +14,7 @@ namespace Kare.Space.Game
     /// Что отводится при отрыве (по секундам с момента взлёта, у каждой детали своя задержка):
     /// фермы-«тюльпан» и наклонные мачты (Tilt — вокруг горизонтальной оси у основания),
     /// поворотные стрелы башни (Swing — вокруг вертикали у шарнира).
+    /// Ночью стол освещают четыре прожекторные мачты (Floodlights): свет — на корпус, включаются по Солнцу над столом.
     /// </summary>
     public sealed class LaunchPadView : MonoBehaviour
     {
@@ -55,6 +57,28 @@ namespace Kare.Space.Game
         /// <summary>Стрелы башни: время поворота, задержка между ярусами снизу вверх, с.</summary>
         const float SwingTime = 2.4f, SwingStagger = 0.12f;
 
+        // ---- прожекторы (§7, §9.3: ночной старт — ракета в свете прожекторов, как на фото Байконура и LC-39)
+        /// <summary>Мачты на диагоналях: от оси FloodBase + FloodPerHeight·H, высота FloodMastBase + FloodMastPerHeight·H, м
+        /// (H — высота ракеты). Пара: башни и мачты обслуживания ближе 30 м к оси (SaturnTower −24, апрон «Протона» по z ±14) —
+        /// на диагонали дальше 45 м мачта ни во что не врезается.</summary>
+        const float FloodBase = 45, FloodPerHeight = 0.5f, FloodMastBase = 12, FloodMastPerHeight = 0.45f;
+        /// <summary>Освещённость корпуса одной мачтой, лк. На каждую сторону светят 2 мачты (FloodHullNits). Экспозицию держит
+        /// SkyController по яркости корпуса (LitNits), так что от числа зависит не яркость кадра, а соотношение с луной и небом.</summary>
+        const float FloodLux = 15;
+        /// <summary>Яркость белого корпуса в свете двух мачт, нит: L = E·ρ/π, ρ ≈ 0,8. Пара: FloodLux.</summary>
+        const float FloodHullNits = 2 * FloodLux * 0.8f / Mathf.PI;
+        /// <summary>Экспозиция по корпусу работает, пока камера ближе FloodNear, и плавно сходит на нет к FloodFar, м.</summary>
+        const float FloodNear = 1500, FloodFar = 4000;
+        /// <summary>Бетонная площадка вокруг стола: края дальше мачт на столько, м.</summary>
+        const float ApronMargin = 15;
+        /// <summary>Панель ламп, нит — с запасом выше белого при ночной экспозиции, чтобы прожектор читался светилом.</summary>
+        const float FloodLampNits = 3e3f;
+        /// <summary>Металлогалогенные лампы, К.</summary>
+        const float FloodTemperature = 4500;
+        /// <summary>Синус высоты Солнца над столом: выше FloodSunOff прожекторы погашены, ниже FloodSunOn — горят полностью
+        /// (±3°: включают в сумерках, а не в полной темноте).</summary>
+        const float FloodSunOff = 0.05f, FloodSunOn = -0.05f;
+
         static readonly Color PitColor = new Color(0.05f, 0.05f, 0.05f);
 
         sealed class Mover
@@ -77,6 +101,14 @@ namespace Kare.Space.Game
         Func<string, Mesh> pads;
         Material[] steel;
         float top;
+        readonly List<Light> floods = new List<Light>();
+        Material lampMat;
+        Color lampColor;
+
+        /// <summary>Яркость корпуса ракеты в свете прожекторов, нит (0 — погашены или стол далеко). По ней SkyController
+        /// держит ночную экспозицию: иначе гистограмма тянется по тёмному кадру, и корпус выжигается в белое
+        /// (замер 03.10.2026: средняя яркость 58, корпус сплошь 255).</summary>
+        public static float LitNits { get; private set; }
 
         public void Init(Vessel v, Texture2D concrete, Material baseMat, Mesh truss = null, Func<string, Mesh> padMeshes = null)
         {
@@ -122,6 +154,7 @@ namespace Kare.Space.Game
             AddPart("Pad", slab.Build(), concreteMat, transform);
             // Дно газоотвода — тёмное, чтобы проём читался ямой, а не травой под ракетой.
             AddPart("Flame Pit", pit.Build(), pitMat, transform);
+            Floodlights(z, shader, concreteMat);
             renderers = GetComponentsInChildren<Renderer>();
             Pose();
         }
@@ -240,6 +273,80 @@ namespace Kare.Space.Game
             Fixed("Pad_Saturn_ML", Vector3.zero);
             Fixed("Pad_Saturn_LUT", Vector3.zero);
             SwingArms("Pad_Arm_Heavy", ArmHeavyLen, SaturnTower, new[] { 12f, 26f, 40f, 52f, 64f, 76f, 88f, 99f, 109f });
+        }
+
+        /// <summary>Четыре прожекторные мачты на диагоналях (по 45°): ствол, голова с панелью ламп и Spot-светом,
+        /// нацеленным в середину ракеты; конус охватывает корпус от стола до верха. h — высота ракеты, м.</summary>
+        void Floodlights(float h, Shader shader, Material concreteMat)
+        {
+            lampColor = Mathf.CorrelatedColorTemperatureToRGB(FloodTemperature);
+            lampMat = new Material(shader) { name = "Pad Lamp" };
+            lampMat.SetColor("_BaseColor", new Color(0.9f, 0.9f, 0.85f));
+            float dist = FloodBase + FloodPerHeight * h, mastH = FloodMastBase + FloodMastPerHeight * h;
+            // Площадка до мачт и чуть дальше: стол не торчит островком в траве, мачты стоят на бетоне. Верх 0,02 — ниже
+            // апронов «Протона» и «Редстоуна» (0,04), чтобы не мерцали.
+            float apron = (dist + ApronMargin) / Mathf.Sqrt(2) + ApronMargin;
+            var slab = new MeshBuilder(ConcreteTile);
+            slab.Box(new Vector3(-apron, -1, -apron), new Vector3(apron, 0.02f, apron));
+            AddPart("Apron", slab.Build(), concreteMat, transform);
+            var aim = new Vector3(0, top + h * 0.5f, 0);
+            var column = new MeshBuilder(ConcreteTile);
+            column.Box(new Vector3(-0.5f, -3, -0.5f), new Vector3(0.5f, mastH, 0.5f));
+            var columnMesh = column.Build();
+            var frame = new MeshBuilder(ConcreteTile);
+            frame.Box(new Vector3(-2.2f, -1.4f, -0.6f), new Vector3(2.2f, 1.4f, 0));
+            var frameMesh = frame.Build();
+            var panel = new MeshBuilder(ConcreteTile);
+            panel.Box(new Vector3(-2, -1.2f, 0), new Vector3(2, 1.2f, 0.08f));
+            var panelMesh = panel.Build();
+            for (int k = 0; k < 4; k++)
+            {
+                float a = (45 + 90 * k) * Mathf.Deg2Rad;
+                var basePos = new Vector3(dist * Mathf.Sin(a), 0, dist * Mathf.Cos(a));
+                var mast = new GameObject($"Floodlight {k}").transform;
+                mast.SetParent(transform, false);
+                mast.localPosition = basePos;
+                AddPart("Column", columnMesh, steel[0], mast);
+                var head = new GameObject("Head").transform;
+                head.SetParent(mast, false);
+                head.localPosition = new Vector3(0, mastH, 0);
+                var headPos = basePos + head.localPosition;
+                var toAim = aim - headPos;
+                head.localRotation = Quaternion.LookRotation(toAim);
+                AddPart("Frame", frameMesh, steel[1], head);
+                AddPart("Lamps", panelMesh, lampMat, head);
+
+                // Конус: угол между лучами на низ и верх ракеты плюс запас — свет не обрезается по кромке корпуса.
+                float cone = Vector3.Angle(new Vector3(0, top, 0) - headPos, new Vector3(0, top + h, 0) - headPos) * 1.15f + 8;
+                var lgo = new GameObject("Spot");
+                lgo.transform.SetParent(head, false);
+                lgo.transform.localPosition = new Vector3(0, 0, 0.3f);
+                var l = lgo.AddComponent<Light>();
+                l.type = LightType.Spot;
+                lgo.AddComponent<HDAdditionalLightData>();
+                l.lightUnit = UnityEngine.Rendering.LightUnit.Candela;
+                l.useColorTemperature = true;
+                l.colorTemperature = FloodTemperature;
+                l.spotAngle = Mathf.Min(cone, 120);
+                l.innerSpotAngle = l.spotAngle * 0.7f;
+                // Сила света под заданную освещённость в точке прицела: E = I / d². Гасим цветом (Pose), не силой.
+                l.intensity = FloodLux * toAim.sqrMagnitude;
+                l.range = toAim.magnitude * 3;
+                l.shadows = LightShadows.Soft;
+                l.enabled = false;
+                floods.Add(l);
+            }
+        }
+
+        /// <summary>Доля «ночи» над столом 0…1 по высоте Солнца над горизонтом стола — не у борта: ракета уже на свету,
+        /// а стол ещё в темноте.</summary>
+        float FloodNight(QuaternionD o)
+        {
+            var sun = body;
+            while (sun.Parent != null) sun = sun.Parent;
+            var up = o * anchorBf;
+            double sinEl = Vector3d.Dot(up.normalized, (sun.Position - (body.Position + up)).normalized);
+            return Mathf.Clamp01((float)((FloodSunOff - sinEl) / (FloodSunOff - FloodSunOn)));
         }
 
         // ------------------------------------------------------------------ сборка
@@ -362,6 +469,8 @@ namespace Kare.Space.Game
             return go;
         }
 
+        void OnDestroy() => LitNits = 0;
+
         void LateUpdate()
         {
             if (vessel == null) return;
@@ -377,6 +486,14 @@ namespace Kare.Space.Game
             var pos = FloatingOrigin.ToUnity(body.Position + o * anchorBf);
             bool show = !MapView.IsOpen && pos.magnitude < DrawDistance;
             foreach (var r in renderers) r.enabled = show;
+            float night = show ? FloodNight(o) : 0;
+            LitNits = FloodHullNits * night * Mathf.Clamp01((FloodFar - pos.magnitude) / (FloodFar - FloodNear));
+            foreach (var l in floods)
+            {
+                l.enabled = night > 0.01f;
+                l.color = Color.white * night;
+            }
+            if (lampMat != null) lampMat.SetColor("_EmissiveColor", lampColor * (FloodLampNits * night));
             if (!show) return;
             transform.SetPositionAndRotation(pos, FloatingOrigin.ToQuaternion(o.SwapYZ * frameBf));
             foreach (var m in movers)

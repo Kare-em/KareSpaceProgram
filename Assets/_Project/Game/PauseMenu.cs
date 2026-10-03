@@ -35,7 +35,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
 
             int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock;
+            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + DetailBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -47,7 +47,8 @@ namespace Kare.Space.Game
             boot.AeroBreakup = GUI.Toggle(new Rect(x, y, w, Row), boot.AeroBreakup, "  Разрушение от аэронагрузки (Qα)", toggle); y += Row;
             boot.HeatDamage = GUI.Toggle(new Rect(x, y, w, Row), boot.HeatDamage, "  Разрушение от перегрева", toggle); y += Row;
             boot.GLoadLimit = GUI.Toggle(new Rect(x, y, w, Row), boot.GLoadLimit, "  Гибель экипажа от перегрузки (> 9 g, 10 с)", toggle); y += Row;
-            boot.AscentTutor = GUI.Toggle(new Rect(x, y, w, Row), boot.AscentTutor, "  Подсказка по углу на взлёте", toggle); y += Row + 20;
+            boot.AscentTutor = GUI.Toggle(new Rect(x, y, w, Row), boot.AscentTutor, "  Подсказки по полёту (тутор)", toggle); y += Row;
+            boot.AutoWarp = GUI.Toggle(new Rect(x, y, w, Row), boot.AutoWarp, "  Автопилот сам управляет ускорением", toggle); y += Row + 20;
 
             if (GUI.Button(new Rect(x, y, w, Row), "Продолжить (Esc)", button)) IsOpen = false;
             y += Row + 8;
@@ -81,7 +82,22 @@ namespace Kare.Space.Game
             GUI.Label(new Rect(x, y, w, 24), "Графика", label); y += 30;
             Quality(x, y, w, ref RenderQuality.RayTracing, RenderQuality.RayTracingSupported,
                 "  Трассировка лучей (тени Солнца, отражения)"); y += Row;
-            Quality(x, y, w, ref RenderQuality.Dlss, RenderQuality.DlssSupported, "  DLSS (апскейл NVIDIA)"); y += Row + 20;
+            Quality(x, y, w, ref RenderQuality.Dlss, RenderQuality.DlssSupported, "  DLSS (апскейл NVIDIA)"); y += Row + 4;
+            // Детализация планет, облаков и орбит карты (§9.4, §9.6): тела перестраиваются сразу, миссия не сбрасывается.
+            GUI.Label(new Rect(x, y, DetailLabel, Row), "Детализация", toggle);
+            float dw = (w - DetailLabel - 3 * 4) / DetailSettings.Names.Length;
+            for (int i = 0; i < DetailSettings.Names.Length; i++)
+            {
+                bool cur = DetailSettings.Level == i;
+                GUI.color = cur ? new Color(1f, 0.8f, 0.4f) : Color.white;
+                if (GUI.Button(new Rect(x + DetailLabel + i * (dw + 4), y, dw, Row), DetailSettings.Names[i], small) && !cur)
+                {
+                    DetailSettings.Level = i;
+                    if (BodyRenderer.Instance != null) BodyRenderer.Instance.ApplyDetail();
+                }
+                GUI.color = Color.white;
+            }
+            y += Row + 20;
 
             // Яркость (§9.3): общая — компенсация экспозиции, факел — отдельно (ночью его легко пересветить).
             // Значения в PlayerPrefs, применяют SkyController и VesselView; сохраняем при отпускании кнопки мыши.
@@ -112,6 +128,8 @@ namespace Kare.Space.Game
 
         /// <summary>Высота блока «Яркость»: заголовок, два ползунка, отступ. Пара: код блока в OnGUI.</summary>
         const float BrightnessBlock = 30 + 2 * (Row + 6) + 20;
+        /// <summary>Строка «Детализация» в блоке «Графика» и ширина её подписи. Пара: код строки в OnGUI.</summary>
+        const float DetailBlock = Row + 4, DetailLabel = 110;
 
         /// <summary>Подпись слева, ползунок посередине, значение справа.</summary>
         float Slider(float x, float y, float w, string text, float value, float min, float max, string format)

@@ -22,7 +22,7 @@ namespace Kare.Space.Core
     /// лучших окон, а не от одного: локальный спуск из чужого окна не выберется. Притяжение цели не
     /// учитывается — точный перицентр у цели даёт прогноз склейки коник (PatchedConics.Predict).
     /// </summary>
-    public static class TransferPlanner
+    public static partial class TransferPlanner
     {
         const int Samples = 300;
         /// <summary>Цена бокового импульса в метрах промаха: окно в плоскости орбиты дешевле поворота плоскости.</summary>
@@ -176,6 +176,12 @@ namespace Kare.Space.Core
         {
             const double day = 86400;
             double span = tr.IsElliptic ? Math.Min(0.6 * tr.Period, 20 * day) : 5 * day;
+            return ClosestApproach(tr, target, t0, span, out tMin);
+        }
+
+        /// <summary>То же на заданном отрезке span, с (межпланетный перелёт — сотни суток).</summary>
+        public static double ClosestApproach(KeplerOrbit tr, CelestialBody target, double t0, double span, out double tMin)
+        {
             double h = span / Samples;
             int bestI = 0;
             double best = double.PositiveInfinity;

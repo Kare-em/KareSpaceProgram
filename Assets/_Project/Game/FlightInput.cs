@@ -43,7 +43,8 @@ namespace Kare.Space.Game
                 Axis(KeyCode.W, KeyCode.S),
                 Axis(KeyCode.D, KeyCode.A),
                 Axis(KeyCode.E, KeyCode.Q));
-            v.PilotInput = pilot;
+            // Луноход «Лунохода-1» ведёт программа миссии через тот же PilotInput — не затирать его нулём.
+            if (pilot.sqrMagnitude > 0 || u.Mission == null || !u.Mission.OwnsPilotInput) v.PilotInput = pilot;
             if (pilot.sqrMagnitude > 0) DropAutopilots(u);
 
             double thr = v.Throttle;
@@ -86,8 +87,26 @@ namespace Kare.Space.Game
                     }
                 }
             }
-            // Y — автопилот «к Луне» (§6.4, §6.11): опорная орбита, разгон, перестроение «Аполлона», коррекция, LOI. Повтор — снять.
+            // Y — автопилот всей миссии (§6.11): от стола до последней цели без рук, ускорением правит сам. Повтор — снять.
             if (Input.GetKeyDown(KeyCode.Y))
+            {
+                if (u.Mission != null) { DropAutopilots(u); FlightControl.Cutoff(v); u.SetWarp(0); u.Post("Автопилот миссии снят"); }
+                else
+                {
+                    var boot = GameBootstrap.Instance;
+                    u.Mission = new MissionAutopilot(u, boot.Tracker);
+                    u.Post($"Автопилот миссии: «{boot.Mission.Title}» без рук. Y — снять, любой руль/газ — тоже");
+                }
+            }
+            // P — узел манёвра к цели с автоматическим расчётом (§6.11): тело, выбранное на карте (Tab), иначе
+            // Луна с орбиты Земли / Земля с орбиты Луны. Выполнить — B.
+            if (Input.GetKeyDown(KeyCode.P) && u.NodePilot == null)
+            {
+                var target = MapView.Focus != null && MapView.Focus != v.Body ? MapView.Focus : ManeuverAutoPlan.DefaultTarget(v);
+                u.Post(ManeuverAutoPlan.Plan(u, target, out _));
+            }
+            // R — автопилот «к Луне» (§6.4, §6.11): опорная орбита, разгон, перестроение «Аполлона», коррекция, LOI. Повтор — снять.
+            if (Input.GetKeyDown(KeyCode.R))
             {
                 if (u.Lunar != null) { u.Lunar = null; FlightControl.Cutoff(v); u.Post("Автопилот к Луне снят"); }
                 else
@@ -184,6 +203,7 @@ namespace Kare.Space.Game
             u.Landing = null;
             u.Docking = null;
             u.Lunar = null;
+            u.Mission = null;
         }
     }
 }

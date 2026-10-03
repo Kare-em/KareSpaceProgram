@@ -75,7 +75,13 @@ namespace Kare.Space.Game
         /// шум сжат по полюсу — облака вытянуты вдоль параллелей, как у зональных ветров; искажение
         /// координат даёт завихрения.
         /// </summary>
-        public static float Cloud(double lat, double lon)
+        /// <summary>Октав шума облаков при текстуре 2048: мельчайшая ≈ 20 км ≈ тексель. Пара: BodyRenderer.BuildClouds
+        /// прибавляет по октаве на удвоение текстуры.</summary>
+        public const int CloudBaseOctaves = 7;
+        /// <summary>Ширина кромки облака по значению шума, вес шума деталей в кромке и глубина фактуры внутри (доля альфы).</summary>
+        const float CloudEdge = 0.07f, CloudDetail = 0.12f, CloudTexture = 0.3f;
+
+        public static float Cloud(double lat, double lon, int octaves = CloudBaseOctaves)
         {
             var d = CelestialBody.LatLonToBodyFixed(lat, lon);
             var perm = CloudPerm;
@@ -84,10 +90,17 @@ namespace Kare.Space.Game
             var p = new Vector3d(d.x, d.y, d.z * 2.2) * 5;
             var warp = new Vector3d(Terrain.Fbm(perm, p * 0.5 + new Vector3d(5.2, 1.3, -7.7), 3, 0.5),
                                     Terrain.Fbm(perm, p * 0.5 + new Vector3d(-2.8, 9.1, 3.3), 3, 0.5), 0);
-            double n = Terrain.Fbm(perm, p + warp * 1.5, 7, 0.55);
+            double n = Terrain.Fbm(perm, p + warp * 1.5, octaves, 0.55);
+            // Детали: мелкий шум с медленным спадом (gain 0,65 — тонкие октавы не тонут) рвёт кромку на клочья и даёт
+            // фактуру внутри поля. Без него облака — гладкие пятна с размытым краем при любом разрешении текстуры
+            // (замер 03.10.2026: 2048 и 4096 с орбиты не отличались). Масштаб ×6: мельчайшая октава ≈ тексель.
+            double det = Terrain.Fbm(perm, p * 6 + warp * 3 + new Vector3d(11.7, -4.1, 6.9), octaves - 2, 0.65);
             // Fbm сосредоточен около 0 (σ ≈ 0,2): порог (0,5 − cover)/2 даёт долю покрытия ≈ cover.
+            // Пара: ширина кромки CloudEdge меньше веса деталей CloudDetail — край рваный, а не размытый.
             float thr = (float)((0.5 - cover) * 0.5);
-            return 0.92f * Smooth(thr, thr + 0.14f, (float)n);
+            float alpha = Smooth(thr, thr + CloudEdge, (float)(n + CloudDetail * det));
+            float body = 1 - CloudTexture * Smooth(0.25f, -0.25f, (float)det);
+            return 0.92f * alpha * body;
         }
 
         static double Sq(double x) => x * x;

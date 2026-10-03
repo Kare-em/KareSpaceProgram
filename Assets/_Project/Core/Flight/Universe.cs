@@ -22,12 +22,15 @@ namespace Kare.Space.Core
         /// <summary>
         /// Автоускорение (§6.11): сколько РЕАЛЬНЫХ секунд должно оставаться до ближайшего события (манёвр, смена сферы,
         /// апоцентр взлёта) на выбранной ступени. Ступень выбирается наибольшей, у которой запас не меньше, — к событию
-        /// ускорение само спускается по лестнице Warps, не перескакивая его за кадр (кадр ≤ 0,1 с, т. е. ≤ 1/40 запаса).
+        /// ускорение само спускается по лестнице Warps, не перескакивая его за кадр (кадр ≤ 0,1 с, т. е. ≤ 1/20 запаса).
+        /// Само событие рельсы не проскочат (AdvanceRails останавливается на нём), запас — только на плавность: при 4 с
+        /// перелёт к Луне шёл 16,6 мин реального времени, половина — спуск по лестнице.
         /// </summary>
-        public const double AutoWarpLead = 4;
-        /// <summary>Долгий прожиг в вакууме, с, от которого автопилот ускоряет физику до MaxPhysicsWarp: разгон к Луне
-        /// идёт ≈ 5,5 мин, на ×10 — полминуты. Шаг интегратора тот же (см. MaxPhysicsWarp), точность импульса не теряется.</summary>
-        public const double AutoBurnWarpMin = 60;
+        public const double AutoWarpLead = 2;
+        /// <summary>Остаток прожига в вакууме, с, выше которого автопилот ускоряет физику до MaxPhysicsWarp: разгон к Луне
+        /// идёт ≈ 5,5 мин, на ×10 — полминуты. Шаг интегратора тот же (см. MaxPhysicsWarp), точность импульса не теряется:
+        /// apollo8 при 60 и при 15 вышел на одну и ту же орбиту 109,9 × 110,3 км, а кадров стало 5512 → 4693.</summary>
+        public const double AutoBurnWarpMin = 15;
 
         public readonly SolarSystem System;
         public double Time { get; private set; }
@@ -43,13 +46,17 @@ namespace Kare.Space.Core
         public LandingAutopilot Landing;
         public DockingAutopilot Docking;
         public LunarAutopilot Lunar;
+        /// <summary>Автопилот «миссия целиком» (Y): сценарий поверх частных автопилотов, сам ведёт ускорение.</summary>
+        public MissionAutopilot Mission;
 
         /// <summary>Автопилот сам ведёт ускорение времени (настройка игрока; в тестах ядра по умолчанию выключено —
         /// там ускорение задаёт сценарий). Ручные «,» и «/» ставят его на паузу до конца работы автопилотов.</summary>
         public bool AutoWarp;
         public bool AutoWarpPaused;
         bool autoDriving;
-        public bool AutopilotActive => Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null;
+        /// <summary>Автоускорение выбрало физическую ступень (≤ MaxPhysicsWarp) при свободных рельсах: окно перед прожигом.</summary>
+        bool autoPhysics;
+        public bool AutopilotActive => Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null || Mission != null;
         /// <summary>Ускорением сейчас управляет автопилот — для HUD.</summary>
         public bool AutoWarpDriving => autoDriving;
 
@@ -169,6 +176,8 @@ namespace Kare.Space.Core
             // Автопилот работает только в полной физике; на рельсах допустим лишь пассивный участок.
             if (v == Active && Ascent != null && Ascent.Phase != AscentAutopilot.PhaseType.Coast) return "идёт выведение";
             if (v == Active && Landing != null && Landing.Phase != LandingAutopilot.PhaseType.Coast) return "идёт посадка";
+            // До проверки посадки: луноход едет, стоя на грунте, а на рельсах борт на поверхности неподвижен.
+            if (v == Active && Mission != null && Mission.NeedsPhysics) return "программа миссии";
             if (v.IsLanded) return null;
             if (v.Position.magnitude < PatchedConics.RailsFloorRadius(v.Body))
                 return v.Body.HasAtmosphere ? "в атмосфере" : "слишком низко над поверхностью";
@@ -181,9 +190,14 @@ namespace Kare.Space.Core
         {
             realDt = Math.Min(realDt, 0.1);
             if (realDt <= 0) return;
+            // Планирование перелёта — раз в кадр и на рельсах тоже (вход в сферу Луны случается под ускорением), и ДО
+            // выбора ускорения: иначе первый кадр после Y улетал на ×1e7 раньше, чем автопилот поставил узел разгона.
+            // Сценарий миссии — первым: он запускает частные автопилоты, и те должны увидеть кадр, в котором созданы.
+            if (Mission != null && Mission.Tick(this)) Mission = null;
+            if (Lunar != null && Lunar.Tick(this)) Lunar = null;
             DriveWarp();
             double warp = Warps[WarpIndex];
-            bool rails = WarpIndex > 0 && Active != null && RailsBlocker(Active) == null;
+            bool rails = WarpIndex > 0 && Active != null && RailsBlocker(Active) == null && !(autoDriving && autoPhysics);
             if (rails && WarpLimitTime() <= Time + 1)
             {
                 SetWarp(0);
@@ -192,13 +206,15 @@ namespace Kare.Space.Core
                 if (!autoDriving) Post("Ускорение сброшено: подходит время манёвра");
             }
 
-            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && (Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null))
+            // Ввод лунохода, который задаёт сам автопилот миссии, ручным управлением не считается.
+            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && AutopilotActive && !(Mission != null && Mission.OwnsPilotInput))
             {
                 Ascent = null;
                 NodePilot = null;
                 Landing = null;
                 Docking = null;
                 Lunar = null;
+                Mission = null;
                 Post("Автопилот отключён: ручное управление");
             }
 
@@ -216,8 +232,6 @@ namespace Kare.Space.Core
                 CheckDocking();
             }
             System.Update(Time);
-            // Планирование перелёта — раз в кадр и на рельсах тоже: вход в сферу Луны случается под ускорением.
-            if (Lunar != null && Lunar.Tick(this)) Lunar = null;
             Vessels.RemoveAll(v => !v.Alive && v != Active);
         }
 
@@ -257,6 +271,8 @@ namespace Kare.Space.Core
         void RunAutopilots(double h)
         {
             if (Active == null) return;
+            // Программа миссии (тангаж «Редстоуна») идёт до частных автопилотов и не исключает их.
+            bool missionStage = Mission != null && Mission.Update(Active, Time, h) == AutopilotRequest.Stage;
             AutopilotRequest req = AutopilotRequest.None;
             if (Ascent != null)
             {
@@ -283,7 +299,7 @@ namespace Kare.Space.Core
                 req = Lunar.Update(Active, Time, h);
                 if (req == AutopilotRequest.Finished) Lunar = null;
             }
-            if (req == AutopilotRequest.Stage) Stage();
+            if (req == AutopilotRequest.Stage || missionStage) Stage();
         }
 
         bool NeedsPassivePhysics(Vessel v)
@@ -319,6 +335,7 @@ namespace Kare.Space.Core
             Landing = null;
             Docking = null;
             Lunar = null;
+            Mission = null;
             v.Node = null;
             // Над дневной стороной, чуть к утреннему терминатору — как FlightDebug.Reentry: и свет есть, и рельеф с тенями.
             var s = (System.Sun.Position - body.Position).normalized;
@@ -431,6 +448,7 @@ namespace Kare.Space.Core
             {
                 if (autoDriving) SetWarp(0);
                 autoDriving = false;
+                autoPhysics = false;
                 AutoWarpPaused = false;
                 return;
             }
@@ -441,16 +459,38 @@ namespace Kare.Space.Core
         int AutoWarpIndex()
         {
             var v = Active;
+            autoPhysics = false;
             if (RailsBlocker(v) != null)
             {
                 bool air = v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop;
                 if (v.AnyEngineRunning && v.Node != null && !air && FlightControl.BurnTime(v, v.Node.Remaining.magnitude) > AutoBurnWarpMin)
                     return Array.IndexOf(Warps, MaxPhysicsWarp);
+                // Миссия целиком: выведение, спуск в атмосфере и посадка проверены тестами ядра на ×10 физики
+                // (шаг интегратора от ускорения не зависит, растёт лишь число шагов в кадре).
+                if (Mission != null && Mission.PhysicsWarpOk(this)) return Array.IndexOf(Warps, MaxPhysicsWarp);
                 return 0;
             }
-            double horizon = Math.Min(WarpLimitTime(), NextEventTime()) - Time;
+            double next = NextEventTime();
+            int i = Ladder(Math.Min(WarpLimitTime(), next) - Time, Warps.Length - 1);
+            if (i > 0) return i;
+            // Рельсы кончились (окно NodeWarpMargin + полпрожига перед узлом): автопилоты работают и в ускоренной
+            // физике, так что ждём старта прожига на ×5…×10, а не на ×1 — иначе каждое окно стоило ≈ 100 с реального времени.
+            double start = WarpLimitTime();
+            if (v.Node != null)
+            {
+                double burn = FlightControl.BurnTime(v, v.Node.Total);
+                start = v.Node.Time - (double.IsInfinity(burn) ? 0 : burn / 2);
+            }
+            i = Ladder(Math.Min(start, next) - Time, Array.IndexOf(Warps, MaxPhysicsWarp));
+            autoPhysics = i > 0;
+            return i;
+        }
+
+        /// <summary>Наибольшая ступень не выше max, у которой до события остаётся AutoWarpLead реальных секунд.</summary>
+        static int Ladder(double horizon, int max)
+        {
             int i = 0;
-            while (i + 1 < Warps.Length && Warps[i + 1] * AutoWarpLead <= horizon) i++;
+            while (i < max && Warps[i + 1] * AutoWarpLead <= horizon) i++;
             return i;
         }
 
@@ -490,6 +530,7 @@ namespace Kare.Space.Core
                 var orbit = v.OnRails ? v.Orbit : KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, Time);
                 limit = Math.Min(limit, Landing.WarpLimit(v, orbit, Time));
             }
+            if (Mission != null) limit = Math.Min(limit, Mission.WarpLimit);
             return limit;
         }
 
@@ -528,7 +569,7 @@ namespace Kare.Space.Core
                 if (stop >= limit)
                 {
                     SetWarp(0);
-                    Post("Ускорение сброшено: подходит время манёвра");
+                    if (!autoDriving) Post("Ускорение сброшено: подходит время манёвра");
                     break;
                 }
             }

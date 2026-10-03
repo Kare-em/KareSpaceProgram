@@ -15,9 +15,10 @@ namespace Kare.Space.Game
     {
         public Volume Volume;
 
-        /// <summary>Пределы EV100 §9.3; на карте экспозиция фиксированная (§9.6). EvMin −7 (было −5): ночью свет
-        /// только луна и свечение неба (NightLight.SkyglowLux, 0,02 лк) — при −5 безлунный грунт был ≈ 3 % белого.</summary>
-        public const float EvMin = -7, EvMax = 16, MapEv = 13;
+        /// <summary>Пределы EV100 §9.3; на карте экспозиция фиксированная (§9.6). EvMin −6: ночью свет только луна и
+        /// свечение неба (NightLight.SkyglowLux, 0,02 лк). При −5 безлунный грунт был ≈ 3 % белого (чёрная ночь), при −7
+        /// стол ночью читался почти как в сумерки (замер 03.10.2026: средняя яркость кадра 35 из 255 — «пересвечено»).</summary>
+        public const float EvMin = -6, EvMax = 16, MapEv = 13;
 
         VisualEnvironment env;
         PhysicallyBasedSky sky;
@@ -118,14 +119,23 @@ namespace Kare.Space.Game
                 plumeK = Mathf.MoveTowards(plumeK, plume > 0 ? plumeNight : 0,
                     Time.unscaledDeltaTime / (plume > 0 && plumeNight > plumeK ? PlumeRampUp : PlumeRampDown));
                 evMin = Mathf.Max(evMin, Mathf.Lerp(evMin, plumeEv, plumeK));
+                // Прожекторы стола ночью: корпус ракеты в PadHullWhite раз белого, а не выжжен (LaunchPadView.LitNits).
+                float pad = LaunchPadView.LitNits;
+                if (pad > 0) evMin = Mathf.Max(evMin, Mathf.Log(pad / (1.2f * PadHullWhite), 2) + comp);
                 float plasma = VesselView.PlasmaPeakNits;
                 if (plasma > 0) evMin = Mathf.Max(evMin, Mathf.Log(plasma / (1.2f * PlasmaWhite), 2));
                 exposure.limitMin.Override(evMin);
                 exposure.limitMax.Override(Mathf.Max(evMin, Mathf.Lerp(EvMax, plumeEv + PlumeEvSlack, plumeK)));
+                // Звёзды за экспозицией (§9.3): физичные звёзды видны только при EV ≲ −4 — на свету в космосе и при
+                // факеле ночью небо было чёрным. Множитель держит их такими, как при EV StarsEv, но не тусклее
+                // реальных. Днём в воздухе предел EV низкий — множитель 1, звёзд не видно, как и должно быть.
+                if (sky != null) sky.spaceEmissionMultiplier.Override(MapView.IsOpen ? 1 : Mathf.Pow(2, Mathf.Max(0, evMin - StarsEv)));
             }
             // На карте bloom выключен: при фиксированной EV диск Солнца (≈1,6·10⁹ нит) с порогом 0 размазывался
             // на весь кадр серой пеленой, и линии орбит в ней тонули (замер 01.10.2026: без bloom — чёрный фон).
-            if (bloom != null) bloom.intensity.Override(MapView.IsOpen ? 0 : bloomFlight);
+            // Ночью с факелом bloom приглушён: ядро в PlumeNightWhite раз белого растаскивалось в ореол на пол-кадра
+            // (замер 03.10.2026, ночной старт: без bloom ореола нет, средняя яркость 14,5 → 6,2).
+            if (bloom != null) bloom.intensity.Override(MapView.IsOpen ? 0 : bloomFlight * Mathf.Lerp(1, PlumeNightBloom, plumeK));
         }
 
         /// <summary>
@@ -155,6 +165,16 @@ namespace Kare.Space.Game
         const float PlumeNightWhite = 16f;
         /// <summary>Запас вверх от ночного EV факела, ступени, и время нарастания/спада зажима, с. Пара: PlumeNightWhite.</summary>
         const float PlumeEvSlack = 1.5f, PlumeRampUp = 1.5f, PlumeRampDown = 3f;
+        /// <summary>Доля bloom ночью при факеле. Пара: PlumeNightWhite — чем ярче ядро относительно белого, тем меньше.</summary>
+        const float PlumeNightBloom = 0.25f;
+
+        /// <summary>
+        /// Экспозиция, при которой звёзды показываются «как есть», EV100 (§9.3). Звёзды в нитах (StarFieldBaker:
+        /// 0m ≈ 1 нит на тексель): при EV −6 звезда 0m — 53× белого, 4m — 0,6, Млечный Путь едва заметен. Замер ночного
+        /// старта (EV 7,3): множитель 2500 (≈ EV −4) и 5000 (−5) — звёзды редкие и тусклые; приравнено к EvMin — небо как у стола
+        /// безлунной ночью. Пара: EvMin.
+        /// </summary>
+        const float StarsEv = EvMin;
         float plumeK, plumeEv, plumeNight;
 
         /// <summary>
@@ -164,6 +184,10 @@ namespace Kare.Space.Game
         /// и накал корпуса читаются. Днём предел и так 12. Пара: VesselView.PlasmaNits.
         /// </summary>
         const float PlasmaWhite = 2f;
+
+        /// <summary>Корпус ракеты в свете прожекторов — во столько раз ярче белого (§7, §9.3). Меньше 1 — корпус серый,
+        /// бетон и мачты тонут в черноте. Пара: LaunchPadView.FloodHullNits.</summary>
+        const float PadHullWhite = 0.9f;
 
         /// <summary>Разлёт bloom. Штатные 0,7 растаскивали диск Солнца (≈1,9·10⁹ нит при пороге 0) в ореол
         /// ≈ 150 px на 1920 — серое пятно на орбите и оливковое на голубом небе; 0,3 — плотное белое пятно

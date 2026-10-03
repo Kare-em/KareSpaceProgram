@@ -34,7 +34,9 @@ Library/, Temp/, Logs/, UserSettings/ — не трогать и не комми
   аэромомент и гибель экипажа, навбол + кнопки SAS, читы и выбор миссии в Esc, G — посадка на теле без атмосферы,
   шлейф выхлопа, текстуры грунта/обшивки, FBX-детали из Blender (СА и приборный отсек «Востока», ПС-1, Е-6, РД-107,
   РД-0110, ферма разделения, створки обтекателя, хвост Г-1, опоры, фермы стола), блик Солнца, ночной свет,
-  RT-тени + DLSS, стыковка (V) и автопилот «к Луне» (Y), исторические стартовые столы, яркость и перезапуски в Esc.
+  RT-тени + DLSS, стыковка (V), исторические стартовые столы, яркость и перезапуски в Esc.
+- Автопилот всей миссии (Y, сам ведёт ускорение), «к Луне» (R), манёвр к цели с авторасчётом (P), тутор после
+  выведения (`MissionGuide`), орбиты тел и кораблей на карте, звёзды за экспозицией.
   Подробности — `docs/STATE.md`.
 
 ## Тесты ядра
@@ -42,7 +44,8 @@ Library/, Temp/, Logs/, UserSettings/ — не трогать и не комми
 D="/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Data/DotNetSdk/dotnet.exe"; P=/c/CocosGames/KareSpaceProgram/Tools/CoreTests/CoreTests.csproj; "$D" build $P -nologo -v q && "$D" run --no-build --project $P
 ```
 `-- <имя>` — один тест (math, orbit, moon, atmo, stats, stability, separation, karman, sputnik, mechta, vympel, farside, vostok, luna9, moondrop,
-juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11).
+juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11, planets, autoplan; `auto` — все миссии
+без рук, `auto_<миссия>` — одна).
 Не собирать во время прогона — exe заблокирован, сборка падает.
 
 ## MCP

@@ -24,8 +24,6 @@ namespace Kare.Space.Game
         [Tooltip("HDRP/Unlit; цвет линий задаётся здесь.")]
         public Material LineMaterial;
 
-        /// <summary>Точек на патч (§9.6).</summary>
-        const int Points = 256;
         /// <summary>Яркость линий: _UnlitColor HDRP не проходит экспозицию (1 = белый на экране),
         /// поэтому не ниты, а доля белого. Больше 1 — ушло бы в пересвет и bloom.</summary>
         const float LineBrightness = 0.9f;
@@ -52,6 +50,13 @@ namespace Kare.Space.Game
         static readonly Color DescentColor = new Color(1f, 0.35f, 0.25f);
         /// <summary>Узел манёвра — цвет как у вектора манёвра в SAS (§4.9).</summary>
         static readonly Color NodeColor = new Color(0.3f, 0.6f, 1f);
+        /// <summary>Орбиты тел и чужих кораблей — тусклее прогноза: фон, а не главное на карте.</summary>
+        static readonly Color BodyOrbitColor = new Color(0.55f, 0.6f, 0.7f) * 0.45f;
+        static readonly Color OtherVesselColor = new Color(0.9f, 0.9f, 0.5f) * 0.6f;
+        /// <summary>Толщина фоновых орбит — доля толщины прогноза.</summary>
+        const float BodyOrbitWidth = 0.6f;
+        /// <summary>Сколько участков прогноза рисовать: 6 — хватает на «Земля → Луна → Земля» и выход к планете.</summary>
+        const int MapPatches = 6;
         static readonly Color AtmosphereColor = new Color(0.35f, 0.55f, 1f, 1f) * 0.6f;
 
         float distance, yaw = 20, pitch = 50;
@@ -59,7 +64,8 @@ namespace Kare.Space.Game
         readonly List<LineRenderer> lines = new List<LineRenderer>();
         List<OrbitPatch> patches;
         float nextPredict;
-        readonly Vector3[] buf = new Vector3[Points + 1];
+        /// <summary>Точек на патч (§9.6) — DetailSettings.MapPoints; буфер пересоздаётся при смене уровня.</summary>
+        Vector3[] buf = new Vector3[0]; // PlayerPrefs нельзя читать из инициализатора поля — размер ставит Draw
         readonly List<Mark> marks = new List<Mark>();
         readonly List<Rect> placed = new List<Rect>();
         GUIStyle markStyle;
@@ -82,6 +88,9 @@ namespace Kare.Space.Game
         {
             if (instance == this) { instance = null; IsOpen = false; BodyRenderer.Compression = true; }
         }
+
+        /// <summary>Выбранное на карте тело (Tab) — цель для P «манёвр к цели»; null — карта закрыта или фокус на борту.</summary>
+        public static CelestialBody Focus => IsOpen ? instance?.focus : null;
 
         public static void Toggle()
         {
@@ -147,7 +156,7 @@ namespace Kare.Space.Game
             if (Time.unscaledTime >= nextPredict)
             {
                 nextPredict = Time.unscaledTime + PredictPeriod;
-                patches = v.Alive && !v.IsLanded ? u.PredictActive() : null;
+                patches = v.Alive && !v.IsLanded ? u.PredictActive(MapPatches) : null;
             }
             Draw(u, v);
         }
@@ -158,6 +167,7 @@ namespace Kare.Space.Game
             marks.Clear();
             marks.Add(new Mark { World = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v)), Text = "▲ " + v.Name, Color = Color.white });
             float width = distance * LineWidth;
+            if (buf.Length != DetailSettings.MapPoints + 1) buf = new Vector3[DetailSettings.MapPoints + 1];
 
             if (patches != null)
             {
@@ -184,8 +194,26 @@ namespace Kare.Space.Game
                 if (Ring(v.Body, o.Normal, v.Body.Radius + v.Body.AtmosphereTop, buf) is int n)
                     SetLine(used++, n, AtmosphereColor, width * 0.5f);
             }
-            for (int i = used; i < lines.Count; i++) lines[i].gameObject.SetActive(false);
             BuildFocusList(u, v);
+            // Орбиты тел (§9.6) — тускло, вокруг родителя на один период: видно, где Луна будет через трое суток
+            // и куда целит перелёт к Марсу. Список тот же, что у фокуса: своя система и планеты.
+            foreach (var b in focusList)
+            {
+                if (b == null || b.Parent == null) continue;
+                var o = b.OrbitAt(u.Time);
+                if (!o.IsElliptic) continue;
+                SetLine(used++, Sample(o, b.Parent, u.Time, u.Time + o.Period, buf), BodyOrbitColor, width * BodyOrbitWidth);
+            }
+            // Другие корабли (КСМ, пока летит ЛМ; цель стыковки) — их коника вокруг своего тела, без прогноза встреч.
+            foreach (var other in u.Vessels)
+            {
+                if (other == v || other.IsDebris || !other.Alive || other.IsLanded) continue;
+                var o = KeplerOrbit.FromState(other.Position, other.Velocity, other.Body.Mu, u.Time);
+                double end = o.IsElliptic ? u.Time + o.Period : EndOf(new OrbitPatch { Body = other.Body, Orbit = o, StartTime = u.Time, EndTime = double.PositiveInfinity }, u.Time);
+                SetLine(used++, Sample(o, other.Body, u.Time, end, buf), OtherVesselColor, width * BodyOrbitWidth);
+                marks.Add(new Mark { World = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(other)), Text = "△ " + other.Name, Color = OtherVesselColor });
+            }
+            for (int i = used; i < lines.Count; i++) lines[i].gameObject.SetActive(false);
             // Подписи тел из списка фокуса: по ним видно, где Луна или Марс, и по клику — облёт вокруг.
             foreach (var b in focusList)
                 if (b != null && b != focus)
@@ -291,17 +319,29 @@ namespace Kare.Space.Game
 
         static Vector3 At(OrbitPatch p, double t) => FloatingOrigin.ToUnity(p.Body.Position + p.Orbit.PositionAt(t));
 
-        /// <summary>Точки коники в Unity относительно текущего положения её тела (коника рисуется в системе тела).</summary>
+        /// <summary>
+        /// Точки коники в Unity относительно текущего положения её тела (коника рисуется в системе тела).
+        /// Шаг — по истинной аномалии, а не по времени: у вытянутой орбиты (перелёт к Луне, e ≈ 0,97) почти все
+        /// равные по времени точки ложились у апоцентра, а перицентр рисовался ломаной из пары отрезков.
+        /// </summary>
         static int Sample(KeplerOrbit o, CelestialBody body, double t0, double t1, Vector3[] outPts)
         {
             var bodyU = body.Position;
             int n = outPts.Length;
+            double nu0 = UnwrappedTrueAnomaly(o, t0), nu1 = UnwrappedTrueAnomaly(o, t1);
             for (int i = 0; i < n; i++)
-            {
-                double t = t0 + (t1 - t0) * i / (n - 1);
-                outPts[i] = FloatingOrigin.ToUnity(bodyU + o.PositionAt(t));
-            }
+                outPts[i] = FloatingOrigin.ToUnity(bodyU + o.PositionAtTrueAnomaly(nu0 + (nu1 - nu0) * i / (n - 1)));
             return n;
+        }
+
+        /// <summary>Истинная аномалия без свёртки в ±π: целые обороты берутся из средней аномалии (они совпадают в 0 и π),
+        /// иначе отрезок через апоцентр или длиннее витка схлопнулся бы.</summary>
+        static double UnwrappedTrueAnomaly(KeplerOrbit o, double t)
+        {
+            double m = o.MeanAnomalyAtEpoch + o.MeanMotion * (t - o.Epoch);
+            if (o.E >= 1) return KeplerSolver.MeanToTrue(m, o.E);
+            double k = System.Math.Floor((m + System.Math.PI) / (2 * System.Math.PI));
+            return KeplerSolver.MeanToTrue(m - 2 * System.Math.PI * k, o.E) + 2 * System.Math.PI * k;
         }
 
         static int? Ring(CelestialBody body, Vector3d normal, double radius, Vector3[] outPts)
