@@ -35,6 +35,8 @@ namespace Kare.Space.Game
         public Material PlumeMaterial;
         [Tooltip("Дым шлейфа и облака у стола: HDRP/Lit прозрачный (§9.5).")]
         public Material SmokeMaterial;
+        /// <summary>Взрывы и хлопки отделения (§9.5); материалы те же, что у факела, дыма и корпуса.</summary>
+        BlastEffects blasts;
         [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
         public Texture2D PadTexture;
         [Header("Лоу-поли детали (Tools/blender → Models/*.fbx); без них — процедурные меши")]
@@ -154,6 +156,11 @@ namespace Kare.Space.Game
             Tracker.Changed += OnMessage;
             OnMessage($"Миссия «{Mission.Title}»: {Mission.Brief}");
             gameObject.AddComponent<PauseMenu>();
+            if (PlumeMaterial != null && SmokeMaterial != null && VesselMaterial != null)
+            {
+                blasts = new GameObject("Blast Effects").AddComponent<BlastEffects>();
+                blasts.Init(PlumeMaterial, SmokeMaterial, VesselMaterial);
+            }
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)
                 new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh, PadMeshFor);
@@ -191,6 +198,7 @@ namespace Kare.Space.Game
             Tracker.Update(universe);
             FloatingOrigin.Refresh();
             SyncViews();
+            if (blasts != null) blasts.Watch(universe);
         }
 
         void SyncViews()

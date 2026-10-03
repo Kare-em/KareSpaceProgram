@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &88668292
+--- !u!1 &275052155
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,286 +127,10 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 88668298}
-  - component: {fileID: 88668297}
-  - component: {fileID: 88668296}
-  - component: {fileID: 88668295}
-  - component: {fileID: 88668294}
-  - component: {fileID: 88668293}
-  m_Layer: 0
-  m_Name: Game
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &88668293
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 88668292}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9a9a878a938f20f41be338c474bb46e2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.MapView
-  Camera: {fileID: 1706958135}
-  LineMaterial: {fileID: 2100000, guid: 9d7643be48ce5f543bad9bd333429a18, type: 2}
---- !u!114 &88668294
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 88668292}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 53ce6d0cf805a6b46bea5a9b7350a4a2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightHud
-  Icons: {fileID: 2800000, guid: c4ed70b5fef9cc64291127f45b761746, type: 3}
---- !u!114 &88668295
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 88668292}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d2159aa8700a20a42aa8b60e47600caf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightInput
---- !u!114 &88668296
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 88668292}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0000ef320f7f464418ef79f5c388e551, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FloatingOrigin
---- !u!114 &88668297
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 88668292}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0c8e796a15890514eb585f982fc8fe26, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.GameBootstrap
-  MissionId: vostok
-  Camera: {fileID: 1706958135}
-  Sun: {fileID: 255036515}
-  Volume: {fileID: 1063877240}
-  VesselMaterial: {fileID: 2100000, guid: 73c6f2463d9719342a8f60327806af52, type: 2}
-  PlumeMaterial: {fileID: 2100000, guid: 7bc18a60e8a525442af346aa126361d0, type: 2}
-  SmokeMaterial: {fileID: 2100000, guid: 14c8c22dd31ca5745a9d2f2a315234a7, type: 2}
-  PadTexture: {fileID: 2800000, guid: 2c64fb41758a32046bed8079f64e0b03, type: 3}
-  CapsuleMesh: {fileID: -5214642718586993695, guid: 4b257117241f63b4cbc742eaa66606da, type: 3}
-  EngineMesh: {fileID: -6926942270825805550, guid: eead109c816ec8c4693a86bf4d918940, type: 3}
-  LegMesh: {fileID: -4502446984299914024, guid: 427957c9ceeaa134fad36d2b82e603c4, type: 3}
-  TrussMesh: {fileID: -751728780084141547, guid: 9724b8802cf515d4c8b3921f0e0444f6, type: 3}
-  SputnikMesh: {fileID: 6094125724344924048, guid: 8274684df74bb7241b83e1742df7c266, type: 3}
-  VostokServiceMesh: {fileID: -5839036555323466775, guid: 06be0cb58c523ac4f9c178fc401e6ea3, type: 3}
-  Luna9Mesh: {fileID: -5986204891109956609, guid: 1ecb64a7fb7d2ba44b436674ec5cc2f5, type: 3}
-  UpperEngineMesh: {fileID: 1060374876675606197, guid: b7107cbd1bc6f6f4e85e3c163b875afc, type: 3}
-  InterstageMesh: {fileID: 1131575979743610285, guid: e66d9f1327a34e640a6338a361cc3776, type: 3}
-  FairingHalfMesh: {fileID: 1731609664043526716, guid: 0b5b26d6e4d48804389ec3a2bdddddb9, type: 3}
-  FinsMesh: {fileID: -2851447849405055644, guid: 9341c732672c81d40bae6050210668e5, type: 3}
-  CraftMeshes:
-  - Model: 4
-    Mesh: {fileID: 5013482962104799579, guid: 64fba521807c0c8489855f7e882f113a, type: 3}
-    Deploy:
-    - Mesh: {fileID: 7582976457393301398, guid: a7157e82220bd9541abb58924c7507a5, type: 3}
-      Dir: {x: -0.014462267, y: 0, z: 0.99989545}
-      Slots: 010000000200000003000000i
-  - Model: 5
-    Mesh: {fileID: -6042764521261893261, guid: 8545fe7b6acdb3143a02c70050b655d7, type: 3}
-    Deploy:
-    - Mesh: {fileID: -6674713140248208140, guid: 66cfdc6d83f7de74ca96acfc34422bcd, type: 3}
-      Dir: {x: 3.522383e-10, y: 0, z: -1}
-      Slots: 01000000i
-    - Mesh: {fileID: 2609098821402500316, guid: 66cfdc6d83f7de74ca96acfc34422bcd, type: 3}
-      Dir: {x: 0.0000000016817383, y: 0, z: 1}
-      Slots: 01000000i
-  - Model: 6
-    Mesh: {fileID: -517955179277923051, guid: ca82720b5fd8fca45a98b802d44a2159, type: 3}
-    Deploy:
-    - Mesh: {fileID: -8468477770013163277, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
-      Dir: {x: -1, y: 0, z: -0.00000007670192}
-      Slots: 01000000i
-    - Mesh: {fileID: 6246880390185720267, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
-      Dir: {x: 5.764196e-10, y: 0, z: -1}
-      Slots: 01000000i
-    - Mesh: {fileID: -1822184865118830907, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
-      Dir: {x: 1, y: 0, z: -0.00000007609214}
-      Slots: 01000000i
-    - Mesh: {fileID: 3160756569845158395, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
-      Dir: {x: 0.00000008901509, y: 0, z: 1}
-      Slots: 01000000i
-  - Model: 7
-    Mesh: {fileID: 7252032420627344912, guid: 7857e4c040e093542b7380d46d9980b3, type: 3}
-    Deploy: []
-  - Model: 8
-    Mesh: {fileID: -6888996427929312046, guid: c923651c2d3837a45b9278d18dba7cca, type: 3}
-    Deploy: []
-  - Model: 9
-    Mesh: {fileID: 36853201528768141, guid: 569a9f0ab6fb87c4cabf7f81ad33add5, type: 3}
-    Deploy: []
-  - Model: 35
-    Mesh: {fileID: 195992849340078296, guid: 151a3f5f18a4b0d4b81d7212a89fbec0, type: 3}
-    Deploy: []
-  - Model: 36
-    Mesh: {fileID: 3935057339829326834, guid: a596b3ccfc1accf429779c53df2cc076, type: 3}
-    Deploy: []
-  - Model: 10
-    Mesh: {fileID: -804801206770926785, guid: b9378b925e649d74a934ff4166e67136, type: 3}
-    Deploy: []
-  - Model: 11
-    Mesh: {fileID: -2096463249116327697, guid: 22599ff00de997a4d97c1e3cf4e6f8c4, type: 3}
-    Deploy: []
-  - Model: 12
-    Mesh: {fileID: -2455835155717056387, guid: 8ac33576819191e4abf71e36e966835a, type: 3}
-    Deploy: []
-  - Model: 13
-    Mesh: {fileID: 6615547932496439496, guid: 5051cc1538422b448810477d2255d6d0, type: 3}
-    Deploy:
-    - Mesh: {fileID: -5690245492777326472, guid: f79413a1262f70a48b986c82e90e22b7, type: 3}
-      Dir: {x: 3.3808642e-10, y: 0, z: -1}
-      Slots: 00000000i
-    - Mesh: {fileID: 6751479523829035085, guid: f79413a1262f70a48b986c82e90e22b7, type: 3}
-      Dir: {x: 0.8660254, y: 0, z: 0.5}
-      Slots: 00000000i
-    - Mesh: {fileID: 5905746837533099358, guid: f79413a1262f70a48b986c82e90e22b7, type: 3}
-      Dir: {x: -0.8660255, y: 0, z: 0.49999988}
-      Slots: 00000000i
-  - Model: 14
-    Mesh: {fileID: -6219135629285325219, guid: af497524c61451d4ab88724e91052650, type: 3}
-    Deploy: []
-  - Model: 15
-    Mesh: {fileID: 7948881830843301474, guid: fbb0857eea9c03b4f8d5e2ac66f11a16, type: 3}
-    Deploy: []
-  - Model: 16
-    Mesh: {fileID: -4817999727821756291, guid: 3c972a3978add274dbb6035ceb85fd4c, type: 3}
-    Deploy: []
-  - Model: 17
-    Mesh: {fileID: 7747481399398511223, guid: c0b2fbfa9149b1c488da2e562bb1c4cb, type: 3}
-    Deploy: []
-  - Model: 18
-    Mesh: {fileID: 4604297886632651149, guid: 33a6066151d1aba4aa2d3b7d9a38815e, type: 3}
-    Deploy: []
-  - Model: 19
-    Mesh: {fileID: 7615073540531000810, guid: 5e56d11c5a30d264886e2d8c305eb18a, type: 3}
-    Deploy: []
-  - Model: 20
-    Mesh: {fileID: -6043212874182919763, guid: a7dd36626ddceee4ea9a50a665dc1b5d, type: 3}
-    Deploy: []
-  - Model: 21
-    Mesh: {fileID: 3658580720956674303, guid: b04b39639e8e9b74987aab5f75cb4e9c, type: 3}
-    Deploy: []
-  - Model: 22
-    Mesh: {fileID: -7668577182907192154, guid: bd178d0073e0a2c45985a556ba25c91a, type: 3}
-    Deploy: []
-  - Model: 23
-    Mesh: {fileID: -5971604830274556113, guid: edf003e317b97b443936881940d9dee9, type: 3}
-    Deploy: []
-  - Model: 24
-    Mesh: {fileID: 7583607270992621090, guid: 274a348df2449e94f8982d15c0157bdb, type: 3}
-    Deploy: []
-  - Model: 25
-    Mesh: {fileID: -5976797174745104469, guid: 8d5b0fd52e1184b48ace8e61070ca254, type: 3}
-    Deploy: []
-  - Model: 26
-    Mesh: {fileID: -7322575233881481290, guid: e230b2f03ab93a14d8924380c68cd19e, type: 3}
-    Deploy: []
-  - Model: 27
-    Mesh: {fileID: -6054468505330145722, guid: 3c69f5c87537cee42b1ab4f8aa2e446c, type: 3}
-    Deploy: []
-  - Model: 28
-    Mesh: {fileID: 5752293017107350594, guid: 7d9dfc336b17ab94cbfbc62b03f4cc6b, type: 3}
-    Deploy: []
-  - Model: 29
-    Mesh: {fileID: -7857419414656346384, guid: 97cd7c4eee033424781ab053d4af3666, type: 3}
-    Deploy: []
-  - Model: 30
-    Mesh: {fileID: -8448553940838311232, guid: 6dfc35d0d6fefaf4b84755cbce77682f, type: 3}
-    Deploy: []
-  - Model: 31
-    Mesh: {fileID: 8418520040901295911, guid: 321d668214afde3479001b969ac19013, type: 3}
-    Deploy: []
-  - Model: 32
-    Mesh: {fileID: 2982833754575969149, guid: 1cc93570dbb5cdb4683cd5b8090fe70d, type: 3}
-    Deploy: []
-  - Model: 33
-    Mesh: {fileID: -3282735570031422338, guid: dc9be40373e0ba04b9f27b5f155074c9, type: 3}
-    Deploy: []
-  - Model: 34
-    Mesh: {fileID: 2180218396066870116, guid: d5d55f518f86ece47bbf84ff14141b03, type: 3}
-    Deploy: []
-  PadMeshes:
-  - Name: Pad_R7
-    Mesh: {fileID: 4579876681042356189, guid: a16d402a6df721c4cacb407ee3109b60, type: 3}
-  - Name: Pad_Mast
-    Mesh: {fileID: 7938580746958750338, guid: 870e8ff2a32de2541b2425b3fbec5e51, type: 3}
-  - Name: Pad_Proton
-    Mesh: {fileID: 7989358685205088883, guid: 9190071da5d92354ba62b87ae9354fb0, type: 3}
-  - Name: Pad_Redstone
-    Mesh: {fileID: 7512289911141902264, guid: 247d1df23a7f1b34f91ade37b7a815a8, type: 3}
-  - Name: Pad_Atlas
-    Mesh: {fileID: -9027335984969045317, guid: 8955350b2aa34a94b82bf0032d0578e4, type: 3}
-  - Name: Pad_Titan
-    Mesh: {fileID: 2174570483973292101, guid: e4997e79617595a45b08c40aa53675eb, type: 3}
-  - Name: Pad_Saturn_ML
-    Mesh: {fileID: -7511823045112627813, guid: cd1fc515cec026c4bbde60e613f95bdb, type: 3}
-  - Name: Pad_Saturn_LUT
-    Mesh: {fileID: -4362114263109769489, guid: 146237b8fc27e1247b9ea6ee46dfe075, type: 3}
-  - Name: Pad_Arm_Light
-    Mesh: {fileID: -4404416771789514909, guid: 31cd24a6846fd57499daae61ecbe257f, type: 3}
-  - Name: Pad_Arm_Heavy
-    Mesh: {fileID: 3014551700878765078, guid: 086f7658030c85949b62808121bc4939, type: 3}
-  AeroBreakup: 0
-  HeatDamage: 0
-  GLoadLimit: 0
-  AscentTutor: 1
-  AutoWarp: 1
-  InfiniteFuel: 0
-  EarthLand: {fileID: 4900000, guid: 4e16bb1612bcf794d8158124a2e950bc, type: 3}
---- !u!4 &88668298
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 88668292}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &255036514
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 255036518}
-  - component: {fileID: 255036515}
-  - component: {fileID: 255036517}
-  - component: {fileID: 255036516}
+  - component: {fileID: 275052159}
+  - component: {fileID: 275052156}
+  - component: {fileID: 275052158}
+  - component: {fileID: 275052157}
   m_Layer: 0
   m_Name: Sun
   m_TagString: Untagged
@@ -414,13 +138,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!108 &255036515
+--- !u!108 &275052156
 Light:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 255036514}
+  m_GameObject: {fileID: 275052155}
   m_Enabled: 1
   serializedVersion: 13
   m_Type: 1
@@ -479,25 +203,25 @@ Light:
   m_LightUnit: 2
   m_LuxAtDistance: 1
   m_EnableSpotReflector: 1
---- !u!114 &255036516
+--- !u!114 &275052157
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 255036514}
+  m_GameObject: {fileID: 275052155}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 90013aea05d01b248b190c02458475c3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SunLight
---- !u!114 &255036517
+--- !u!114 &275052158
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 255036514}
+  m_GameObject: {fileID: 275052155}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7a68c43fe1f2a47cfa234b5eeaa98012, type: 3}
@@ -632,13 +356,13 @@ MonoBehaviour:
   m_AreaLightEmissiveMeshShadowCastingMode: 0
   m_AreaLightEmissiveMeshMotionVectorGenerationMode: 0
   m_AreaLightEmissiveMeshLayer: -1
---- !u!4 &255036518
+--- !u!4 &275052159
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 255036514}
+  m_GameObject: {fileID: 275052155}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -647,7 +371,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &520486398
+--- !u!1 &619663696
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -655,8 +379,71 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 520486400}
-  - component: {fileID: 520486399}
+  - component: {fileID: 619663699}
+  - component: {fileID: 619663697}
+  - component: {fileID: 619663698}
+  m_Layer: 0
+  m_Name: Global Volume
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &619663697
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 619663696}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: c217d6ea0ffc9884f89fe4f27d02928b, type: 2}
+--- !u!114 &619663698
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 619663696}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b33d184a5ad092f488a16668cc0c9854, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SkyController
+  Volume: {fileID: 619663697}
+--- !u!4 &619663699
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 619663696}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1202610733
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1202610735}
+  - component: {fileID: 1202610734}
   m_Layer: 0
   m_Name: Bodies
   m_TagString: Untagged
@@ -664,13 +451,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &520486399
+--- !u!114 &1202610734
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 520486398}
+  m_GameObject: {fileID: 1202610733}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8aac56f161dba2540848fcf625603db2, type: 3}
@@ -683,15 +470,60 @@ MonoBehaviour:
   MarsGround: {fileID: 2800000, guid: cce9f7be0e1b10244979707127c0bfc5, type: 3}
   EarthGroundNormal: {fileID: 2800000, guid: 817358eba3aa2e34e9a0f73eb7850fe9, type: 3}
   WaterNormal: {fileID: 2800000, guid: a38362efe8fcae940af5e567fb226755, type: 3}
-  MoonMap: {fileID: 2800000, guid: 56e784c10fc1a49449ba45875a8caf3b, type: 3}
-  MoonMapSmall: {fileID: 2800000, guid: d3613527d7ccf4440835fc91120af0ee, type: 3}
---- !u!4 &520486400
+  Maps:
+  - Id: moon
+    Map: {fileID: 2800000, guid: 56e784c10fc1a49449ba45875a8caf3b, type: 3}
+    Small: {fileID: 2800000, guid: d3613527d7ccf4440835fc91120af0ee, type: 3}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: earth
+    Map: {fileID: 2800000, guid: 774cff5249f6bd64daaaa947d13a3a07, type: 3}
+    Small: {fileID: 2800000, guid: 11a0a9f5665db404e9897f870a7303ed, type: 3}
+    Night: {fileID: 2800000, guid: f3fec076a81c3c642b5ef1adfc83dff5, type: 3}
+    Clouds: {fileID: 2800000, guid: 38d50d6ca53be8048a336c06aeee8297, type: 3}
+  - Id: mercury
+    Map: {fileID: 2800000, guid: 4576e440d7d5ebe429294a94ca107f16, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: venus
+    Map: {fileID: 2800000, guid: 7902f812e02b7dd4295ba15a322caad6, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: mars
+    Map: {fileID: 2800000, guid: 63839ba5812c5704d9a1bd9601873b84, type: 3}
+    Small: {fileID: 2800000, guid: 31f166fd6b394434380459e87ca9b7e4, type: 3}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: jupiter
+    Map: {fileID: 2800000, guid: 3f4ff9c4b37ccdf4ca0e68e811e4a50e, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: saturn
+    Map: {fileID: 2800000, guid: d6ad9e44d79ce334db9a8ad8ed870830, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: uranus
+    Map: {fileID: 2800000, guid: 0cfaea251bb4de64181e46d5b608a0cc, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: neptune
+    Map: {fileID: 2800000, guid: 9b739e0940c07fa49b9f82edecd3c270, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  SaturnRing: {fileID: 2800000, guid: 2c92d65e27d115a43a66aba8192325f7, type: 3}
+--- !u!4 &1202610735
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 520486398}
+  m_GameObject: {fileID: 1202610733}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -700,7 +532,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1063877239
+--- !u!1 &2030235101
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -708,53 +540,323 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1063877242}
-  - component: {fileID: 1063877240}
-  - component: {fileID: 1063877241}
+  - component: {fileID: 2030235107}
+  - component: {fileID: 2030235106}
+  - component: {fileID: 2030235105}
+  - component: {fileID: 2030235104}
+  - component: {fileID: 2030235103}
+  - component: {fileID: 2030235102}
   m_Layer: 0
-  m_Name: Global Volume
+  m_Name: Game
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1063877240
+--- !u!114 &2030235102
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1063877239}
+  m_GameObject: {fileID: 2030235101}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Script: {fileID: 11500000, guid: 9a9a878a938f20f41be338c474bb46e2, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
-  m_IsGlobal: 1
-  priority: 0
-  blendDistance: 0
-  weight: 1
-  sharedProfile: {fileID: 11400000, guid: c217d6ea0ffc9884f89fe4f27d02928b, type: 2}
---- !u!114 &1063877241
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.MapView
+  Camera: {fileID: 2108595580}
+  LineMaterial: {fileID: 2100000, guid: 9d7643be48ce5f543bad9bd333429a18, type: 2}
+--- !u!114 &2030235103
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1063877239}
+  m_GameObject: {fileID: 2030235101}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b33d184a5ad092f488a16668cc0c9854, type: 3}
+  m_Script: {fileID: 11500000, guid: 53ce6d0cf805a6b46bea5a9b7350a4a2, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SkyController
-  Volume: {fileID: 1063877240}
---- !u!4 &1063877242
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightHud
+  Icons: {fileID: 2800000, guid: c4ed70b5fef9cc64291127f45b761746, type: 3}
+--- !u!114 &2030235104
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030235101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d2159aa8700a20a42aa8b60e47600caf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightInput
+--- !u!114 &2030235105
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030235101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0000ef320f7f464418ef79f5c388e551, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FloatingOrigin
+--- !u!114 &2030235106
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2030235101}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0c8e796a15890514eb585f982fc8fe26, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.GameBootstrap
+  MissionId: vostok
+  Camera: {fileID: 2108595580}
+  Sun: {fileID: 275052156}
+  Volume: {fileID: 619663697}
+  VesselMaterial: {fileID: 2100000, guid: 73c6f2463d9719342a8f60327806af52, type: 2}
+  PlumeMaterial: {fileID: 2100000, guid: 7bc18a60e8a525442af346aa126361d0, type: 2}
+  SmokeMaterial: {fileID: 2100000, guid: 14c8c22dd31ca5745a9d2f2a315234a7, type: 2}
+  PadTexture: {fileID: 2800000, guid: 2c64fb41758a32046bed8079f64e0b03, type: 3}
+  CapsuleMesh: {fileID: -5214642718586993695, guid: 4b257117241f63b4cbc742eaa66606da, type: 3}
+  EngineMesh: {fileID: -6926942270825805550, guid: eead109c816ec8c4693a86bf4d918940, type: 3}
+  LegMesh: {fileID: -4502446984299914024, guid: 427957c9ceeaa134fad36d2b82e603c4, type: 3}
+  TrussMesh: {fileID: -751728780084141547, guid: 9724b8802cf515d4c8b3921f0e0444f6, type: 3}
+  SputnikMesh: {fileID: 6094125724344924048, guid: 8274684df74bb7241b83e1742df7c266, type: 3}
+  VostokServiceMesh: {fileID: -5839036555323466775, guid: 06be0cb58c523ac4f9c178fc401e6ea3, type: 3}
+  Luna9Mesh: {fileID: -5986204891109956609, guid: 1ecb64a7fb7d2ba44b436674ec5cc2f5, type: 3}
+  UpperEngineMesh: {fileID: 1060374876675606197, guid: b7107cbd1bc6f6f4e85e3c163b875afc, type: 3}
+  InterstageMesh: {fileID: 1131575979743610285, guid: e66d9f1327a34e640a6338a361cc3776, type: 3}
+  FairingHalfMesh: {fileID: 1731609664043526716, guid: 0b5b26d6e4d48804389ec3a2bdddddb9, type: 3}
+  FinsMesh: {fileID: -2851447849405055644, guid: 9341c732672c81d40bae6050210668e5, type: 3}
+  CraftMeshes:
+  - Model: 4
+    Mesh: {fileID: 5013482962104799579, guid: 64fba521807c0c8489855f7e882f113a, type: 3}
+    Deploy:
+    - Mesh: {fileID: 7582976457393301398, guid: a7157e82220bd9541abb58924c7507a5, type: 3}
+      Dir: {x: -0.014462267, y: 0, z: 0.99989545}
+      Slots: 010000000200000003000000i
+    Wheels:
+    - Mesh: {fileID: -5381331594429529297, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: 0.8, y: 0.255, z: 0.845}
+      Slots: 01000000i
+    - Mesh: {fileID: -7746562765553170249, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: -0.8, y: 0.255, z: 0.845}
+      Slots: 01000000i
+    - Mesh: {fileID: 5418213970248954255, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: 0.8, y: 0.255, z: 0.28329998}
+      Slots: 01000000i
+    - Mesh: {fileID: 4476580562805339146, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: -0.8, y: 0.255, z: 0.28329998}
+      Slots: 01000000i
+    - Mesh: {fileID: -7848094408192009764, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: 0.8, y: 0.255, z: -0.28329998}
+      Slots: 01000000i
+    - Mesh: {fileID: -279127097988408895, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: -0.8, y: 0.255, z: -0.28329998}
+      Slots: 01000000i
+    - Mesh: {fileID: -3847648726957894156, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: 0.8, y: 0.255, z: -0.845}
+      Slots: 01000000i
+    - Mesh: {fileID: 6105301973047927066, guid: b216365151d29e64aadd4093fa7ec815, type: 3}
+      Dir: {x: -0.8, y: 0.255, z: -0.845}
+      Slots: 01000000i
+  - Model: 5
+    Mesh: {fileID: -6042764521261893261, guid: 8545fe7b6acdb3143a02c70050b655d7, type: 3}
+    Deploy:
+    - Mesh: {fileID: -6674713140248208140, guid: 66cfdc6d83f7de74ca96acfc34422bcd, type: 3}
+      Dir: {x: 3.522383e-10, y: 0, z: -1}
+      Slots: 01000000i
+    - Mesh: {fileID: 2609098821402500316, guid: 66cfdc6d83f7de74ca96acfc34422bcd, type: 3}
+      Dir: {x: 0.0000000016817383, y: 0, z: 1}
+      Slots: 01000000i
+    Wheels: []
+  - Model: 6
+    Mesh: {fileID: -517955179277923051, guid: ca82720b5fd8fca45a98b802d44a2159, type: 3}
+    Deploy:
+    - Mesh: {fileID: -8468477770013163277, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
+      Dir: {x: -1, y: 0, z: -0.00000007670192}
+      Slots: 01000000i
+    - Mesh: {fileID: 6246880390185720267, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
+      Dir: {x: 5.764196e-10, y: 0, z: -1}
+      Slots: 01000000i
+    - Mesh: {fileID: -1822184865118830907, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
+      Dir: {x: 1, y: 0, z: -0.00000007609214}
+      Slots: 01000000i
+    - Mesh: {fileID: 3160756569845158395, guid: 1e84bcf2b21129044bfe36ae408177cd, type: 3}
+      Dir: {x: 0.00000008901509, y: 0, z: 1}
+      Slots: 01000000i
+    Wheels: []
+  - Model: 7
+    Mesh: {fileID: 7252032420627344912, guid: 7857e4c040e093542b7380d46d9980b3, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 8
+    Mesh: {fileID: -6888996427929312046, guid: c923651c2d3837a45b9278d18dba7cca, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 9
+    Mesh: {fileID: 36853201528768141, guid: 569a9f0ab6fb87c4cabf7f81ad33add5, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 35
+    Mesh: {fileID: 195992849340078296, guid: 151a3f5f18a4b0d4b81d7212a89fbec0, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 36
+    Mesh: {fileID: 3935057339829326834, guid: a596b3ccfc1accf429779c53df2cc076, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 10
+    Mesh: {fileID: -804801206770926785, guid: b9378b925e649d74a934ff4166e67136, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 11
+    Mesh: {fileID: -2096463249116327697, guid: 22599ff00de997a4d97c1e3cf4e6f8c4, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 12
+    Mesh: {fileID: -2455835155717056387, guid: 8ac33576819191e4abf71e36e966835a, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 13
+    Mesh: {fileID: 6615547932496439496, guid: 5051cc1538422b448810477d2255d6d0, type: 3}
+    Deploy:
+    - Mesh: {fileID: -5690245492777326472, guid: f79413a1262f70a48b986c82e90e22b7, type: 3}
+      Dir: {x: 3.3808642e-10, y: 0, z: -1}
+      Slots: 00000000i
+    - Mesh: {fileID: 6751479523829035085, guid: f79413a1262f70a48b986c82e90e22b7, type: 3}
+      Dir: {x: 0.8660254, y: 0, z: 0.5}
+      Slots: 00000000i
+    - Mesh: {fileID: 5905746837533099358, guid: f79413a1262f70a48b986c82e90e22b7, type: 3}
+      Dir: {x: -0.8660255, y: 0, z: 0.49999988}
+      Slots: 00000000i
+    Wheels: []
+  - Model: 14
+    Mesh: {fileID: -6219135629285325219, guid: af497524c61451d4ab88724e91052650, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 15
+    Mesh: {fileID: 7948881830843301474, guid: fbb0857eea9c03b4f8d5e2ac66f11a16, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 16
+    Mesh: {fileID: -4817999727821756291, guid: 3c972a3978add274dbb6035ceb85fd4c, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 17
+    Mesh: {fileID: 7747481399398511223, guid: c0b2fbfa9149b1c488da2e562bb1c4cb, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 18
+    Mesh: {fileID: 4604297886632651149, guid: 33a6066151d1aba4aa2d3b7d9a38815e, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 19
+    Mesh: {fileID: 7615073540531000810, guid: 5e56d11c5a30d264886e2d8c305eb18a, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 20
+    Mesh: {fileID: -6043212874182919763, guid: a7dd36626ddceee4ea9a50a665dc1b5d, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 21
+    Mesh: {fileID: 3658580720956674303, guid: b04b39639e8e9b74987aab5f75cb4e9c, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 22
+    Mesh: {fileID: -7668577182907192154, guid: bd178d0073e0a2c45985a556ba25c91a, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 23
+    Mesh: {fileID: -5971604830274556113, guid: edf003e317b97b443936881940d9dee9, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 24
+    Mesh: {fileID: 7583607270992621090, guid: 274a348df2449e94f8982d15c0157bdb, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 25
+    Mesh: {fileID: -5976797174745104469, guid: 8d5b0fd52e1184b48ace8e61070ca254, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 26
+    Mesh: {fileID: -7322575233881481290, guid: e230b2f03ab93a14d8924380c68cd19e, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 27
+    Mesh: {fileID: -6054468505330145722, guid: 3c69f5c87537cee42b1ab4f8aa2e446c, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 28
+    Mesh: {fileID: 5752293017107350594, guid: 7d9dfc336b17ab94cbfbc62b03f4cc6b, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 29
+    Mesh: {fileID: -7857419414656346384, guid: 97cd7c4eee033424781ab053d4af3666, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 30
+    Mesh: {fileID: -8448553940838311232, guid: 6dfc35d0d6fefaf4b84755cbce77682f, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 31
+    Mesh: {fileID: 8418520040901295911, guid: 321d668214afde3479001b969ac19013, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 32
+    Mesh: {fileID: 2982833754575969149, guid: 1cc93570dbb5cdb4683cd5b8090fe70d, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 33
+    Mesh: {fileID: -3282735570031422338, guid: dc9be40373e0ba04b9f27b5f155074c9, type: 3}
+    Deploy: []
+    Wheels: []
+  - Model: 34
+    Mesh: {fileID: 2180218396066870116, guid: d5d55f518f86ece47bbf84ff14141b03, type: 3}
+    Deploy: []
+    Wheels: []
+  PadMeshes:
+  - Name: Pad_R7
+    Mesh: {fileID: 4579876681042356189, guid: a16d402a6df721c4cacb407ee3109b60, type: 3}
+  - Name: Pad_Mast
+    Mesh: {fileID: 7938580746958750338, guid: 870e8ff2a32de2541b2425b3fbec5e51, type: 3}
+  - Name: Pad_Proton
+    Mesh: {fileID: 7989358685205088883, guid: 9190071da5d92354ba62b87ae9354fb0, type: 3}
+  - Name: Pad_Redstone
+    Mesh: {fileID: 7512289911141902264, guid: 247d1df23a7f1b34f91ade37b7a815a8, type: 3}
+  - Name: Pad_Atlas
+    Mesh: {fileID: -9027335984969045317, guid: 8955350b2aa34a94b82bf0032d0578e4, type: 3}
+  - Name: Pad_Titan
+    Mesh: {fileID: 2174570483973292101, guid: e4997e79617595a45b08c40aa53675eb, type: 3}
+  - Name: Pad_Saturn_ML
+    Mesh: {fileID: -7511823045112627813, guid: cd1fc515cec026c4bbde60e613f95bdb, type: 3}
+  - Name: Pad_Saturn_LUT
+    Mesh: {fileID: -4362114263109769489, guid: 146237b8fc27e1247b9ea6ee46dfe075, type: 3}
+  - Name: Pad_Arm_Light
+    Mesh: {fileID: -4404416771789514909, guid: 31cd24a6846fd57499daae61ecbe257f, type: 3}
+  - Name: Pad_Arm_Heavy
+    Mesh: {fileID: 3014551700878765078, guid: 086f7658030c85949b62808121bc4939, type: 3}
+  AeroBreakup: 0
+  HeatDamage: 0
+  GLoadLimit: 0
+  AscentTutor: 1
+  AutoWarp: 1
+  InfiniteFuel: 0
+  EarthLand: {fileID: 4900000, guid: 4e16bb1612bcf794d8158124a2e950bc, type: 3}
+--- !u!4 &2030235107
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1063877239}
+  m_GameObject: {fileID: 2030235101}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -763,7 +865,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1706958134
+--- !u!1 &2108595579
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -771,12 +873,12 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1706958140}
-  - component: {fileID: 1706958135}
-  - component: {fileID: 1706958139}
-  - component: {fileID: 1706958138}
-  - component: {fileID: 1706958137}
-  - component: {fileID: 1706958136}
+  - component: {fileID: 2108595585}
+  - component: {fileID: 2108595580}
+  - component: {fileID: 2108595584}
+  - component: {fileID: 2108595583}
+  - component: {fileID: 2108595582}
+  - component: {fileID: 2108595581}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -784,13 +886,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &1706958135
+--- !u!20 &2108595580
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1706958134}
+  m_GameObject: {fileID: 2108595579}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 1
@@ -835,25 +937,25 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!114 &1706958136
+--- !u!114 &2108595581
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1706958134}
+  m_GameObject: {fileID: 2108595579}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e8f3e21eaf37b8a42a3a873d0482a235, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.RenderQuality
---- !u!114 &1706958137
+--- !u!114 &2108595582
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1706958134}
+  m_GameObject: {fileID: 2108595579}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a74223da20fd79f41a3a01d19c5d3e1b, type: 3}
@@ -865,21 +967,21 @@ MonoBehaviour:
   Yaw: 30
   Pitch: 10
   OrbitSpeed: 3
---- !u!81 &1706958138
+--- !u!81 &2108595583
 AudioListener:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1706958134}
+  m_GameObject: {fileID: 2108595579}
   m_Enabled: 1
---- !u!114 &1706958139
+--- !u!114 &2108595584
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1706958134}
+  m_GameObject: {fileID: 2108595579}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 23c1ce4fb46143f46bc5cb5224c934f6, type: 3}
@@ -1012,13 +1114,13 @@ MonoBehaviour:
       data1: 0
       data2: 0
   defaultFrameSettings: 0
---- !u!4 &1706958140
+--- !u!4 &2108595585
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1706958134}
+  m_GameObject: {fileID: 2108595579}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -1031,8 +1133,8 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 1063877242}
-  - {fileID: 255036518}
-  - {fileID: 1706958140}
-  - {fileID: 88668298}
-  - {fileID: 520486400}
+  - {fileID: 619663699}
+  - {fileID: 275052159}
+  - {fileID: 2108595585}
+  - {fileID: 2030235107}
+  - {fileID: 1202610735}

@@ -41,6 +41,11 @@ namespace Kare.Space.Game
         /// его размеров. Замена soft-particles — у HDRP/Lit их нет, а входящая в клуб камера давала плоский экран-вуаль.</summary>
         const float PuffFadeNear = 0.6f, PuffFadeRange = 1.2f;
         static readonly Color SmokeColor = new Color(0.86f, 0.85f, 0.83f);
+        /// <summary>Пыль под струёй в вакууме (§9.5): «Аполлон-11» поднимал её с ~30 м (Армстронг: «picking up some dust»
+        /// на 100 футах). Без воздуха частицы летят веером по прямой — скорость не гаснет, клуб не всплывает.
+        /// DustSpeed × DustLife ≈ 150 м — дальность веера; пара: DustSize/DustGrowth — ширина к концу жизни ~12 м.</summary>
+        const float DustHeight = 30f, DustSpeed = 60f, DustLife = 2.5f, DustSize = 2f, DustGrowth = 4f, DustAlpha = 0.35f;
+        const double DustInterval = 0.08;
 
         struct Sample { public Vector3d Bf; public double Time; public float Width; }
 
@@ -49,6 +54,7 @@ namespace Kare.Space.Game
             public Vector3d Ground, Dir, Up;
             public double Born = double.NegativeInfinity;
             public float Strength;
+            public bool Dust;
             public Transform Tr;
             public Renderer R;
         }
@@ -58,6 +64,8 @@ namespace Kare.Space.Game
         readonly Sample[] samples = new Sample[Points];
         int newest = -1, count;
         double lastSample = double.NegativeInfinity, lastPuff = double.NegativeInfinity;
+        /// <summary>Цвет пыли — средний тон грунта тела (BodyVisuals), пересчитывается при смене тела.</summary>
+        Color dustColor;
         float lastRadius = 1;
         Vector3d lastSrc;
 
@@ -135,6 +143,8 @@ namespace Kare.Space.Game
             {
                 // Смена сферы влияния: точки в осях старого тела смысла не имеют.
                 body = v.Body;
+                var look = BodyVisuals.Get(body.Id);
+                dustColor = Color.Lerp(look.Low, look.High, 0.5f);
                 count = 0; newest = -1;
                 foreach (var p in puffs) p.Born = double.NegativeInfinity;
             }
@@ -157,6 +167,8 @@ namespace Kare.Space.Game
                 lastSrc = srcBf;
                 lastRadius = radius;
                 if (v.Density > DensityFull) SpawnPuffs(v, now, srcBf, upBf, Vector3d.Dot(offBf, upBf));
+                else if (v.Density < DensityEnd && body.Terrain != null && !body.IsGasGiant)
+                    SpawnDust(v, now, srcBf, upBf, Vector3d.Dot(offBf, upBf), thr);
             }
             // Выключенный двигатель кладёт точки нулевой ширины в последнее место — хвост стареет дальше.
             if ((burning || count > 0) && (now - lastSample >= SampleInterval || now < lastSample))
@@ -235,6 +247,27 @@ namespace Kare.Space.Game
             p.Up = upBf;
             p.Born = now;
             p.Strength = 1 - (float)(System.Math.Max(0, agl) / CloudHeight);
+            p.Dust = false;
+        }
+
+        /// <summary>Пыль в вакууме: чаще и короче клубов, сила — от тяги и высоты над грунтом.</summary>
+        void SpawnDust(Vessel v, double now, Vector3d srcBf, Vector3d upBf, double offUp, float thr)
+        {
+            double agl = v.TerrainAltitude + offUp;
+            if (agl > DustHeight || now - lastPuff < DustInterval) return;
+            if (now < lastPuff) lastPuff = now;
+            lastPuff = now;
+            var e1 = Vector3d.AnyPerpendicular(upBf).normalized;
+            var e2 = Vector3d.Cross(upBf, e1);
+            double a = rng.NextDouble() * 2 * System.Math.PI;
+            var p = puffs[nextPuff];
+            nextPuff = (nextPuff + 1) % Puffs;
+            p.Ground = srcBf - upBf * System.Math.Max(0, agl);
+            p.Dir = e1 * System.Math.Cos(a) + e2 * System.Math.Sin(a);
+            p.Up = upBf;
+            p.Born = now;
+            p.Strength = (1 - (float)(System.Math.Max(0, agl) / DustHeight)) * Mathf.Clamp01(0.3f + thr);
+            p.Dust = true;
         }
 
         void UpdatePuffs(bool show, double now, QuaternionD q)
@@ -243,24 +276,36 @@ namespace Kare.Space.Game
             foreach (var p in puffs)
             {
                 float age = (float)(now - p.Born);
-                bool on = show && age >= 0 && age < PuffLife;
+                float maxAge = p.Dust ? DustLife : PuffLife;
+                bool on = show && age >= 0 && age < maxAge;
                 p.R.enabled = on;
                 if (!on) continue;
-                float size = PuffSize + PuffGrowth * Mathf.Sqrt(age);
-                double run = PuffSpeed * PuffDrag * (1 - System.Math.Exp(-age / PuffDrag));
-                var bf = p.Ground + p.Dir * run + p.Up * (PuffRise * age + size * PuffLift);
+                float size;
+                Vector3d bf;
+                if (p.Dust)
+                {
+                    size = DustSize + DustGrowth * age;
+                    bf = p.Ground + p.Dir * (DustSpeed * age) + p.Up * (size * PuffLift * 0.5f);
+                }
+                else
+                {
+                    size = PuffSize + PuffGrowth * Mathf.Sqrt(age);
+                    double run = PuffSpeed * PuffDrag * (1 - System.Math.Exp(-age / PuffDrag));
+                    bf = p.Ground + p.Dir * run + p.Up * (PuffRise * age + size * PuffLift);
+                }
                 p.Tr.position = FloatingOrigin.ToUnity(body.Position + q * bf);
                 if (cam != null) p.Tr.rotation = cam.transform.rotation;
                 p.Tr.localScale = Vector3.one * size;
-                float life = 1 - age / PuffLife;
-                float alpha = PuffAlpha * p.Strength * Mathf.Clamp01(age * 2) * life * life;
+                float life = 1 - age / maxAge;
+                float alpha = (p.Dust ? DustAlpha : PuffAlpha) * p.Strength * Mathf.Clamp01(age * (p.Dust ? 10 : 2)) * life * life;
                 if (cam != null)
                 {
                     float d = Vector3.Distance(cam.transform.position, p.Tr.position) / size;
                     alpha *= Mathf.SmoothStep(0, 1, (d - PuffFadeNear) / PuffFadeRange);
                 }
                 mpb.Clear();
-                mpb.SetColor("_BaseColor", new Color(SmokeColor.r, SmokeColor.g, SmokeColor.b, alpha));
+                var tint = p.Dust ? dustColor : SmokeColor;
+                mpb.SetColor("_BaseColor", new Color(tint.r, tint.g, tint.b, alpha));
                 p.R.SetPropertyBlock(mpb);
             }
         }
@@ -285,7 +330,7 @@ namespace Kare.Space.Game
             return trailTex;
         }
 
-        static Texture2D PuffTexture()
+        internal static Texture2D PuffTexture()
         {
             if (puffTex != null) return puffTex;
             const int n = 128;
