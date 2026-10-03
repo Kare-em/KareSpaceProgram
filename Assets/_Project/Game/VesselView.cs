@@ -78,6 +78,11 @@ namespace Kare.Space.Game
         const float FairingModelRadius = 2.6f, FairingModelHeight = 13f, FinsModelBodyRadius = 0.5f;
         /// <summary>Радиус среза ТДУ «Востока» в долях радиуса отсека — по модели (сопло Ø≈0,5 м на Ø2,44).</summary>
         const float ServiceNozzleShare = 0.2f;
+        /// <summary>
+        /// Начало модели аппарата у верха (служебный модуль «Аполлона» — от стыка с КМ вниз), если над началом
+        /// меньше этой доли высоты модели; иначе начало у днища. Модели в натуральную величину, как и секции.
+        /// </summary>
+        const float CraftTopOriginShare = 0.5f;
 
         public Vessel Vessel { get; private set; }
 
@@ -117,6 +122,52 @@ namespace Kare.Space.Game
         // Слоты FBX «Metal» (рамы, баки, антенны) и «Polished» (полированный шар ПС-1, экраны Е-6).
         static readonly Color MetalColor = new Color(0.55f, 0.55f, 0.53f);
         static readonly Color PolishedColor = new Color(0.85f, 0.85f, 0.83f);
+        static readonly Color FoilColor = new Color(0.80f, 0.62f, 0.28f);
+        static readonly Color BlackColor = new Color(0.07f, 0.07f, 0.07f);
+        static readonly Color PanelColor = new Color(0.06f, 0.08f, 0.16f);
+        static readonly Color ShieldColor = new Color(0.33f, 0.24f, 0.17f);
+        static readonly Color WhiteColor = new Color(0.90f, 0.90f, 0.88f);
+
+        /// <summary>Цвета слотов моделей аппаратов — в порядке материалов FBX (Hull/Metal/Foil… из parts.blend).</summary>
+        static Color[] CraftPalette(SectionModel m)
+        {
+            switch (m)
+            {
+                case SectionModel.Lunokhod: return new[] { PayloadColor, MetalColor, BlackColor, PolishedColor };
+                case SectionModel.Luna17KT: return new[] { FoilColor, MetalColor, StageColor, NozzleColor };
+                case SectionModel.LMDescent: return new[] { FoilColor, MetalColor, BlackColor, NozzleColor };
+                case SectionModel.LMAscent: return new[] { MetalColor, FoilColor, PolishedColor, BlackColor };
+                case SectionModel.ApolloCM: return new[] { ShieldColor, MetalColor, PolishedColor };
+                case SectionModel.ApolloSM: return new[] { StageColor, MetalColor, NozzleColor };
+                case SectionModel.Mercury:
+                case SectionModel.Gemini: return new[] { ShieldColor, BlackColor, MetalColor };
+                case SectionModel.GeminiAdapter: return new[] { WhiteColor, MetalColor };
+                case SectionModel.Surveyor: return new[] { MetalColor, PanelColor, WhiteColor, FoilColor };
+                case SectionModel.Ranger: return new[] { FoilColor, MetalColor, PanelColor };
+                // Корпуса ступеней: слоты Hull/Black/Metal/Nozzle (hulls_lib.py). Окраска — по фото: Сатурн, Редстоун,
+                // Протон белые; Атлас, Центавр, Аджена — полированная нержавейка; Титан и Блок Д — металл.
+                case SectionModel.AtlasBooster:
+                case SectionModel.AtlasSustainer:
+                case SectionModel.AtlasSustainerAgena:
+                case SectionModel.AtlasSustainerCentaur:
+                case SectionModel.Agena:
+                case SectionModel.Centaur: return new[] { PolishedColor, BlackColor, MetalColor, NozzleColor };
+                case SectionModel.TitanStage1:
+                case SectionModel.TitanStage2:
+                case SectionModel.BlokD: return new[] { MetalColor, BlackColor, PolishedColor, NozzleColor };
+                case SectionModel.Redstone:
+                case SectionModel.JunoStage1:
+                case SectionModel.JunoCluster11:
+                case SectionModel.JunoCluster3:
+                case SectionModel.SaturnSIC:
+                case SectionModel.SaturnSII:
+                case SectionModel.SaturnSIVB:
+                case SectionModel.ProtonStage1:
+                case SectionModel.ProtonStage2:
+                case SectionModel.ProtonStage3: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
+                default: return new[] { WhiteColor, PolishedColor };
+            }
+        }
 
         public void Init(Vessel v, Material mat, Material plume)
         {
@@ -161,7 +212,8 @@ namespace Kare.Space.Game
                 if (interstageFbx == null || j <= 0 || j >= secs.Count || !Vessel.Attached[j] || Vessel.IsEnclosed(j)) return 0;
                 var sj = secs[j];
                 if (!sj.HasEngine || sj.EngineCount != 1) return 0;
-                bool own = (sj.Model == SectionModel.VostokService && serviceFbx != null) || (sj.Model == SectionModel.Luna9 && luna9Fbx != null);
+                bool own = (sj.Model == SectionModel.VostokService && serviceFbx != null) || (sj.Model == SectionModel.Luna9 && luna9Fbx != null)
+                           || boot != null && boot.CraftMeshFor(sj.Model) != null;
                 return own ? 0 : Mathf.Min((float)sj.Radius * 0.45f, 1.2f) * 1.4f;
             }
             for (int i = 0; i < secs.Count; i++)
@@ -189,13 +241,24 @@ namespace Kare.Space.Game
                 var part = new Part { Index = i, Tr = go.transform };
                 // Своя модель аппарата целиком заменяет процедурный корпус; у отсеков с двигателем в ней и сопло.
                 Mesh model = s.Model == SectionModel.Sputnik ? sputnikFbx : s.Model == SectionModel.VostokService ? serviceFbx
-                           : s.Model == SectionModel.Luna9 ? luna9Fbx : null;
+                           : s.Model == SectionModel.Luna9 ? luna9Fbx : boot != null ? boot.CraftMeshFor(s.Model) : null;
+                bool craft = model != null && boot.CraftMeshFor(s.Model) == model;
+                // Низ модели в осях секции: у верхних ступеней сопла свисают в юбку нижней — факел ставим под срез.
+                float ownBottom = 0;
                 if (model != null)
                 {
                     var m = AddChild(go, "Model");
                     Color[] palette;
-                    switch (s.Model)
+                    switch (craft ? SectionModel.None : s.Model)
                     {
+                        case SectionModel.None:
+                            // Аппарат в натуральную величину: опоры, сопла и панели уже в модели, масштаб 1.
+                            var mb = model.bounds;
+                            bool top = mb.max.y < CraftTopOriginShare * mb.size.y;
+                            m.localPosition = new Vector3(0, top ? len : 0, 0);
+                            ownBottom = Mathf.Min(0, m.localPosition.y + mb.min.y);
+                            palette = CraftPalette(s.Model);
+                            break;
                         case SectionModel.Sputnik:
                             // Начало — центр шара: ставим в середину секции. Антенны уходят вниз; под обтекателем их
                             // не видно, после сброса — отогнуты вдоль ступени, как у ПС-1 на носителе.
@@ -245,7 +308,7 @@ namespace Kare.Space.Game
                     var palette = new[] { col };
                     part.AddBody(AddRenderer(go, mesh, palette), palette);
                 }
-                if (s.FinArea > 0 && finsFbx != null)
+                if (s.FinArea > 0 && finsFbx != null && !craft)
                 {
                     // Хвостовой отсек Г-1 со стабилизаторами: начало у низа, корпус модели вписан в радиус секции.
                     var f = AddChild(go, "Fins");
@@ -253,7 +316,7 @@ namespace Kare.Space.Game
                     var palette = new[] { col, MetalColor, NozzleColor };
                     part.AddBody(AddRenderer(f.gameObject, finsFbx, palette), palette);
                 }
-                if (s.LandingLegs && legFbx != null)
+                if (s.LandingLegs && legFbx != null && !craft)
                 {
                     // Четыре опоры по кромке: шарнир поднят на вынос стопы, чтобы стопы стояли в плоскости днища —
                     // ядро сажает борт по днищу (Vessel.PlaceOnSurface), опоры его не продлевают.
@@ -281,7 +344,7 @@ namespace Kare.Space.Game
                     if (ownNozzle && s.Model == SectionModel.VostokService) nr = r * ServiceNozzleShare;
                     var nozzle = new GameObject("Nozzle");
                     nozzle.transform.SetParent(go.transform, false);
-                    nozzle.transform.localPosition = new Vector3(0, ownNozzle ? 0 : -nr * 1.4f, 0);
+                    nozzle.transform.localPosition = new Vector3(0, ownNozzle ? (craft ? ownBottom : 0) : -nr * 1.4f, 0);
                     var bell = ProcMesh.Bell(nr, nr * 0.45f, nr * 1.4f, 16);
                     if (ring == 0 && !ownNozzle && i > 0 && interstageFbx != null)
                     {
@@ -735,7 +798,7 @@ namespace Kare.Space.Game
                 bool on = Vessel.Running[p.Index];
                 float thr = on ? (float)Vessel.EffectiveThrottle(p.Index) : 0;
                 p.Throttle = thr;
-                if (thr > 0.01f) ReportPlume(CoreNits * thr);
+                if (thr > 0.01f) ReportPlume(CoreNits * thr * BrightnessSettings.Plume);
                 bool burning = thr > 0.01f;
                 p.Plume.gameObject.SetActive(burning);
                 p.Glow.gameObject.SetActive(burning);
@@ -751,11 +814,11 @@ namespace Kare.Space.Game
                 p.Glow.localScale = new Vector3(p.PlumeRadius * spread, len * GlowLength * flicker, p.PlumeRadius * spread);
                 // Яркость на единицу площади: раздувшаяся струя тусклее (§9.5).
                 float bright = thr * Mathf.Lerp(1, VacuumBrightness, vac) * flicker;
-                SetPlumeColor(p.CoreR, CoreNits * bright);
-                SetPlumeColor(p.GlowR, GlowNits * bright / spread);
+                SetPlumeColor(p.CoreR, CoreNits * bright * BrightnessSettings.Plume);
+                SetPlumeColor(p.GlowR, GlowNits * bright * BrightnessSettings.Plume / spread);
                 // Свет факела дрожит слабее струи: им освещён весь стол и дым, и та же амплитуда читалась
                 // миганием всей сцены.
-                p.PlumeLight.intensity = PlumeCandela * thr * (1 + (flicker - 1) * 0.3f);
+                p.PlumeLight.intensity = PlumeCandela * thr * BrightnessSettings.Plume * (1 + (flicker - 1) * 0.3f);
             }
         }
 

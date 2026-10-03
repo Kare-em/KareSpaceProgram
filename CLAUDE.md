@@ -25,8 +25,9 @@ Tools/CoreTests         headless-тесты ядра (csproj подхватыв�
 ```
 Library/, Temp/, Logs/, UserSettings/ — не трогать и не коммитить.
 
-## Состояние (02.10.2026)
-- Ядро (M0) готово, тесты 43/43 ✅, включая «Луна-9» (мягкая посадка 3,3 м/с) и moondrop (чит «Над Луной» + G, 3,4 м/с).
+## Состояние (03.10.2026)
+- Ядро (M0) готово, 24 тест-группы ✅: «Луна-9» 3,3 м/с, moondrop, juno1, freedom7, friendship7, gemini3, ranger7,
+  surveyor1, luna17 (луноход), apollo8, apollo11. Пресеты — `Core/Vessels/HistoricRockets.cs` (до «Аполлона», без «Артемиды»).
 - Игровой слой написан; сцена `Scenes/Flight.unity` собирается меню **Kare/Build Flight Scene** (идемпотентно).
   Миссия по умолчанию — `GameBootstrap.MissionId = "vostok"`. Ввод — старый Input Manager.
 - Есть: HUD v2, стол с фермами, грунт и вода патча, биомы Земли, облака, парашют, меню Esc, манёвры (N/B/C…),
@@ -39,7 +40,8 @@ Library/, Temp/, Logs/, UserSettings/ — не трогать и не комми
 ```bash
 D="/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Data/DotNetSdk/dotnet.exe"; P=/c/CocosGames/KareSpaceProgram/Tools/CoreTests/CoreTests.csproj; "$D" build $P -nologo -v q && "$D" run --no-build --project $P
 ```
-`-- <имя>` — один тест (math, orbit, moon, atmo, stats, stability, separation, karman, sputnik, mechta, vympel, farside, vostok, luna9, moondrop).
+`-- <имя>` — один тест (math, orbit, moon, atmo, stats, stability, separation, karman, sputnik, mechta, vympel, farside, vostok, luna9, moondrop,
+juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11).
 Не собирать во время прогона — exe заблокирован, сборка падает.
 
 ## MCP

@@ -141,6 +141,18 @@ namespace Kare.Space.Core
         }
 
         public bool Alive => Situation != Situation.Destroyed;
+        /// <summary>Пройдено самоходным шасси по грунту, м (цель миссии «Проехать», ObjectiveType.Drive).</summary>
+        public double DriveDistance;
+
+        /// <summary>Самоходное шасси стало нижней секцией: съехало с посадочной ступени и ездит (FlightPhysics.StepLanded).</summary>
+        public bool IsRover
+        {
+            get
+            {
+                int b = BottomSection();
+                return !IsDebris && b >= 0 && Design.Sections[b].Rover;
+            }
+        }
         public bool IsLanded => Situation == Situation.Landed || Situation == Situation.Splashed;
         public bool PropellantSettled => IsLanded || SettledTimer > 0;
         public double MissionTime(double now) => double.IsNaN(LaunchTime) ? 0 : now - LaunchTime;
@@ -322,7 +334,10 @@ namespace Kare.Space.Core
         public double EffectiveThrottle(int i)
         {
             if (!Running[i]) return 0;
-            return Math.Max(Throttle, Design.Sections[i].Engine.MinThrottle);
+            var e = Design.Sections[i].Engine;
+            // РДТТ не дросселируется: горит на полной до выработки.
+            if (e.Solid) return 1;
+            return Math.Max(Throttle, e.MinThrottle);
         }
 
         /// <summary>Тяга (Н) и расход (кг/с) работающих двигателей при давлении p.</summary>
@@ -352,7 +367,8 @@ namespace Kare.Space.Core
             for (int i = 0; i < secs.Count; i++)
             {
                 if (!Attached[i] || !secs[i].HasEngine || !Armed[i]) continue;
-                if (Throttle <= 0)
+                // Твердотопливный РУДа не слушает: взведён — горит до выработки.
+                if (Throttle <= 0 && !secs[i].Engine.Solid)
                 {
                     ignitionLatch[i] = false;
                     if (Running[i])
@@ -618,6 +634,9 @@ namespace Kare.Space.Core
                 p.MassProperties(out _, out double com, out _, out _);
                 var r = new Vector3d(0, base0[low] + com - com0, 0);
                 p.Position += LocalToWorld(r);
+                // На грунте положение задаёт якорь в осях тела: без сдвига якоря часть, оставшаяся стоять
+                // (луноход, съехавший с посадочной ступени), прыгнула бы обратно на старый общий ЦМ.
+                if (p.IsLanded) p.AnchorBodyFixed += (p.AttitudeBodyFixed * r).SwapYZ;
                 // Точка жёсткого тела на плече r летит со скоростью v + ω × r.
                 p.Velocity += LocalToWorld(Vector3d.Cross(w, r));
             }

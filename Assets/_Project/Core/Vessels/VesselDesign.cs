@@ -20,6 +20,11 @@ namespace Kare.Space.Core
         public int Ignitions = 1;
         /// <summary>Нужна осадка топлива перед запуском в невесомости (GDD §6.3).</summary>
         public bool NeedsUllage;
+        /// <summary>
+        /// Твердотопливный: запускается при взведении сам, без РУД, и не глушится до выработки (GDD §6.3).
+        /// Тяга ступени неуправляема — автопилот поджигает её в апоцентре (AscentAutopilot.NextIsSolidKick).
+        /// </summary>
+        public bool Solid;
 
         public double MassFlow => ThrustVac / (IspVac * Constants.G0);
         public double NozzleArea => (ThrustVac - ThrustSL) / 101325.0;
@@ -29,7 +34,14 @@ namespace Kare.Space.Core
     }
 
     /// <summary>Деталь вида секции из Tools/blender. Физики не касается: ядро о мешах не знает, только об имени детали.</summary>
-    public enum SectionModel { None, Sputnik, VostokService, Luna9 }
+    public enum SectionModel
+    {
+        None, Sputnik, VostokService, Luna9,
+        Lunokhod, Luna17KT, LMDescent, LMAscent, ApolloCM, ApolloSM, Mercury, Gemini, GeminiAdapter, Surveyor, Ranger, Explorer1,
+        // Корпуса ступеней (Tools/blender/hulls_models.py): сопла в модели, начало — днище секции.
+        Redstone, JunoStage1, JunoCluster11, JunoCluster3, AtlasBooster, AtlasSustainer, AtlasSustainerAgena, AtlasSustainerCentaur,
+        Agena, Centaur, TitanStage1, TitanStage2, SaturnSIC, SaturnSII, SaturnSIVB, ProtonStage1, ProtonStage2, ProtonStage3, BlokD,
+    }
 
     public enum SectionKind
     {
@@ -75,6 +87,10 @@ namespace Kare.Space.Core
         public SectionModel Model;
         /// <summary>Мест экипажа: перегрузка (§4.7) убивает только живых, приборные капсулы её терпят.</summary>
         public int Crew;
+        /// <summary>
+        /// Самоходное шасси («Луноход»): став нижней секцией на грунте, ездит от W/S и A/D (FlightPhysics.StepLanded).
+        /// </summary>
+        public bool Rover;
 
         public double Mass => DryMass + Propellant;
         public double Radius => Diameter * 0.5;
@@ -211,7 +227,7 @@ namespace Kare.Space.Core
     }
 
     /// <summary>Готовые ракеты стартового набора (GDD §5.3).</summary>
-    public static class VesselPresets
+    public static partial class VesselPresets
     {
         // Двигатель первой ступени «Кара-1» — класс Merlin 1D: тяга и УИ — по открытым данным.
         public static EngineDef K1Engine() => new EngineDef
@@ -242,6 +258,12 @@ namespace Kare.Space.Core
         static SectionDef Fairing(int encloses) => new SectionDef
         {
             Name = "Головной обтекатель", Kind = SectionKind.Fairing, DryMass = 1900, Length = 13, Diameter = 5.2,
+            EnclosesBelow = encloses, MaxHeatFlux = 2e5,
+        };
+
+        static SectionDef Fairing(int encloses, double length, double diameter, double dry) => new SectionDef
+        {
+            Name = "Головной обтекатель", Kind = SectionKind.Fairing, DryMass = dry, Length = length, Diameter = diameter,
             EnclosesBelow = encloses, MaxHeatFlux = 2e5,
         };
 
@@ -342,6 +364,15 @@ namespace Kare.Space.Core
                 case "sputnik": return Kara1Sputnik();
                 case "vostok": return Kara1Vostok();
                 case "luna": return Kara1Luna();
+                case "luna17": return ProtonLuna17();
+                case "juno1": return JunoExplorer1();
+                case "mercury_redstone": return MercuryRedstone();
+                case "mercury_atlas": return MercuryAtlas();
+                case "gemini_titan": return GeminiTitan();
+                case "ranger": return AtlasAgenaRanger();
+                case "surveyor": return AtlasCentaurSurveyor();
+                case "apollo8": return SaturnApollo8();
+                case "apollo11": return SaturnApollo11();
                 default: return Kara1Heavy();
             }
         }

@@ -25,6 +25,8 @@ namespace Kare.Space.Core
         Landing,
         /// <summary>Вернуть капсулу на тело целой; с экипажем — живым (предел перегрузки §4.7 — в FlightPhysics).</summary>
         Return,
+        /// <summary>Проехать по телу не меньше Min метров (луноход, GDD §6.12).</summary>
+        Drive,
     }
 
     public sealed class Objective
@@ -48,6 +50,7 @@ namespace Kare.Space.Core
                 case ObjectiveType.FarSidePhoto: return $"Снять освещённую обратную сторону: {b}, не дальше {Max / 1000:F0} км";
                 case ObjectiveType.Impact: return $"Достичь поверхности: {b}";
                 case ObjectiveType.Landing: return $"Мягкая посадка: {b}, не быстрее {MaxSpeed:F0} м/с";
+                case ObjectiveType.Drive: return $"Проехать {Min:F0} м: {b}";
                 case ObjectiveType.Return:
                     return $"Вернуть капсулу: {b}" + (FlightPhysics.GLoadLimit
                         ? $", экипаж не дольше {FlightPhysics.CrewGTime:F0} с выше {FlightPhysics.CrewGLimit:F0} g" : "");
@@ -212,6 +215,9 @@ namespace Kare.Space.Core
                     if (!launched || !onBody || v.Situation != Situation.Landed && v.Situation != Situation.Splashed) return false;
                     return true;
 
+                case ObjectiveType.Drive:
+                    return onBody && v.IsLanded && v.DriveDistance >= o.Min;
+
                 case ObjectiveType.Return:
                 {
                     if (!launched) return false;
@@ -317,6 +323,103 @@ namespace Kare.Space.Core
             };
             luna9.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Body = "moon" });
             list.Add(luna9);
+
+            var luna17 = new MissionDef
+            {
+                Id = "luna17", Title = "Луноход-1", DesignId = "luna17",
+                Brief = "«Протон-К» с блоком Д: посадить ступень КТ на Луну, съехать по трапам и проехать 100 м.",
+                StartTime = GameCalendar.ToGameTime(1970, 11, 10, 14, 44, 1),
+                Rival = "17 ноя 1970",
+            };
+            luna17.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Body = "moon" });
+            luna17.Objectives.Add(new Objective { Type = ObjectiveType.Drive, Body = "moon", Min = 100 });
+            list.Add(luna17);
+
+            // Американские миссии до «Аполлона» включительно (Artemis вне эпохи) — со стартом с Канаверала.
+            var juno1 = new MissionDef
+            {
+                Id = "juno1", Title = "Эксплорер-1", DesignId = "juno1", SiteId = "canaveral",
+                Brief = "Juno I: жидкостная ступень выводит на пассивный участок, три связки РДТТ поджигаются в апоцентре.",
+                StartTime = GameCalendar.ToGameTime(1958, 2, 1, 3, 48, 0),
+                Rival = "1 фев 1958",
+            };
+            juno1.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Min = 150000, HoldSeconds = -1 });
+            list.Add(juno1);
+
+            var freedom7 = new MissionDef
+            {
+                Id = "freedom7", Title = "Фридом-7", DesignId = "mercury_redstone", SiteId = "canaveral",
+                Brief = "Суборбитальный полёт Алана Шепарда: подняться за 100 км и приводниться на парашюте.",
+                StartTime = GameCalendar.ToGameTime(1961, 5, 5, 14, 34, 13),
+                Rival = "5 мая 1961",
+            };
+            freedom7.Objectives.Add(new Objective { Type = ObjectiveType.Altitude, Min = 100000 });
+            freedom7.Objectives.Add(new Objective { Type = ObjectiveType.Return });
+            list.Add(freedom7);
+
+            var friendship7 = new MissionDef
+            {
+                Id = "friendship7", Title = "Френдшип-7", DesignId = "mercury_atlas", SiteId = "canaveral",
+                Brief = "Джон Гленн на орбите: виток, торможение тремя РДТТ, спуск на парашюте.",
+                StartTime = GameCalendar.ToGameTime(1962, 2, 20, 14, 47, 39),
+                Rival = "20 фев 1962",
+            };
+            friendship7.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Min = 150000, HoldSeconds = -1 });
+            friendship7.Objectives.Add(new Objective { Type = ObjectiveType.Return });
+            list.Add(friendship7);
+
+            var ranger7 = new MissionDef
+            {
+                Id = "ranger7", Title = "Рейнджер-7", DesignId = "ranger", SiteId = "canaveral",
+                Brief = "«Атлас-Аджена»: перелёт к Луне и снимки до самого падения в Море Облаков.",
+                StartTime = GameCalendar.ToGameTime(1964, 7, 28, 16, 50, 7),
+                Rival = "31 июл 1964",
+            };
+            ranger7.Objectives.Add(new Objective { Type = ObjectiveType.Impact, Body = "moon" });
+            list.Add(ranger7);
+
+            var gemini3 = new MissionDef
+            {
+                Id = "gemini3", Title = "Джемини-3", DesignId = "gemini_titan", SiteId = "canaveral",
+                Brief = "Гриссом и Янг: орбита на «Титане II», торможение агрегатным отсеком, спуск.",
+                StartTime = GameCalendar.ToGameTime(1965, 3, 23, 14, 24, 0),
+                Rival = "23 мар 1965",
+            };
+            gemini3.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Min = 150000, HoldSeconds = -1 });
+            gemini3.Objectives.Add(new Objective { Type = ObjectiveType.Return });
+            list.Add(gemini3);
+
+            var surveyor1 = new MissionDef
+            {
+                Id = "surveyor1", Title = "Сервейор-1", DesignId = "surveyor", SiteId = "canaveral",
+                Brief = "«Атлас-Центавр»: прямой перелёт и мягкая посадка в Океане Бурь.",
+                StartTime = GameCalendar.ToGameTime(1966, 5, 30, 14, 41, 1),
+                Rival = "2 июн 1966",
+            };
+            surveyor1.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Body = "moon" });
+            list.Add(surveyor1);
+
+            var apollo8 = new MissionDef
+            {
+                Id = "apollo8", Title = "Аполлон-8", DesignId = "apollo8", SiteId = "canaveral",
+                Brief = "«Сатурн-5»: разгон S-IVB к Луне, виток на окололунной орбите, возвращение и спуск.",
+                StartTime = GameCalendar.ToGameTime(1968, 12, 21, 12, 51, 0),
+                Rival = "24 дек 1968",
+            };
+            apollo8.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Body = "moon", Min = 50000, HoldSeconds = -1 });
+            apollo8.Objectives.Add(new Objective { Type = ObjectiveType.Return });
+            list.Add(apollo8);
+
+            var apollo11 = new MissionDef
+            {
+                Id = "apollo11", Title = "Аполлон-11", DesignId = "apollo11", SiteId = "canaveral",
+                Brief = "Посадка «Игла» в Море Спокойствия и взлёт взлётной ступени на окололунную орбиту.",
+                StartTime = GameCalendar.ToGameTime(1969, 7, 16, 13, 32, 0),
+                Rival = "20 июл 1969",
+            };
+            apollo11.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Body = "moon" });
+            apollo11.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Body = "moon", Min = 15000, HoldSeconds = 60 });
+            list.Add(apollo11);
 
             return list;
         }

@@ -38,6 +38,14 @@ namespace Kare.Space.Core
         /// КТДУ (0,25 × 16 кН / ~700 кг ≈ 5,7 м/с²) должен оставаться ниже TerminalDecel + g.
         /// </summary>
         const double TerminalDecel = 6;
+        /// <summary>
+        /// Доля запаса тяги (aMax − g), отдаваемая терминальному замедлению. Слабый DPS «Орла» (45 кН на ~8,5 т,
+        /// aMax ≈ 5,3 м/с² против 6 + 1,62 потребных) не держал ворота 136 м и бился на 17–19 м/с с 3,9 т
+        /// топлива. С долей 0,6 ворота LM ≈ 370 м; «Луна-9» и «Сервейор» с большим запасом остаются на 6 м/с².
+        /// </summary>
+        const double TerminalShare = 0.6;
+        /// <summary>Нижний предел терминального замедления, м/с²: слабее — ворота уходят на километры.</summary>
+        const double MinTerminalDecel = 0.5;
         /// <summary>Отсечка: FinalSpeed на FinalHeight над рельефом — падение даёт у Луны ~3,5 м/с.</summary>
         const double FinalHeight = 3, FinalSpeed = 1.5;
         /// <summary>Доля тяги, закладываемая в прогноз на будущие ступени, — запас на ошибки и рельеф.</summary>
@@ -53,8 +61,19 @@ namespace Kare.Space.Core
         /// <summary>За сколько секунд до запуска торможения ускорение времени сбрасывается: успеть развернуться.</summary>
         const double IgnitionWarpMargin = 60;
 
-        /// <summary>Высота ворот над рельефом: с неё постоянное замедление гасит GateSpeed до FinalSpeed.</summary>
-        public static double GateAltitude => (GateSpeed * GateSpeed - FinalSpeed * FinalSpeed) / (2 * TerminalDecel) + FinalHeight;
+        /// <summary>Высота ворот для сильной ступени (замедление TerminalDecel).</summary>
+        public static double GateAltitude => GateAltitudeFor(double.PositiveInfinity, 0);
+
+        /// <summary>
+        /// Высота ворот над рельефом: с неё постоянное замедление гасит GateSpeed до FinalSpeed. Замедление —
+        /// TerminalDecel, но не больше TerminalShare запаса тяги aMax − g (м/с²), иначе закон Terminal просит
+        /// больше полного газа.
+        /// </summary>
+        public static double GateAltitudeFor(double aMax, double g)
+        {
+            double decel = Math.Max(MinTerminalDecel, Math.Min(TerminalDecel, TerminalShare * (aMax - g)));
+            return (GateSpeed * GateSpeed - FinalSpeed * FinalSpeed) / (2 * decel) + FinalHeight;
+        }
 
         double stageCooldown, replanTimer, throttleCmd = PlanThrottle, planTime = double.NaN;
         CelestialBody planBody;
@@ -152,7 +171,9 @@ namespace Kare.Space.Core
                     }
                     FlightControl.Ignite(v, throttleCmd);
                     Status = $"Торможение: {h / 1000:F1} км, {speed:F0} м/с, газ {throttleCmd * 100:F0}%";
-                    if (speed <= GateSpeed + 5 || h < GateAltitude && speed < 150)
+                    v.MassProperties(out double bm, out _, out _, out _);
+                    double gate = GateAltitudeFor(FlightControl.AvailableThrust(v, out _) / bm, Target.Mu / r.sqrMagnitude);
+                    if (speed <= GateSpeed + 5 || h < gate && speed < 150)
                     {
                         Phase = PhaseType.Terminal;
                         v.Raise($"Терминальный участок: {h:F0} м, {speed:F0} м/с");
@@ -265,7 +286,7 @@ namespace Kare.Space.Core
             double Margin(double tt)
             {
                 orbit.GetState(tt, out var rr, out var vv);
-                return PredictGate(Target, rr, vv, tt, stages, PlanThrottle) - GateAltitude;
+                return PredictGate(Target, rr, vv, tt, stages, PlanThrottle);
             }
             if (Margin(t) <= 0) return t;
             double lo = t, hi = tHit;
@@ -286,7 +307,11 @@ namespace Kare.Space.Core
             var r = v.Position;
             var vel = v.Velocity;
             double kMin = Math.Max(MinThrottle(v), 0.05);
-            double Margin(double k) => PredictGate(Target, r, vel, t, stages, k) - GateAltitude;
+            double Margin(double k) => PredictGate(Target, r, vel, t, stages, k);
+            // Борт ещё поднимается (торможение начато у перицентра пролётной траектории): прогноз «ворот» тогда
+            // немонотонен по газу — малый газ уводит вверх и кажется запасом. Замер «Сервейора»: газ 10%,
+            // подъём до 172 км и выработка топлива. Гасим скорость полным газом, пока не пойдём вниз.
+            if (Vector3d.Dot(r, vel) > 0) return 1;
             if (Margin(1) <= 0) return 1;
             if (Margin(kMin) >= 0) return kMin;
             double lo = kMin, hi = 1;
@@ -300,8 +325,9 @@ namespace Kare.Space.Core
         }
 
         /// <summary>
-        /// Прогноз торможения против поверхностной скорости: высота над рельефом (м), на которой скорость
-        /// упадёт до GateSpeed. Отрицательная — удар или топлива не хватает; величина тогда неважна.
+        /// Прогноз торможения против поверхностной скорости: запас высоты над воротами (м) в момент, когда
+        /// скорость упадёт до GateSpeed. Ворота — по полной тяге ступени на тот момент (GateAltitudeFor).
+        /// Отрицательный — удар, топлива не хватает или ворота ниже нужных; величина тогда неважна.
         /// </summary>
         /// <param name="firstThrottle">Газ первой (текущей) ступени; остальные — на PlanThrottle.</param>
         public static double PredictGate(CelestialBody body, Vector3d r, Vector3d vel, double t,
@@ -358,9 +384,16 @@ namespace Kare.Space.Core
                 if (alt <= 0) return -speed;
                 if (speed <= GateSpeed)
                 {
-                    if (double.IsNaN(prevAlt)) return alt;
+                    double aFull = 0;
+                    if (si < stages.Count)
+                    {
+                        var s = stages[si];
+                        aFull = (s.StartMass - s.EndMass) / s.BurnTime * s.DeltaVVac / Math.Log(s.StartMass / s.EndMass) / m;
+                    }
+                    double gate = GateAltitudeFor(aFull, mu / r.sqrMagnitude);
+                    if (double.IsNaN(prevAlt)) return alt - gate;
                     double f = (prevSpeed - GateSpeed) / Math.Max(prevSpeed - speed, 1e-9);
-                    return prevAlt + f * (alt - prevAlt);
+                    return prevAlt + f * (alt - prevAlt) - gate;
                 }
                 prevSpeed = speed;
                 prevAlt = alt;

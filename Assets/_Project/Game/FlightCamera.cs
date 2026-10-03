@@ -49,6 +49,9 @@ namespace Kare.Space.Game
             cam = GetComponent<Camera>();
             cam.nearClipPlane = NearClip;
             cam.farClipPlane = FarClip;
+            // OnMouse*-событий в игре нет, а SendMouseEvents каждый кадр строит луч через камеру: при far/near = 1e7
+            // (в карте ещё больше) матрица вырождается — предупреждение «Screen position out of view frustum».
+            cam.eventMask = 0;
         }
 
         void LateUpdate()

@@ -168,6 +168,55 @@ namespace Kare.Space.Core
             return (m0 - m1) / mdot;
         }
 
+        /// <summary>Следующий шаг программы поджигает РДТТ (взведение или отделение с запуском следующей).</summary>
+        public static bool NextIsSolidKick(Vessel v)
+        {
+            if (!v.HasNextStage) return false;
+            var a = v.Design.Sequence[v.NextStage];
+            int s = a.Type == StageActionType.Ignite ? a.Section
+                  : a.Type == StageActionType.Separate && a.IgniteNext ? a.Section + 1 : -1;
+            var secs = v.Design.Sections;
+            return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && secs[s].Engine.Solid &&
+                   v.Propellant[s] > 0;
+        }
+
+        public static bool SolidBurning(Vessel v)
+        {
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+                if (v.Attached[i] && v.Running[i] && secs[i].Engine.Solid) return true;
+            return false;
+        }
+
+        /// <summary>Суммарное время работы оставшихся РДТТ, с (с секундной паузой на каждое разделение).</summary>
+        public static double SolidBurnTime(Vessel v)
+        {
+            double t = 0;
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                var s = secs[i];
+                if (!v.Attached[i] || !s.HasEngine || !s.Engine.Solid || v.Propellant[i] <= 0) continue;
+                t += v.Propellant[i] / (s.Engine.MassFlow * s.EngineCount) + 1;
+            }
+            return t;
+        }
+
+        /// <summary>
+        /// Следующий шаг программы взводит двигатель с топливом. Нужен, когда у текущей ступени кончились
+        /// запуски, а не топливо: правило «отсечка по выработке» такую ступень не сбросит.
+        /// </summary>
+        public static bool NextStageBringsEngine(Vessel v)
+        {
+            if (!v.HasNextStage) return false;
+            var a = v.Design.Sequence[v.NextStage];
+            int s = a.Type == StageActionType.Ignite ? a.Section
+                  : a.Type == StageActionType.Separate && a.IgniteNext ? a.Section + 1 : -1;
+            var secs = v.Design.Sections;
+            return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && v.Propellant[s] > 0 &&
+                   v.IgnitionsLeft[s] > 0;
+        }
+
         public static bool NeedsUllageForStart(Vessel v)
         {
             var secs = v.Design.Sections;
@@ -250,12 +299,25 @@ namespace Kare.Space.Core
         const double GuidedAltitude = 35000;
         /// <summary>Нижняя граница времени до орбиты в законе наведения, с: у отсечки закон вырождается.</summary>
         const double MinTimeToGo = 10;
+        /// <summary>
+        /// Постоянная времени набора вертикальной скорости перед твердотопливным «пинком», с. Закон до орбиты
+        /// задирал «Редстоун» Juno до 72° (vz 1691 при vh 2095): вертикаль уходила в лишний подъём, а горизонтали
+        /// РДТТ не хватало 130 м/с (Pe −174 км). Перед РДТТ жидкостная ступень набирает ровно ту vz, что донесёт
+        /// до апоцентра TargetAltitude, остальное — в горизонталь.
+        /// </summary>
+        const double KickLoftTime = 10;
         double stageCooldown;
 
         public string Status { get; private set; } = "";
 
         /// <summary>Вертикальный подъём до этой поверхностной скорости или высоты — потом разворот.</summary>
         public const double VerticalSpeedEnd = 100, VerticalAltitudeEnd = 2000;
+        /// <summary>
+        /// Без атмосферы (взлёт LM с Луны) вертикальный участок — только отрыв от рельефа, дальше сразу замкнутое
+        /// наведение: программа тангажа с крутым подъёмом до 35 км на Луне сожгла всю APS (Ap 66 км, Pe −337 км).
+        /// Настоящий LM уходил с вертикали через ~10 с, на 15–20 м/с.
+        /// </summary>
+        public const double AirlessVerticalSpeedEnd = 20;
 
         /// <summary>Программный тангаж над горизонтом на высоте h, рад: 90°·(1 − √(h/H)). Им ведёт автопилот
         /// и его же подсказывает HUD ручному пилоту (FlightHud.Tutor) — один закон на двоих.</summary>
@@ -291,8 +353,16 @@ namespace Kare.Space.Core
                 if (v.HasNextStage && next.Type == StageActionType.JettisonFairing &&
                     (v.Altitude > FairingAltitude || v.DynamicPressure < 10 && v.Altitude > 80000))
                     return RequestStage();
+                // Juno I: жидкостная ступень выработана ниже орбиты, дальше — РДТТ. Их тягу не дросселировать и не
+                // отложить, поэтому их поджигают в апоцентре пассивного участка, а не сразу (GDD §6.3).
+                if (burning && Phase != PhaseType.Circularize && !v.AnyEngineRunning && FlightControl.NextIsSolidKick(v) &&
+                    peAlt < v.Body.AtmosphereTop + 10000)
+                {
+                    Phase = PhaseType.Coast;
+                    Raise(v, $"Выработка: апоцентр {apAlt / 1000:F0} км — твердотопливные ступени в апоцентре");
+                }
                 // Отсечка по выработке: сбросить пустую ступень, следующую запустить.
-                if (burning && !v.AnyEngineRunning && v.HasNextStage &&
+                else if (burning && !v.AnyEngineRunning && v.HasNextStage &&
                     (next.Type == StageActionType.Ignite ||
                      next.Type == StageActionType.Separate && v.Propellant[next.Section] <= 0))
                     return RequestStage();
@@ -304,7 +374,8 @@ namespace Kare.Space.Core
                     v.Throttle = 1;
                     FlightControl.PointAt(v, up);
                     Status = "Вертикальный подъём";
-                    if (v.SurfaceSpeed > VerticalSpeedEnd || v.Altitude > VerticalAltitudeEnd) Phase = PhaseType.PitchProgram;
+                    if (!v.Body.HasAtmosphere && v.SurfaceSpeed > AirlessVerticalSpeedEnd) Phase = PhaseType.Guided;
+                    else if (v.SurfaceSpeed > VerticalSpeedEnd || v.Altitude > VerticalAltitudeEnd) Phase = PhaseType.PitchProgram;
                     break;
 
                 case PhaseType.PitchProgram:
@@ -332,6 +403,12 @@ namespace Kare.Space.Core
                     double T = Math.Max(MinTimeToGo, TimeToGo(v, dvGo));
                     // Линейный по времени закон: к моменту T высота rT и нулевая вертикальная скорость.
                     double azReq = 6 * (rT - r) / (T * T) - 4 * vz / T;
+                    if (FlightControl.NextIsSolidKick(v))
+                    {
+                        double gEff = Math.Max(0.5, g - vh * vh / r);
+                        double vzReq = Math.Sqrt(2 * gEff * Math.Max(0, rT - r));
+                        azReq = (vzReq - vz) / KickLoftTime;
+                    }
                     double thrust = FlightControl.AvailableThrust(v, out _);
                     double a = thrust / v.Mass;
                     double sinT = a > 0 ? MathD.Clamp((azReq + g - vh * vh / r) / a, -0.6, 0.95) : 0;
@@ -366,6 +443,16 @@ namespace Kare.Space.Core
                     double burn = FlightControl.BurnTime(v, dv);
                     double tAp = orbit.TimeToApoapsis(t);
                     Status = $"Пассивный участок: до апоцентра {tAp:F0} с, импульс {dv:F0} м/с";
+                    if (FlightControl.NextIsSolidKick(v) && double.IsInfinity(burn))
+                    {
+                        // Тяга РДТТ неуправляема — импульс центрируем на апоцентре по суммарному времени работы.
+                        double kick = FlightControl.SolidBurnTime(v);
+                        Status = $"Пассивный участок: до апоцентра {tAp:F0} с, РДТТ {kick:F0} с";
+                        if (stageCooldown > 0 || !(tAp <= kick / 2 + 4 || v.VerticalSpeed < 0)) break;
+                        Phase = PhaseType.Circularize;
+                        v.Throttle = 1;
+                        return RequestStage();
+                    }
                     // Сопротивление в верхних слоях подъедает апоцентр — догоняем, пока ещё низко.
                     if (v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop && apAlt < TargetAltitude - 2000)
                     {
@@ -374,6 +461,8 @@ namespace Kare.Space.Core
                     }
                     if (double.IsInfinity(burn))
                     {
+                        // Последний запуск ступени истрачен, а дальше по программе — ступень с двигателем: сбросить.
+                        if (FlightControl.NextStageBringsEngine(v) && stageCooldown <= 0) return RequestStage();
                         Status = "Нечем довыводить: нет двигателя с топливом";
                         break;
                     }
@@ -397,12 +486,15 @@ namespace Kare.Space.Core
                     if (aligned) FlightControl.Ignite(v, 1);
                     Status = $"Довыведение: перицентр {peAlt / 1000:F0} км";
                     double minPe = Math.Max(v.Body.AtmosphereTop + 10000, TargetAltitude - 2000);
-                    if (peAlt > minPe || orbit.E < 0.002 && peAlt > v.Body.AtmosphereTop)
+                    // РДТТ не выключить: довыведение ими кончается, когда отгорят все (Explorer-1 — 358 × 2550 км).
+                    bool solidLeft = FlightControl.SolidBurning(v) || FlightControl.NextIsSolidKick(v);
+                    if (!solidLeft && (peAlt > minPe || orbit.E < 0.002 && peAlt > v.Body.AtmosphereTop))
                     {
                         FlightControl.Cutoff(v);
                         return Finish(v, peAlt, apAlt);
                     }
-                    if (!double.IsInfinity(FlightControl.BurnTime(v, 1))) break;
+                    if (!double.IsInfinity(FlightControl.BurnTime(v, 1)) || solidLeft) break;
+                    if (FlightControl.NextStageBringsEngine(v) && stageCooldown <= 0) return RequestStage();
                     if (!v.AnyEngineRunning && !v.HasNextStage)
                     {
                         Raise(v, "Автопилот: топливо кончилось до выхода на орбиту");
@@ -456,7 +548,7 @@ namespace Kare.Space.Core
         }
 
         /// <summary>В плотных слоях угол атаки не больше допустимого по q·sin α — иначе пакет сломается (GDD §4.7).</summary>
-        static Vector3d LimitAoA(Vessel v, double t, Vector3d dir)
+        public static Vector3d LimitAoA(Vessel v, double t, Vector3d dir)
         {
             if (v.DynamicPressure < 100) return dir;
             var spin = FlightPhysics.SpinAxis(v.Body, t);
@@ -495,8 +587,50 @@ namespace Kare.Space.Core
     /// <summary>Исполнение манёвра (GDD §6.11): разворот на импульс, запуск за полвремени до узла, отсечка.</summary>
     public sealed class NodeAutopilot
     {
+        /// <summary>
+        /// Прожиг длиннее этой доли периода — «длинный» (разгон к Луне S-IVB/блоком Д, LOI): за время работы борт
+        /// проходит десятки градусов дуги, и импульс по неподвижному инерциальному направлению теряет до 60 м/с
+        /// (замер: апогей 227–323 тыс. км вместо 380). Такой прожиг ведётся по осям текущей орбиты и
+        /// отсекается по энергии — так же разгон к Луне отсекала и настоящая система управления.
+        /// Пара: короткие прожиги (сход «Востока», коррекции) остаются на старом законе — порог их не задевает.
+        /// </summary>
+        const double LongBurnPeriodShare = 0.02;
+        /// <summary>Длинный прожиг без замкнутой орбиты (гипербола) — по времени, с.</summary>
+        const double LongBurnSeconds = 60;
+        /// <summary>Доля тангенциальной составляющей, при которой отсечка по энергии осмысленна.</summary>
+        const double EnergyCutoffAlong = 0.9;
+
         public string Status { get; private set; } = "";
         bool started;
+        ManeuverNode planned;
+        bool energyMode;
+        double targetEnergy, sign, cPro, cNrm, cRad;
+
+        /// <summary>Запомнить цель длинного прожига: энергию орбиты после импульса и его компоненты в осях орбиты.</summary>
+        void Plan(Vessel v, ManeuverNode node, double t)
+        {
+            planned = node;
+            energyMode = false;
+            var orbit = NodePlanner.CurrentOrbit(v, t);
+            orbit.GetState(node.Time, out var r, out var vel);
+            var dv = node.Remaining;
+            double total = dv.magnitude;
+            if (total < 1) return;
+            var pro = vel.normalized;
+            var nrm = Vector3d.Cross(r, vel).normalized;
+            var rad = Vector3d.Cross(pro, nrm);
+            cPro = Vector3d.Dot(dv, pro) / total;
+            cNrm = Vector3d.Dot(dv, nrm) / total;
+            cRad = Vector3d.Dot(dv, rad) / total;
+            double burn = FlightControl.BurnTime(v, total);
+            double period = orbit.Period;
+            bool longBurn = double.IsInfinity(period) ? burn > LongBurnSeconds : burn > LongBurnPeriodShare * period;
+            if (!longBurn || double.IsInfinity(burn) || Math.Abs(cPro) < EnergyCutoffAlong) return;
+            var after = vel + dv;
+            targetEnergy = after.sqrMagnitude / 2 - v.Body.Mu / r.magnitude;
+            sign = Math.Sign(cPro);
+            energyMode = true;
+        }
 
         public AutopilotRequest Update(Vessel v, double t, double dt)
         {
@@ -506,8 +640,21 @@ namespace Kare.Space.Core
             // Флаг — по факту работы двигателя, а не по команде: запуск происходит уже в шаге физики,
             // и в окне осадки (до startAt) следующий вызов иначе заглушил бы его, сжигая попытку запуска.
             if (v.AnyEngineRunning) started = true;
+            if (planned != node) Plan(v, node, t);
             double left = node.Total;
-            if (left < 0.1 || started && Vector3d.Dot(node.Remaining, v.NoseP) < 0)
+            Vector3d dir;
+            if (energyMode)
+            {
+                // Остаток — недобор энергии, пересчитанный в м/с по текущей скорости: dE = v·dv.
+                double e = v.Velocity.sqrMagnitude / 2 - v.Body.Mu / v.Position.magnitude;
+                left = Math.Max(0, sign * (targetEnergy - e) / Math.Max(v.Velocity.magnitude, 1));
+                var pro = v.Velocity.normalized;
+                var nrm = Vector3d.Cross(v.Position, v.Velocity).normalized;
+                var rad = Vector3d.Cross(pro, nrm);
+                dir = (pro * cPro + nrm * cNrm + rad * cRad).normalized;
+            }
+            else dir = node.Remaining.normalized;
+            if (left < 0.1 || !energyMode && started && Vector3d.Dot(node.Remaining, v.NoseP) < 0)
             {
                 FlightControl.Cutoff(v);
                 v.Node = null;
@@ -516,9 +663,15 @@ namespace Kare.Space.Core
                 v.Raise($"Манёвр выполнен, остаток {left:F1} м/с");
                 return AutopilotRequest.Finished;
             }
-            var dir = node.Remaining.normalized;
             FlightControl.PointAt(v, dir);
             double burn = FlightControl.BurnTime(v, left);
+            if (double.IsInfinity(burn) && !v.AnyEngineRunning && FlightControl.NextStageBringsEngine(v))
+            {
+                // Ступень без запусков (S-IVB после разгона к Луне) — сбросить, дальше работает следующая.
+                FlightControl.Cutoff(v);
+                Status = "Сброс ступени без запусков";
+                return AutopilotRequest.Stage;
+            }
             if (double.IsInfinity(burn))
             {
                 Status = "Нечем выполнять манёвр";

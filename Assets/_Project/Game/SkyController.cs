@@ -94,10 +94,26 @@ namespace Kare.Space.Game
             if (exposure != null)
             {
                 exposure.mode.Override(MapView.IsOpen ? ExposureMode.Fixed : ExposureMode.AutomaticHistogram);
-                exposure.fixedExposure.Override(MapEv);
+                // Яркость игрока (меню Esc): плюс — ярче. В HDRP компенсация вычитается из EV, на карте с фиксированной
+                // экспозицией — тот же знак через fixedExposure.
+                float comp = BrightnessSettings.Ev;
+                exposure.compensation.Override(comp);
+                exposure.fixedExposure.Override(MapEv - comp);
                 float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active));
                 float plume = VesselView.PlumePeakNits;
-                if (plume > 0) evMin = Mathf.Max(evMin, Mathf.Log(plume / (1.2f * PreExposedMax), 2));
+                if (plume > 0)
+                {
+                    // Защита half-буфера от переполнения факелом (см. PreExposedMax), плюс компенсация: она сдвигает
+                    // итоговый EV вниз на comp, и множитель кадра растёт во столько же.
+                    evMin = Mathf.Max(evMin, Mathf.Log(plume / (1.2f * PreExposedMax), 2) + comp);
+                    // Ночью факел светит стол и дым силой PlumeCandela (PlumeLitNits ≈ 200 нит на 30 м), а автоэкспозиция
+                    // по тёмному кадру уходит к EvMin и выжигает всё вокруг (замер 03.10.2026: «Спутник» на старте,
+                    // 3,8 % кадра белые, дым квадратами). Держим экспозицию такой, чтобы ядро было в PlumeNightWhite раз
+                    // белого: ярко, но не заливает. Днём предел EV и так выше — max ничего не меняет.
+                    float night = 1 - Mathf.Clamp01((float)SunLight.Visible);
+                    float nightFloor = Mathf.Log(plume / (1.2f * PlumeNightWhite), 2) + comp;
+                    evMin = Mathf.Max(evMin, Mathf.Lerp(evMin, nightFloor, night));
+                }
                 float plasma = VesselView.PlasmaPeakNits;
                 if (plasma > 0) evMin = Mathf.Max(evMin, Mathf.Log(plasma / (1.2f * PlasmaWhite), 2));
                 exposure.limitMin.Override(evMin);
@@ -124,6 +140,13 @@ namespace Kare.Space.Game
         /// аддитива (две стенки ядра + две свечения). Пара: VesselView.CoreNits.
         /// </summary>
         const float PreExposedMax = 1e4f;
+
+        /// <summary>
+        /// Во сколько раз ядро факела ярче белого ночью (§9.5). Пара: VesselView.CoreNits (3·10³ нит) и PlumeCandela
+        /// (2·10⁶ кд): при 8 экспозиция ≈ EV 8,3 — стол в 30 м от сопла (≈ 200 нит) около 0,5 белого, ядро в 8 раз
+        /// выше белого с ореолом. Больше — кадр заливает светом, меньше — факел сереет.
+        /// </summary>
+        const float PlumeNightWhite = 8f;
 
         /// <summary>
         /// Ударный слой на входе — во столько раз ярче белого после экспозиции (§4.6, §9.3). Ночью предел EV — EvMin,

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Kare.Space.Core;
 using Kare.Space.Game;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -100,6 +102,13 @@ namespace Kare.Space.EditorTools
             boot.InterstageMesh = ModelMesh("Interstage_Truss");
             boot.FairingHalfMesh = ModelMesh("Fairing_Half");
             boot.FinsMesh = ModelMesh("Sounding_Fins");
+            var crafts = new List<GameBootstrap.CraftMesh>();
+            foreach (var (model, file) in CraftFiles)
+            {
+                var mesh = ModelMesh(file);
+                if (mesh != null) crafts.Add(new GameBootstrap.CraftMesh { Model = model, Mesh = mesh });
+            }
+            boot.CraftMeshes = crafts.ToArray();
             game.AddComponent<FloatingOrigin>();
             game.AddComponent<FlightInput>();
             game.AddComponent<FlightHud>().Icons = IconTexture(HudIconsPath);
@@ -266,6 +275,26 @@ namespace Kare.Space.EditorTools
             EditorUtility.SetDirty(m);
             return m;
         }
+
+        /// <summary>Аппараты в натуральную величину из Tools/blender/parts.blend → Models/*.fbx.</summary>
+        static readonly (SectionModel, string)[] CraftFiles =
+        {
+            (SectionModel.Lunokhod, "Lunokhod"), (SectionModel.Luna17KT, "Luna17_KT"),
+            (SectionModel.LMDescent, "LM_Descent"), (SectionModel.LMAscent, "LM_Ascent"),
+            (SectionModel.ApolloCM, "Apollo_CM"), (SectionModel.ApolloSM, "Apollo_SM"),
+            (SectionModel.Mercury, "Mercury_Capsule"), (SectionModel.Gemini, "Gemini_Capsule"),
+            (SectionModel.GeminiAdapter, "Gemini_Adapter"), (SectionModel.Surveyor, "Surveyor"),
+            (SectionModel.Ranger, "Ranger"), (SectionModel.Explorer1, "Explorer1"),
+            (SectionModel.Redstone, "Redstone"), (SectionModel.JunoStage1, "Juno_Stage1"),
+            (SectionModel.JunoCluster11, "Juno_Cluster11"), (SectionModel.JunoCluster3, "Juno_Cluster3"),
+            (SectionModel.AtlasBooster, "Atlas_Booster"), (SectionModel.AtlasSustainer, "Atlas_Sustainer"),
+            (SectionModel.AtlasSustainerAgena, "Atlas_SustainerAgena"), (SectionModel.AtlasSustainerCentaur, "Atlas_SustainerCentaur"),
+            (SectionModel.Agena, "Agena"), (SectionModel.Centaur, "Centaur"),
+            (SectionModel.TitanStage1, "Titan_Stage1"), (SectionModel.TitanStage2, "Titan_Stage2"),
+            (SectionModel.SaturnSIC, "Saturn_SIC"), (SectionModel.SaturnSII, "Saturn_SII"), (SectionModel.SaturnSIVB, "Saturn_SIVB"),
+            (SectionModel.ProtonStage1, "Proton_Stage1"), (SectionModel.ProtonStage2, "Proton_Stage2"),
+            (SectionModel.ProtonStage3, "Proton_Stage3"), (SectionModel.BlokD, "BlokD"),
+        };
 
         /// <summary>Первый меш FBX из Models; null — файла нет (детали не обязательны).</summary>
         static Mesh ModelMesh(string name)

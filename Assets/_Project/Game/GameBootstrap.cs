@@ -56,6 +56,19 @@ namespace Kare.Space.Game
         public Mesh FairingHalfMesh;
         [Tooltip("Хвостовой отсек с 4 стабилизаторами: начало у низа, корпус Ø1,0 м, размах Ø1,5 м, высота 1,2 м.")]
         public Mesh FinsMesh;
+        [Tooltip("Аппараты в натуральную величину (Луноход, LM, «Аполлон», «Меркурий»…): метры, ось +Y — нос.")]
+        public CraftMesh[] CraftMeshes;
+
+        /// <summary>Модель аппарата для детали секции; null — нет (вид берёт процедурный меш).</summary>
+        [System.Serializable]
+        public struct CraftMesh { public SectionModel Model; public Mesh Mesh; }
+
+        public Mesh CraftMeshFor(SectionModel model)
+        {
+            if (CraftMeshes == null || model == SectionModel.None) return null;
+            foreach (var c in CraftMeshes) if (c.Model == model) return c.Mesh;
+            return null;
+        }
 
         [Header("Правила (GDD §4.7); в игре — меню Esc")]
         [Tooltip("Разрушение от поперечной аэродинамической нагрузки q·sin α.")]

@@ -37,6 +37,15 @@ static class Program
         Run("vostok", TestVostok, only);
         Run("luna9", () => TestLunar("luna9", 1000e3, land: true), only);
         Run("moondrop", TestMoonDrop, only);
+        Run("juno1", () => TestOrbitReturn("juno1", JunoTarget), only);
+        Run("freedom7", TestFreedom7, only);
+        Run("friendship7", () => TestOrbitReturn("friendship7", 200000), only);
+        Run("gemini3", () => TestOrbitReturn("gemini3", 200000), only);
+        Run("ranger7", () => TestLunar("ranger7", 1000e3), only);
+        Run("surveyor1", () => TestLunar("surveyor1", 1000e3, land: true), only);
+        Run("luna17", () => TestLunar("luna17", 1000e3, land: true, afterLanding: DriveLunokhod), only);
+        Run("apollo8", () => TestLunar("apollo8", 1737.4e3 + 110e3, lunarOrbit: true), only);
+        Run("apollo11", () => TestLunar("apollo11", 1000e3, land: true, afterLanding: LunarLiftoff), only);
         Console.WriteLine($"\nИтого: {passed} ok, {failed} fail");
         return failed == 0 ? 0 : 1;
     }
@@ -142,7 +151,8 @@ static class Program
 
     static void TestStats()
     {
-        foreach (var id in new[] { "heavy", "sputnik", "vostok", "luna", "sounding" })
+        foreach (var id in new[] { "heavy", "sputnik", "vostok", "luna", "sounding", "luna17", "juno1", "mercury_redstone", "mercury_atlas",
+                                    "gemini_titan", "ranger", "surveyor", "apollo8", "apollo11" })
         {
             var d = VesselPresets.ById(id);
             Console.WriteLine($"   {d.Name}: {d.TotalMass / 1000:F2} т, Δv {d.TotalDeltaVVac:F0} м/с");
@@ -337,7 +347,11 @@ static class Program
         Check("Спутник: миссия выполнена (виток на орбите)", tr.Status == MissionStatus.Success, tr.FailReason ?? OrbitText(u.Active, u.Time));
     }
 
-    static void TestLunar(string id, double miss, double maxTransfer = double.PositiveInfinity, bool land = false)
+    /// <summary>Промах по перицентру у Луны, после которого нужна коррекция на трассе, м.</summary>
+    const double MidcourseTolerance = 300e3;
+
+    static void TestLunar(string id, double miss, double maxTransfer = double.PositiveInfinity, bool land = false,
+                          Action<Universe, MissionTracker> afterLanding = null, bool lunarOrbit = false)
     {
         var (u, tr) = StartMission(id);
         var earth = u.Active.Body;
@@ -371,6 +385,23 @@ static class Program
         patches = u.PredictActive();
         var lunar = patches.Find(p => p.Body == moon);
         Console.WriteLine(lunar != null ? $"   прогноз у Луны: Pe {(lunar.Orbit.PeriapsisRadius - moon.Radius) / 1000:F0} км" : "   прогноз: Луна не достигается");
+        // Коррекция на трассе (как у всех настоящих лунных станций): промах разгона добирается малым импульсом
+        // через несколько часов, пока Луна далеко и цена поправки — единицы-десятки м/с.
+        if (lunar == null || Math.Abs(lunar.Orbit.PeriapsisRadius - miss) > MidcourseTolerance)
+        {
+            var fix = TransferPlanner.PlanIntercept(earth, v.Position, v.Velocity, u.Time + 2 * 3600, moon, miss, 86400, maxTransfer);
+            if (fix != null)
+            {
+                Console.WriteLine($"   коррекция: через {Clock(fix.Time - u.Time)}, Δv {fix.Prograde:F1}/{fix.Normal:F1}/{fix.Radial:F1} м/с, промах {fix.Miss / 1000:F0} км");
+                u.SetNode(fix.Time, fix.Prograde, fix.Normal, fix.Radial);
+                u.NodePilot = new NodeAutopilot();
+                Fly(u, tr, 6, fix.Time - u.Time + 3600, () => u.NodePilot != null && u.Active.Alive);
+                v = u.Active;
+                lunar = u.PredictActive().Find(p => p.Body == moon);
+                Console.WriteLine(lunar != null ? $"   после коррекции: Pe {(lunar.Orbit.PeriapsisRadius - moon.Radius) / 1000:F0} км" : "   после коррекции: Луна не достигается");
+            }
+            else Console.WriteLine("   коррекция: план не найден");
+        }
 
         Action landLog = null;
         if (land)
@@ -393,19 +424,150 @@ static class Program
                 }
             };
         }
-        Fly(u, tr, 7, 20 * 86400, () => tr.Status == MissionStatus.Active && u.Active.Alive, landLog);
+        if (lunarOrbit)
+        {
+            // Выход на окололунную орбиту: торможение в перицентре до круговой (как LOI «Аполлона-8»).
+            Fly(u, tr, 7, 6 * 86400, () => u.Active.Body != moon && u.Active.Alive);
+            v = u.Active;
+            if (v.Body == moon)
+            {
+                var o = KeplerOrbit.FromState(v.Position, v.Velocity, moon.Mu, u.Time);
+                double rp = o.PeriapsisRadius, tp = o.TimeToPeriapsis(u.Time);
+                double vp = Math.Sqrt(moon.Mu * (2 / rp - 1 / o.A)), vc = Math.Sqrt(moon.Mu / rp);
+                Console.WriteLine($"   у Луны: Pe {(rp - moon.Radius) / 1000:F0} км через {Clock(tp)}, торможение {vp - vc:F0} м/с");
+                u.SetNode(u.Time + tp, -(vp - vc), 0, 0);
+                u.NodePilot = new NodeAutopilot();
+                Fly(u, tr, 7, tp + 3600, () => u.NodePilot != null && u.Active.Alive);
+                Console.WriteLine($"   после LOI: {OrbitText(u.Active, u.Time)}");
+            }
+            Fly(u, tr, 5, 6 * 3600, () => !tr.Done[0] && u.Active.Alive);
+            Check($"{id}: виток вокруг Луны", tr.Done[0], OrbitText(u.Active, u.Time));
+            return;
+        }
+        Fly(u, tr, 7, 20 * 86400, () => tr.Status == MissionStatus.Active && u.Active.Alive &&
+                                         !(land && u.Active.IsLanded && u.Active.Body == moon), landLog);
         if (land)
         {
             var lv = u.Active;
             double left = 0;
             for (int i = 0; i < lv.Attached.Length; i++) if (lv.Attached[i]) left += lv.Propellant[i];
             Console.WriteLine($"   посадка: {lv.Situation}, остаток топлива {left:F0} кг");
+            if (lv.IsLanded && afterLanding != null) afterLanding(u, tr);
         }
         // Падение на Луну доводит физика: ускорение сброшено у рельефа, дальше шагаем в реальном темпе.
         if (tr.Status == MissionStatus.Active && u.Active.Body == moon)
             Fly(u, tr, 2, 3600, () => tr.Status == MissionStatus.Active);
         Console.WriteLine($"   итог: {(u.Active.Alive ? OrbitText(u.Active, u.Time) : u.Active.DestroyReason)}");
         Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
+    /// <summary>«Луноход-1»: сброс посадочной ступени (съезд по трапам) и 100 м своим ходом (GDD §6.12).</summary>
+    static void DriveLunokhod(Universe u, MissionTracker tr)
+    {
+        while (!u.Active.IsRover && u.Active.NextStageLabel != null) u.Stage();
+        var v = u.Active;
+        Check("luna17: луноход съехал", v.IsRover, v.Situation.ToString());
+        v.PilotInput = new Vector3d(1, 0.3, 0);
+        Fly(u, tr, 0, 600, () => tr.Status == MissionStatus.Active && v.Alive);
+        v.PilotInput = Vector3d.zero;
+        Console.WriteLine($"   проехал {v.DriveDistance:F0} м, {v.Situation}");
+    }
+
+    /// <summary>«Аполлон-11»: взлётная ступень уходит с посадочной на окололунную орбиту.</summary>
+    static void LunarLiftoff(Universe u, MissionTracker tr)
+    {
+        u.Stage(); // отделение взлётной ступени с зажиганием
+        bool orbit = Ascend(u, tr, 30000);
+        var lm = u.Active;
+        double pe = KeplerOrbit.FromState(lm.Position, lm.Velocity, lm.Body.Mu, u.Time).PeriapsisRadius - lm.Body.Radius;
+        Check("apollo11: взлётная ступень на орбите", orbit && pe > 10000, OrbitText(lm, u.Time));
+        Fly(u, tr, 2, 3600, () => tr.Status == MissionStatus.Active && u.Active.Alive);
+    }
+
+    /// <summary>Орбита, виток, торможение (жидкостное по SAS-ретро или РДТТ) и спуск капсулы на парашюте.</summary>
+    static void TestOrbitReturn(string id, double target)
+    {
+        var (u, tr) = StartMission(id);
+        if (!Ascend(u, tr, target)) { Check($"{id}: орбита", false); return; }
+        Fly(u, tr, 5, 4 * 3600, () => !tr.Done[0] && u.Active.Alive);
+        Check($"{id}: виток выполнен", tr.Done[0], OrbitText(u.Active, u.Time));
+        if (tr.Def.Objectives.Count < 2 || !tr.Done[0]) return;
+        while (u.Active.NextStageLabel != null && u.Active.Design.Sequence[u.Active.NextStage].Type != StageActionType.Ignite)
+            u.Stage();
+        var v = u.Active;
+        v.Sas = SasMode.Retrograde;
+        Fly(u, tr, 2, 120, () => true);
+        v.Throttle = 1;
+        u.Stage(); // тормозные двигатели
+        var earth = v.Body;
+        Fly(u, tr, 2, 900, () => v.Alive && KeplerOrbit.FromState(v.Position, v.Velocity, earth.Mu, u.Time).PeriapsisRadius - earth.Radius > 40000);
+        v.Throttle = 0;
+        Console.WriteLine($"   после торможения: {OrbitText(v, u.Time)}");
+        while (u.Active.NextStageLabel != null && u.Active.Design.Sequence[u.Active.NextStage].Type != StageActionType.DeployParachute)
+            u.Stage();
+        v = u.Active;
+        v.Sas = SasMode.Off;
+        u.Stage(); // парашют взводится, раскрывает автоматика
+        double maxG = 0;
+        Fly(u, tr, 2, 6 * 3600, () => tr.Status == MissionStatus.Active, () => { if (v.Situation == Situation.Flying) maxG = Math.Max(maxG, v.GForce); });
+        Console.WriteLine($"   спуск: max {maxG:F1} g, итог {v.Situation} {v.DestroyReason}");
+        Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
+    /// <summary>
+    /// Программный наклон «Фридом-7», град; дальше нос ведёт ограничитель угла атаки (гравитационный разворот).
+    /// Строго вертикальный подъём на 385 км давал на спуске 14 g дольше 10 с. Перебор: 15° без отсечки —
+    /// 147 км и 10,8 g, 20° — 88 км: без отсечки апогей слишком чувствителен к наклону.
+    /// </summary>
+    const double FreedomTilt = 10;
+    /// <summary>
+    /// Отсечка «Редстоуна» по баллистическому апоцентру, м. С наклоном 10°: апогей 181 км, пик 11,1 g
+    /// (у Шепарда — 187 км и 11 g). Пара: CrewGLimit/CrewGTime — при 150 км пик 9,7 g, при 187 км 11,8 g.
+    /// </summary>
+    const double FreedomApex = 180000;
+    /// <summary>
+    /// Цель апоцентра Juno I, м. Настоящий «Эксплорер-1» ушёл на 358 × 2550 км, но в модели связки РДТТ дают
+    /// 5,18 км/с: подъём к 237 км оставлял 80 м/с недобора до круговой. Ниже апоцентр — больше горизонтальной
+    /// скорости после I ступени. Пара: цель миссии — перицентр выше 150 км.
+    /// </summary>
+    const double JunoTarget = 200000;
+    /// <summary>Скорость наклона после вертикального участка, град/с; пара к FreedomTilt (наклон за ~20 с).</summary>
+    const double FreedomPitchRate = 0.5;
+    /// <summary>Длительность вертикального участка, с.</summary>
+    const double FreedomVertical = 12;
+
+    /// <summary>«Фридом-7»: суборбитальный прыжок Шепарда — как «Линия Кармана», но с капсулой.</summary>
+    static void TestFreedom7()
+    {
+        var (u, tr) = StartMission("freedom7");
+        var v = u.Active;
+        u.Stage();
+        double apex = 0, maxG = 0, t0 = u.Time;
+        bool separated = false, chute = false;
+        Fly(u, tr, 2, 3000, () => tr.Status == MissionStatus.Active, () =>
+        {
+            v = u.Active;
+            apex = Math.Max(apex, v.Altitude);
+            if (v.Situation == Situation.Flying) maxG = Math.Max(maxG, v.GForce);
+            if (!separated && v.AnyEngineRunning)
+            {
+                // Программа тангажа «Редстоуна»: вертикально, затем плавный наклон на восток (в океан).
+                FlightControl.LocalFrame(v, u.Time, out var up, out _, out var east);
+                double pitch = (90 - Math.Min(FreedomTilt, Math.Max(0, u.Time - t0 - FreedomVertical) * FreedomPitchRate)) * Math.PI / 180;
+                // FlightControl.Update обнуляет момент каждый шаг — программа идёт через удержание SAS.
+                var dir = AscentAutopilot.LimitAoA(v, u.Time, up * Math.Sin(pitch) + east * Math.Cos(pitch));
+                v.Sas = SasMode.Stability;
+                v.SasHold = QuaternionD.FromToRotation(v.NoseP.SwapYZ, dir.SwapYZ) * v.Attitude;
+                v.SasHoldValid = true;
+                // Отсечка по баллистическому апоцентру: модельный «Редстоун» с полной выработкой забрасывал на 300+ км.
+                var o = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, u.Time);
+                if (o.ApoapsisRadius - v.Body.Radius > FreedomApex) v.Throttle = 0;
+            }
+            if (!separated && v.VerticalSpeed < 0 && v.Altitude > 50000) { u.Stage(); separated = true; }
+            else if (separated && !chute) { u.Stage(); chute = true; }
+        });
+        Console.WriteLine($"   апогей {apex / 1000:F1} км, max {maxG:F1} g, итог: {v.Situation}, {v.DestroyReason}");
+        Check("Фридом-7 выполнен", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
     }
 
     /// <summary>Чит меню Esc «Над Луной 15 км» + G: полный пакет со стола, падение из покоя, автопилот посадки.</summary>

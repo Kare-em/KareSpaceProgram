@@ -11,8 +11,11 @@
 - **Компиляция**: `refresh_unity` compile=request, mode=force, scope=all; бывает «idle» без сборки — проверять появление
   нового типа/поля через `execute_code`, при необходимости повторить.
 - **`execute_code` без `action:"execute"` падает**; codedom (C# 6, без `dynamic`) — без `StringBuilder.Append` цепочкой,
-  собирать строку через `+`.
+  собирать строку через `+`. `Object` там неоднозначен (System/UnityEngine) — писать `UnityEngine.Object`;
+  тел списком у `Universe` нет — брать `u.System.Get("moon")`.
 - `read_console types` — списком.
+- **PNG больше ~1,4 МБ не доходит через `SendUserFile` до удалённого зрителя** (таймаут, 03.10.2026) — в
+  десктопе файл виден. Для телефона ужимать (JPEG/половина Full HD).
 - **Порт 8767 отвечает 406 и при закрытом редакторе** — это жив Python-сервер `mcp-for-unity.exe`, а не Unity.
   Признак: тулы возвращают `no_unity_session`. Проверять `tasklist | grep Unity.exe`; запуск —
   `"/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Unity.exe" -projectPath <проект> &`.
@@ -27,6 +30,10 @@
   `Lift(alt, up)`); ускорение — `Time.timeScale`; поля `FlightCamera.Yaw/Pitch/Distance` публичные (Yaw от севера).
 - **Телепорт борта**: сначала `v.Situation = Flying` (иначе `UpdateLandedPose` вернёт на стол), и пауза
   `manage_editor pause` — переключатель: второй вызов снимает паузу.
+- **Кадр любого аппарата без полёта** (03.10.2026): в редакторе `GameBootstrap.MissionId = "<id>"` → play →
+  `var u = GameBootstrap.U; u.Teleport(u.System.Get("moon"), 15e3, false);` + `u.Stage()` до нужного набора
+  (`u.Active.Attached`), `Throttle = 0`. После stop вернуть `MissionId = "vostok"`. Секции под обтекателем
+  (`Vessel.IsEnclosed`) не рисуются — LM на столе не виден, это не баг.
 
 ## Правка файлов (Windows, Git Bash)
 - Длинный Python в heredoc Bash падает — писать скрипт в файл (скретчпад) и запускать `python файл`.
@@ -35,6 +42,9 @@
 - `sed -i '<N>r кусок'` после любой `Edit` того же файла — номер строки уже сдвинут (вставка попала внутрь
   doc-комментария, 02.10.2026). Вставлять Python-заменой по точной строке-якорю.
 - `perl -i` на файлах с кириллицей не использовать — портит кодировку.
+- Якорь Python-замены должен быть уникален: одинаковые строки в соседних пресетах (Karman/Freedom 7) дают
+  count=2 — брать якорь с соседней уникальной строкой.
+- `sed` со вставкой `\r\n` в LF-файл (FlightSceneBuilder) даёт смешанные концы строк — сначала определить EOL файла.
 
 ## Blender MCP (лоу-поли детали)
 - Сервер: `.mcp.json` → `uvx --python 3.12 blender-mcp` (ahujasid), аддон `blender_mcp_addon.py` v1.8 в

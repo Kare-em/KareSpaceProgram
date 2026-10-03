@@ -33,6 +33,13 @@ namespace Kare.Space.Game
         /// <summary>Клуб: полуразмер, м; рост, м/√с; разлёт, м/с (гаснет за PuffDrag с); подъём, м/с; жизнь, с.</summary>
         const float PuffSize = 6f, PuffGrowth = 5f, PuffSpeed = 25f, PuffDrag = 4f, PuffRise = 1.2f, PuffLife = 40f;
         const float TrailAlpha = 0.85f, PuffAlpha = 0.7f;
+        /// <summary>Текстура клуба в долях полуразмера квадрата: окно гасит альфу в 0 между Start и End (&lt; 1 — не доходит
+        /// до края квадрата), рваность края шумом. Пара: PuffLift поднимает центр на PuffLift·размер, чтобы низ клуба не
+        /// резал грунт прямой линией.</summary>
+        const float PuffEdgeStart = 0.6f, PuffEdgeEnd = 0.88f, PuffRagged = 0.5f, PuffLift = 0.6f;
+        /// <summary>Мягкое подхождение камеры: клуб тает на расстоянии от PuffFadeNear до PuffFadeNear + PuffFadeRange
+        /// его размеров. Замена soft-particles — у HDRP/Lit их нет, а входящая в клуб камера давала плоский экран-вуаль.</summary>
+        const float PuffFadeNear = 0.6f, PuffFadeRange = 1.2f;
         static readonly Color SmokeColor = new Color(0.86f, 0.85f, 0.83f);
 
         struct Sample { public Vector3d Bf; public double Time; public float Width; }
@@ -241,12 +248,17 @@ namespace Kare.Space.Game
                 if (!on) continue;
                 float size = PuffSize + PuffGrowth * Mathf.Sqrt(age);
                 double run = PuffSpeed * PuffDrag * (1 - System.Math.Exp(-age / PuffDrag));
-                var bf = p.Ground + p.Dir * run + p.Up * (PuffRise * age + size * 0.5);
+                var bf = p.Ground + p.Dir * run + p.Up * (PuffRise * age + size * PuffLift);
                 p.Tr.position = FloatingOrigin.ToUnity(body.Position + q * bf);
                 if (cam != null) p.Tr.rotation = cam.transform.rotation;
                 p.Tr.localScale = Vector3.one * size;
                 float life = 1 - age / PuffLife;
                 float alpha = PuffAlpha * p.Strength * Mathf.Clamp01(age * 2) * life * life;
+                if (cam != null)
+                {
+                    float d = Vector3.Distance(cam.transform.position, p.Tr.position) / size;
+                    alpha *= Mathf.SmoothStep(0, 1, (d - PuffFadeNear) / PuffFadeRange);
+                }
                 mpb.Clear();
                 mpb.SetColor("_BaseColor", new Color(SmokeColor.r, SmokeColor.g, SmokeColor.b, alpha));
                 p.R.SetPropertyBlock(mpb);
@@ -276,16 +288,22 @@ namespace Kare.Space.Game
         static Texture2D PuffTexture()
         {
             if (puffTex != null) return puffTex;
-            const int n = 64;
+            const int n = 128;
             puffTex = new Texture2D(n, n, TextureFormat.RGBA32, true) { name = "Smoke Puff", wrapMode = TextureWrapMode.Clamp };
             for (int y = 0; y < n; y++)
             for (int x = 0; x < n; x++)
             {
                 float dx = (x + 0.5f) / n * 2 - 1, dy = (y + 0.5f) / n * 2 - 1;
                 float r = Mathf.Sqrt(dx * dx + dy * dy);
-                // Клочья: шум сдвигает край, середина плотная.
-                float noise = Mathf.PerlinNoise(x * 0.12f + 3, y * 0.12f + 7);
-                float f = Mathf.Clamp01(1 - r * (0.8f + 0.5f * noise));
+                // Клочья: два октава шума сдвигают край, середина плотная.
+                float noise = 0.65f * Mathf.PerlinNoise(x * 0.06f + 3, y * 0.06f + 7)
+                            + 0.35f * Mathf.PerlinNoise(x * 0.17f + 21, y * 0.17f + 5);
+                float rn = r * (1 + PuffRagged * (noise - 0.5f));
+                float f = 1 - Mathf.SmoothStep(0.15f, 0.75f, rn);
+                // Жёсткое окно: альфа ровно 0 за PuffEdgeEnd, иначе у квадрата виден прямой край (03.10.2026,
+                // старая формула давала 0,10 на середине стороны). Пара: край квадрата r = 1, окно кончается раньше.
+                float win = 1 - Mathf.SmoothStep(PuffEdgeStart, PuffEdgeEnd, r);
+                f *= win;
                 puffTex.SetPixel(x, y, new Color(1, 1, 1, f * f * (3 - 2 * f)));
             }
             puffTex.Apply(true, true);

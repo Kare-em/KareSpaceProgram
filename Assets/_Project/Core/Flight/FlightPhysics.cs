@@ -145,9 +145,41 @@ namespace Kare.Space.Core
             v.AngularVelocity = Vector3d.zero;
         }
 
+        /// <summary>
+        /// Скорость лунохода, м/с: вторая передача «Лунохода-1» ≈ 2 км/ч. Поворот на месте — RoverTurnRate, рад/с.
+        /// Пара: за шаг 0,02 с шасси сдвигается на 1 см — рельеф патча (шаг сетки ~1 м) проходится плавно.
+        /// </summary>
+        public const double RoverSpeed = 0.55, RoverTurnRate = 0.25;
+
+        /// <summary>
+        /// Езда самоходного шасси (GDD §6.3): W/S — вперёд/назад вдоль связанной оси Z, A/D — разворот вокруг местной
+        /// вертикали. Шасси всегда стоит по радиусу на высоте рельефа: так же встаёт борт на столе (PlaceOnSurface).
+        /// </summary>
+        static void DriveRover(Vessel v, double dt)
+        {
+            var body = v.Body;
+            v.MassProperties(out _, out double com, out _, out _);
+            double R = v.AnchorBodyFixed.magnitude;
+            var u = v.AnchorBodyFixed / R;
+            var f = Vector3d.ProjectOnPlane((v.AttitudeBodyFixed * Vector3d.forward).SwapYZ, u);
+            if (f.sqrMagnitude < 1e-12) f = Vector3d.ProjectOnPlane(Vector3d.forward, u);
+            if (f.sqrMagnitude < 1e-12) f = Vector3d.ProjectOnPlane(Vector3d.right, u);
+            f = f.normalized;
+            double turn = MathD.Clamp(v.PilotInput.y, -1, 1) * RoverTurnRate * dt;
+            // D (y > 0) — направо, то есть по часовой при взгляде сверху: отрицательный угол вокруг зенита.
+            if (turn != 0) f = (QuaternionD.AngleAxis(-turn, u) * f).normalized;
+            double ds = MathD.Clamp(v.PilotInput.x, -1, 1) * RoverSpeed * dt;
+            var dir = (u + f * (ds / R)).normalized;
+            f = Vector3d.ProjectOnPlane(f, dir).normalized;
+            v.AnchorBodyFixed = dir * (body.Radius + body.SurfaceHeight(dir) + com);
+            v.AttitudeBodyFixed = QuaternionD.FromBasis(Vector3d.Cross(f, dir).SwapYZ, dir.SwapYZ, f.SwapYZ);
+            v.DriveDistance += Math.Abs(ds);
+        }
+
         static void StepLanded(Vessel v, double t, double dt)
         {
             var body = v.Body;
+            if (v.IsRover && v.Situation == Situation.Landed) DriveRover(v, dt);
             UpdateLandedPose(v, t + dt);
             v.UpdateEngines();
             UpdateAir(v, body, v.Position, v.Velocity, SpinAxis(body, t + dt));
