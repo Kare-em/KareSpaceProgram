@@ -102,3 +102,34 @@
   `VesselView.TrussHeight(i + 1)` укорачивает процедурный корпус нижней ступени на высоту фермы (не меньше
   половины длины); длина в физике прежняя. Условие в `TrussHeight` = условие постановки фермы — меняешь одно,
   меняй второе.
+
+## Яркость, ночь, дым, обшивка (03.10.2026)
+- **Квадратные края дыма ночью**: у `Smoke.mat` (HDRP Unlit/Lit, Alpha) по умолчанию `_EnableBlendModePreserveSpecularLighting` = 1 —
+  блик света факела НЕ умножается на альфу, и по краю спрайта виден прямоугольник. Днём незаметно (бликов нет), ночью
+  от света факела — резкий квадрат. Решение: ключ в 0 до `HDMaterial.ValidateMaterial` (`FlightSceneBuilder.SmokeMaterial`).
+  Дополнительно: текстура клуба 128² с рваным краем и спадом до нуля раньше края квадрата (`ExhaustTrail.PuffEdge*`),
+  клубы приподняты на `size*PuffLift`, у самой камеры гасятся (`PuffFade*`).
+- **Факел ночью пересвечивает кадр**: автоэкспозиция у тёмной сцены уходит на высокий EV, эмиссия факела (3e3 нит) выжигает кадр —
+  замер старта «Востока» ночью: средняя яркость 87,8 из 255, 3,8 % белых пикселей. Одного нижнего предела `limitMin`
+  мало (тёмная сцена остаётся чёрной) — зажимаем EV в полосу `[plumeEv, plumeEv + PlumeEvSlack]` и верхний предел
+  (`limitMax`) тоже, с рампами (`PlumeRampUp` 1,5 с, `PlumeRampDown` 3 с) от `SunLight.Visible`. После: 8,6 / 0,4 %.
+  `PlumeNightWhite` = 8 дало 5,0, 16 — 8,6 (в `SkyController`). Пара: `VesselView.CoreNits/GlowNits` и `BrightnessSettings.Plume`.
+- **Экспозиция HDRP не адаптируется при `timeScale` ≈ 0** (адаптация в масштабированном времени): замер ночной орбиты
+  при 0,0001 дал среднюю яркость 0,0. Для замеров — `timeScale = 1` и несколько кадров перед снимком.
+- **Ночь на орбите была чёрной** (средняя 9,4): неба-свечения нет, а отражённый свет Земли/Луны слаб. `NightLight.SpaceGlowLux`
+  = 0,04 лк в вакууме `(1 − air)·(1 − SunLight.Visible)` -> 46,6 (виден корпус и диск Земли). Ночь всё равно темнее дня.
+- **Карта ночью** (`MapView`, фиксированная экспозиция EV 13, bloom 0): без света видна только орбита — средняя 0,2.
+  Направленный «Map Fill» от камеры (`NightLight.MapFillLux`): 2500 лк -> 1,0, 8000 -> 2,6 (диск Земли, орбита и маркер читаются).
+- **Яркость в меню Esc**: `BrightnessSettings` (PlayerPrefs `kare.brightness.ev`, `.plume`). EV -> `exposure.compensation`,
+  и `fixedExposure` карты сдвигается на `MapEv − comp`, иначе слайдер на карте не работает. Факел — множитель на
+  эмиссию и свет (`VesselView`) и в расчёт нижнего предела EV.
+- **HDRP Lit Mask Map**: R металл, G AO, B маска детали, A гладкость. При наличии маски `_Metallic`/`_Smoothness` игнорируются —
+  управлять `_MetallicRemapMin/Max`, `_SmoothnessRemapMin/Max`, `_AORemapMin/Max`. Detail Map: R оттенок, G нормаль Y, B гладкость, A нормаль X;
+  `_LinkDetailsWithBase` = 1 — деталь идёт за трипланаром базы. Ключи (`_NORMALMAP`, `_MASKMAP`, `_DETAIL_MAP`) — `HDMaterial.ValidateMaterial`.
+- **Namespace**: `UnityEngine.Rendering.HighDefinition.HDMaterial` (не `UnityEditor.Rendering.HighDefinition`).
+- **Текстуры обшивки** — `Tools/gen-hull-textures.py` -> `Assets/_Project/Textures/Hull` (Albedo/Normal/Mask/Detail, тайл `HullTileMeters` = 2 м,
+  бесшовные), назначает `FlightSceneBuilder.HullTexturing` (вызывается и из меню сборки). Первый вариант давал заметную клетчатую
+  сетку — швы 3 px, AO 0,4, стрингер 0,1, панелей 1×2; сетка всё ещё чуть видна. Сажа у сопел НЕ реализована: тайл без привязки
+  к ступени, только общие подтёки вдоль оси.
+- **Ракета, запущенная при малом `timeScale`, падает и разрушается** (Situation Destroyed): старт — только на `timeScale = 1`.
+  `GameBootstrap.U/Instance` после перезагрузки скриптов бывают null — `FindObjectOfType<GameBootstrap>()` или перезагрузить сцену.

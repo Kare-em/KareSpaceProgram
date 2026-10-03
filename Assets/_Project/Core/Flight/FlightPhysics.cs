@@ -232,7 +232,9 @@ namespace Kare.Space.Core
                 if (v.Attached[i] && v.ChuteDeployed[i] && !v.ChuteFailed[i])
                     g.ChuteCdA += 1.5 * v.Design.Sections[i].ParachuteArea * ChuteFraction(v.ChuteOpenTime[i]);
 
-            var thrustAcc = nose * ((thrust + v.RcsForward * v.RcsThrust) / mass);
+            var thrustAcc = nose * ((thrust + v.RcsForward * v.RcsThrust) / mass)
+                          // Поступательная РСУ — сближение при стыковке (§6.6), в связанных осях.
+                          + v.LocalToWorld(v.RcsTranslate) * (v.RcsThrust / mass);
 
             // RK4: тяга и масса постоянны на шаге, гравитация и сопротивление — от состояния.
             var r0 = v.Position;

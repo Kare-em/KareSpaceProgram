@@ -109,6 +109,14 @@ namespace Kare.Space.EditorTools
                 if (mesh != null) crafts.Add(new GameBootstrap.CraftMesh { Model = model, Mesh = mesh });
             }
             boot.CraftMeshes = crafts.ToArray();
+            // Стартовые комплексы: Р-7, мачта, Протон, Редстоун, Атлас, Титан, Сатурн (ML + LUT), стрелы башен.
+            var pads = new List<GameBootstrap.PadMesh>();
+            foreach (var file in PadFiles)
+            {
+                var mesh = ModelMesh(file);
+                if (mesh != null) pads.Add(new GameBootstrap.PadMesh { Name = file, Mesh = mesh });
+            }
+            boot.PadMeshes = pads.ToArray();
             game.AddComponent<FloatingOrigin>();
             game.AddComponent<FlightInput>();
             game.AddComponent<FlightHud>().Icons = IconTexture(HudIconsPath);
@@ -277,11 +285,19 @@ namespace Kare.Space.EditorTools
         }
 
         /// <summary>Аппараты в натуральную величину из Tools/blender/parts.blend → Models/*.fbx.</summary>
+        /// <summary>FBX комплексов Models/Pad_*.fbx; имена — ключи GameBootstrap.PadMeshFor (пара: LaunchPadView).</summary>
+        static readonly string[] PadFiles =
+        {
+            "Pad_R7", "Pad_Mast", "Pad_Proton", "Pad_Redstone", "Pad_Atlas", "Pad_Titan",
+            "Pad_Saturn_ML", "Pad_Saturn_LUT", "Pad_Arm_Light", "Pad_Arm_Heavy",
+        };
+
         static readonly (SectionModel, string)[] CraftFiles =
         {
             (SectionModel.Lunokhod, "Lunokhod"), (SectionModel.Luna17KT, "Luna17_KT"),
             (SectionModel.LMDescent, "LM_Descent"), (SectionModel.LMAscent, "LM_Ascent"),
             (SectionModel.ApolloCM, "Apollo_CM"), (SectionModel.ApolloSM, "Apollo_SM"),
+            (SectionModel.ApolloLES, "Apollo_LES"), (SectionModel.ApolloSLA, "Apollo_SLA_Half"),
             (SectionModel.Mercury, "Mercury_Capsule"), (SectionModel.Gemini, "Gemini_Capsule"),
             (SectionModel.GeminiAdapter, "Gemini_Adapter"), (SectionModel.Surveyor, "Surveyor"),
             (SectionModel.Ranger, "Ranger"), (SectionModel.Explorer1, "Explorer1"),
@@ -314,6 +330,9 @@ namespace Kare.Space.EditorTools
             m.SetFloat("_TransparentZWrite", 0);
             m.SetFloat("_Smoothness", 0);
             m.SetFloat("_Metallic", 0);
+            // Без «Preserve Specular Lighting»: блик не умножается на альфу, и под факелом 2·10⁶ кд весь квадрат клуба
+            // светился целиком с прямыми краями, как бы мягко ни гасла текстура (замер 03.10.2026, ночной старт).
+            m.SetFloat("_EnableBlendModePreserveSpecularLighting", 0);
             HDMaterial.ValidateMaterial(m);
             EditorUtility.SetDirty(m);
             return m;
@@ -385,23 +404,64 @@ namespace Kare.Space.EditorTools
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
+        /// <summary>Процедурные карты обшивки — Tools/gen-hull-textures.py (швы, заклёпки, стрингеры, подтёки, зерно).</summary>
+        const string HullDir = "Assets/_Project/Textures/Hull";
+
+        /// <summary>Карта обшивки без стороннего пака: повтор, мипы, 1024; srgb — только цветовая карта.</summary>
+        static Texture2D HullMap(string name, TextureImporterType type, bool srgb)
+        {
+            string path = $"{HullDir}/{name}.png";
+            if (!(AssetImporter.GetAtPath(path) is TextureImporter ti)) return null;
+            ti.textureType = type;
+            ti.sRGBTexture = srgb;
+            ti.mipmapEnabled = true;
+            ti.wrapMode = TextureWrapMode.Repeat;
+            ti.anisoLevel = 8;
+            ti.maxTextureSize = 1024;
+            ti.textureCompression = TextureImporterCompression.CompressedHQ;
+            ti.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
         /// <summary>
-        /// Обшивка бортов и стола (§9.5): Metal_30 с нормалью трипланаром в пространстве объекта. У процедурных
-        /// Frustum/Bell нет UV, а трипланар их не требует; объектное пространство — чтобы рисунок не «плыл»
-        /// при сдвиге плавающего начала. Цвет ступеней по-прежнему даёт _BaseColor из MPB — он умножается на карту,
-        /// поэтому карта почти белая.
+        /// Обшивка бортов и стола (§9.5): процедурный атлас Hull (albedo + нормаль + Mask Map + Detail Map) трипланаром
+        /// в пространстве объекта. У процедурных Frustum/Bell нет UV, а трипланар их не требует; объектное пространство —
+        /// чтобы рисунок не «плыл» при сдвиге плавающего начала. Цвет ступеней по-прежнему даёт _BaseColor из MPB —
+        /// он умножается на карту, поэтому карта почти белая. Металличность и гладкость берутся из Mask Map (слайдеры
+        /// _Metallic/_Smoothness при ней игнорируются), поэтому масштабируются через Remap. Нет карт — старый Metal_30.
         /// </summary>
         static void HullTexturing(Material m)
         {
-            var albedo = PackTexture(HullMetal + ".tga", false, false);
-            var normal = PackTexture(HullMetal + "_N.tga", false, true);
+            var albedo = HullMap("HullAlbedo", TextureImporterType.Default, true);
+            var normal = HullMap("HullNormal", TextureImporterType.NormalMap, false);
+            var mask = HullMap("HullMask", TextureImporterType.Default, false);
+            var detail = HullMap("HullDetail", TextureImporterType.Default, false);
+            if (albedo == null)
+            {
+                albedo = PackTexture(HullMetal + ".tga", false, false);
+                normal = PackTexture(HullMetal + "_N.tga", false, true);
+                mask = detail = null;
+            }
             if (albedo == null) return;
             m.SetTexture("_BaseColorMap", albedo);
-            if (normal != null) { m.SetTexture("_NormalMap", normal); m.SetFloat("_NormalScale", 0.6f); }
+            m.SetTexture("_NormalMap", normal);
+            m.SetFloat("_NormalScale", 0.8f);
+            m.SetTexture("_MaskMap", mask);
+            // Пара: HullMask.R (металл ≈ 0,5–0,75) и HullMask.A (гладкость ≈ 0,3–0,6) из gen-hull-textures.py. Покрашенная
+            // обшивка — не зеркало: потолок металла 0,45, гладкость 0,15…0,75.
+            m.SetFloat("_MetallicRemapMin", 0f); m.SetFloat("_MetallicRemapMax", 0.45f);
+            m.SetFloat("_SmoothnessRemapMin", 0.15f); m.SetFloat("_SmoothnessRemapMax", 0.75f);
+            m.SetFloat("_AORemapMin", 0f); m.SetFloat("_AORemapMax", 1f);
+            m.SetTexture("_DetailMap", detail);
+            m.SetFloat("_LinkDetailsWithBase", 1);    // деталь берёт трипланар базы
+            m.SetTextureScale("_DetailMap", new Vector2(6, 6)); // зерно в 6 раз мельче швов
+            m.SetFloat("_DetailAlbedoScale", 0.6f);
+            m.SetFloat("_DetailNormalScale", 0.7f);
+            m.SetFloat("_DetailSmoothnessScale", 0.5f);
             m.SetFloat("_UVBase", 5);                 // Triplanar
             m.SetFloat("_ObjectSpaceUVMapping", 1);  // ObjectSpace
             m.SetFloat("_TexWorldScale", 1f / HullTileMeters);
-            HDMaterial.ValidateMaterial(m); // ставит _MAPPING_TRIPLANAR, _NORMALMAP по свойствам
+            HDMaterial.ValidateMaterial(m); // ставит _MAPPING_TRIPLANAR, _NORMALMAP, _MASKMAP, _DETAIL_MAP по свойствам
             EditorUtility.SetDirty(m);
         }
 

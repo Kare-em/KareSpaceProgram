@@ -74,6 +74,13 @@ namespace Kare.Space.Core
         /// <summary>Попытка запуска уже была при этой «подаче газа»: повтор — только после сброса РУД в 0.</summary>
         bool[] ignitionLatch;
         public int NextStage;
+        /// <summary>
+        /// Порядок секций снизу вверх. У нового борта — по индексам; после стыковки секции второго борта идут сверху
+        /// в обратном порядке (носом к носу, §6.6). Раскладка, верх и низ связки считаются по нему, а не по индексам.
+        /// </summary>
+        public int[] Order;
+        /// <summary>Секция перевёрнута: пристыкована носом к носу. Двигатель её не взводится, рендер разворачивает её на 180°.</summary>
+        public bool[] Flipped;
 
         // Состояние.
         public CelestialBody Body;
@@ -102,6 +109,12 @@ namespace Kare.Space.Core
         public Vector3d TorqueCommand;
         /// <summary>Поступательная РСУ вдоль носа (0…1): осаживает топливо перед повторным запуском (GDD §6.3).</summary>
         public double RcsForward;
+        /// <summary>Поступательная РСУ в связанных осях, −1…1 по каждой оси: сближение и причаливание (§6.6).</summary>
+        public Vector3d RcsTranslate;
+        /// <summary>Расстыковка с переходом экипажа (ЛМ «Аполлона»): Universe делает этот борт активным и обнуляет поле.</summary>
+        public Vessel ControlTransfer;
+        /// <summary>Перезапуски двигателей без счёта (настройка меню Esc, §6.3). В ядре по умолчанию — честный счёт: тесты миссий.</summary>
+        public static bool UnlimitedIgnitions;
         public ManeuverNode Node;
 
         // Телеметрия (обновляет физика).
@@ -131,9 +144,12 @@ namespace Kare.Space.Core
             ChuteArmed = new bool[n];
             ChuteOpenTime = new double[n];
             ignitionLatch = new bool[n];
+            Order = new int[n];
+            Flipped = new bool[n];
             for (int i = 0; i < n; i++)
             {
                 var s = design.Sections[i];
+                Order[i] = i;
                 Attached[i] = true;
                 Propellant[i] = s.Propellant;
                 IgnitionsLeft[i] = s.HasEngine ? s.Engine.Ignitions : 0;
@@ -211,7 +227,7 @@ namespace Kare.Space.Core
         {
             var secs = Design.Sections;
             double h = 0;
-            for (int i = 0; i < secs.Count; i++)
+            foreach (int i in Order)
             {
                 if (!Attached[i]) continue;
                 var s = secs[i];
@@ -301,18 +317,36 @@ namespace Kare.Space.Core
             }
         }
 
+        /// <summary>Верхняя присоединённая секция по порядку связки (после стыковки — секция второго борта).</summary>
         public int TopSection()
         {
-            for (int i = Attached.Length - 1; i >= 0; i--)
-                if (Attached[i]) return i;
+            for (int k = Order.Length - 1; k >= 0; k--)
+                if (Attached[Order[k]]) return Order[k];
             return -1;
         }
 
         public int BottomSection()
         {
-            for (int i = 0; i < Attached.Length; i++)
-                if (Attached[i]) return i;
+            for (int k = 0; k < Order.Length; k++)
+                if (Attached[Order[k]]) return Order[k];
             return -1;
+        }
+
+        /// <summary>Стыковочный узел — верхний торец связки: его высота над центром масс, м (§6.6).</summary>
+        public double PortHeight()
+        {
+            MassProperties(out _, out double com, out double length, out _);
+            return length - com;
+        }
+
+        /// <summary>Узел свободен: верхняя секция связки несёт порт и не перевёрнута (у перевёрнутой порт смотрит вниз — занят).</summary>
+        public bool HasFreePort
+        {
+            get
+            {
+                int t = TopSection();
+                return t >= 0 && Design.Sections[t].DockingPort && !Flipped[t];
+            }
         }
 
         public bool HasCrew()
@@ -385,21 +419,25 @@ namespace Kare.Space.Core
                     Raise($"{secs[i].Engine.Name}: нет топлива");
                     continue;
                 }
-                if (IgnitionsLeft[i] <= 0)
+                if (!CanIgnite(i))
                 {
                     Raise($"{secs[i].Engine.Name}: запуски исчерпаны");
                     continue;
                 }
-                IgnitionsLeft[i]--;
+                if (!UnlimitedIgnitions) IgnitionsLeft[i]--;
+                string left = UnlimitedIgnitions ? "∞" : IgnitionsLeft[i].ToString();
                 if (secs[i].Engine.NeedsUllage && !PropellantSettled)
                 {
-                    Raise($"{secs[i].Engine.Name}: запуск сорван — топливо не осело (осталось запусков: {IgnitionsLeft[i]})");
+                    Raise($"{secs[i].Engine.Name}: запуск сорван — топливо не осело (осталось запусков: {left})");
                     continue;
                 }
                 Running[i] = true;
-                Raise($"{secs[i].Engine.Name}: запуск (осталось запусков: {IgnitionsLeft[i]})");
+                Raise($"{secs[i].Engine.Name}: запуск (осталось запусков: {left})");
             }
         }
+
+        /// <summary>Остался ли запуск у двигателя секции (с настройкой «бесконечные перезапуски» — всегда).</summary>
+        public bool CanIgnite(int i) => UnlimitedIgnitions || IgnitionsLeft[i] > 0;
 
         /// <summary>Списать топливо за dt; при выработке — останов.</summary>
         public void BurnPropellant(double dt)
@@ -431,9 +469,47 @@ namespace Kare.Space.Core
 
         // ---------------------------------------------------------------- ступени
 
-        public bool HasNextStage => NextStage < Design.Sequence.Count;
+        /// <summary>
+        /// Первый шаг программы начиная с from, который сейчас выполним. После стыковки и расстыковки состав связки
+        /// меняется (§6.6): шаги, чьих секций в ней нет, пропускаются, а не съедают нажатие пробела впустую.
+        /// </summary>
+        public int NextApplicable(int from)
+        {
+            int k = Math.Max(0, from);
+            while (k < Design.Sequence.Count && !Applicable(Design.Sequence[k])) k++;
+            return k;
+        }
 
-        /// <summary>Оставшиеся ступени с текущим топливом — для автопилота и HUD.</summary>
+        bool Applicable(StageAction a)
+        {
+            var secs = Design.Sections;
+            int i = a.Section;
+            switch (a.Type)
+            {
+                case StageActionType.Ignite:
+                    return Attached[i] && secs[i].HasEngine && !Flipped[i];
+                case StageActionType.Separate:
+                {
+                    bool below = false, above = false;
+                    for (int j = 0; j < secs.Count; j++)
+                        if (Attached[j]) { if (j <= i) below = true; else above = true; }
+                    if (below && above) return true;
+                    int next = i + 1;
+                    return a.IgniteNext && next < secs.Count && Attached[next] && secs[next].HasEngine && !Armed[next] && !Flipped[next];
+                }
+                case StageActionType.JettisonFairing:
+                    return Attached[i];
+                case StageActionType.Undock:
+                    for (int j = 0; j < secs.Count; j++)
+                        if (Attached[j] && Flipped[j]) return true;
+                    return false;
+                default:
+                    return Attached[i] && !ChuteDeployed[i] && !ChuteArmed[i];
+            }
+        }
+
+        public bool HasNextStage => NextApplicable(NextStage) < Design.Sequence.Count;
+
         /// <summary>
         /// Δv оставшихся ступеней: сначала взведённые двигатели с топливом и запусками (заработают по газу,
         /// даже если сейчас заглушены — пассивный участок перед посадкой), затем последовательность.
@@ -442,7 +518,7 @@ namespace Kare.Space.Core
         {
             var ready = new bool[Attached.Length];
             for (int i = 0; i < ready.Length; i++)
-                ready[i] = Attached[i] && Armed[i] && Propellant[i] > 0 && (Running[i] || IgnitionsLeft[i] > 0);
+                ready[i] = Attached[i] && Armed[i] && Propellant[i] > 0 && (Running[i] || CanIgnite(i));
             return Design.ComputeStats(Attached, Propellant, NextStage, ready);
         }
 
@@ -450,24 +526,28 @@ namespace Kare.Space.Core
         {
             get
             {
-                if (!HasNextStage) return "—";
-                var a = Design.Sequence[NextStage];
+                int k = NextApplicable(NextStage);
+                if (k >= Design.Sequence.Count) return "—";
+                var a = Design.Sequence[k];
                 var s = Design.Sections[a.Section];
                 switch (a.Type)
                 {
                     case StageActionType.Ignite: return $"Запуск: {s.Engine.Name}";
                     case StageActionType.Separate: return $"Отделение: {s.Name}";
-                    case StageActionType.JettisonFairing: return "Сброс обтекателя";
+                    case StageActionType.JettisonFairing: return s.JettisonWhole ? $"Сброс: {s.Name}" : "Сброс обтекателя";
+                    case StageActionType.Undock: return "Расстыковка";
                     default: return "Парашют";
                 }
             }
         }
 
-        /// <summary>Следующая ступень (пробел). Возвращает отделившиеся обломки — их добавит Universe.</summary>
+        /// <summary>Следующая ступень (пробел). Возвращает отделившиеся борта — их добавит Universe.</summary>
         public List<Vessel> Stage()
         {
             var debris = new List<Vessel>();
-            if (!HasNextStage || !Alive) return debris;
+            if (!Alive) return debris;
+            NextStage = NextApplicable(NextStage);
+            if (NextStage >= Design.Sequence.Count) return debris;
             var a = Design.Sequence[NextStage++];
             var secs = Design.Sections;
             switch (a.Type)
@@ -480,24 +560,36 @@ namespace Kare.Space.Core
                 {
                     var mask = new bool[secs.Count];
                     bool any = false;
-                    for (int i = 0; i <= a.Section; i++)
-                        if (Attached[i]) { mask[i] = true; any = true; }
-                    if (any)
+                    if (secs[a.Section].Kind == SectionKind.Fairing)
                     {
-                        var d = Split(mask, -1.5);
-                        debris.Add(d);
+                        // Переходник (SLA «Аполлона», §6.6): ниже — ступень с грузом. Груз со стыковочным узлом (ЛМ) — не обломок:
+                        // к нему ещё причаливают. Сам переходник раскрывается створками, как обтекатель.
+                        bool port = false;
+                        for (int i = 0; i < a.Section; i++)
+                            if (Attached[i]) { mask[i] = true; any = true; port |= secs[i].DockingPort; }
+                        if (any) debris.Add(Split(mask, AdapterPush, debris: !port));
+                        if (Attached[a.Section])
+                        {
+                            var fm = new bool[secs.Count];
+                            fm[a.Section] = true;
+                            var h = Split(fm, FairingPush);
+                            debris.Add(h);
+                            debris.Add(h.SplitFairing());
+                            h.Name = debris[debris.Count - 1].Name = secs[a.Section].Name;
+                        }
                         Raise($"Отделение: {secs[a.Section].Name}");
                     }
-                    int next = a.Section + 1;
-                    if (a.IgniteNext && next < secs.Count && Attached[next])
+                    else
                     {
-                        if (secs[next].UllageMotors)
+                        for (int i = 0; i <= a.Section; i++)
+                            if (Attached[i]) { mask[i] = true; any = true; }
+                        if (any)
                         {
-                            // Двигатели осадки работают ~3 с — успевает и разделение, и запуск.
-                            SettledTimer = Math.Max(SettledTimer, 3);
+                            debris.Add(Split(mask, StagePush));
+                            Raise($"Отделение: {secs[a.Section].Name}");
                         }
-                        Arm(next);
                     }
+                    if (a.IgniteNext) ArmNext(a.Section + 1);
                     break;
                 }
 
@@ -506,12 +598,37 @@ namespace Kare.Space.Core
                     {
                         var mask = new bool[secs.Count];
                         mask[a.Section] = true;
-                        var h = Split(mask, FairingPush);
-                        debris.Add(h);
-                        debris.Add(h.SplitFairing());
-                        Raise("Сброс головного обтекателя");
+                        if (secs[a.Section].JettisonWhole)
+                        {
+                            // САС уходит целиком на своём РДТТ увода: толчок не от корабля, отдачи нет. Сопла скошены —
+                            // башня уходит вбок и не проходит над кораблём (§6.6).
+                            var d = Split(mask, 0);
+                            d.Velocity += NoseP * LesPush + LocalToWorld(new Vector3d(1, 0, 0)) * LesSide;
+                            d.Name = secs[a.Section].Name;
+                            debris.Add(d);
+                            Raise($"Сброс: {secs[a.Section].Name}");
+                        }
+                        else
+                        {
+                            var h = Split(mask, FairingPush);
+                            debris.Add(h);
+                            debris.Add(h.SplitFairing());
+                            Raise("Сброс головного обтекателя");
+                        }
                     }
                     break;
+
+                case StageActionType.Undock:
+                {
+                    var mask = new bool[secs.Count];
+                    for (int i = 0; i < secs.Count; i++) mask[i] = Attached[i] && Flipped[i];
+                    var d = Split(mask, UndockPush, debris: !a.TransferControl);
+                    d.Unflip();
+                    if (a.TransferControl) ControlTransfer = d;
+                    debris.Add(d);
+                    Raise($"Расстыковка: {d.Name}");
+                    break;
+                }
 
                 case StageActionType.DeployParachute:
                     // Ступень только взводит: раскрытие — по барометру (FlightPhysics.UpdateChutes), как у «Востока».
@@ -528,10 +645,29 @@ namespace Kare.Space.Core
 
         void Arm(int i)
         {
-            if (!Attached[i] || !Design.Sections[i].HasEngine) return;
+            if (!Attached[i] || Flipped[i] || !Design.Sections[i].HasEngine) return;
             Armed[i] = true;
             ignitionLatch[i] = false;
         }
+
+        /// <summary>Взвести новую нижнюю ступень после отделения; двигатели осадки работают ~3 с — успевает и разделение, и запуск.</summary>
+        void ArmNext(int next)
+        {
+            var secs = Design.Sections;
+            if (next >= secs.Count || !Attached[next] || Flipped[next]) return;
+            if (secs[next].UllageMotors) SettledTimer = Math.Max(SettledTimer, 3);
+            Arm(next);
+        }
+
+        /// <summary>Толчок пиропушителей при разделении ступеней, м/с (§5): обломок уходит назад, с отдачей.</summary>
+        const double StagePush = 1.5;
+        /// <summary>
+        /// Толчки стыковочной программы, м/с (§6.6): ступень с ЛМ от переходника и расстыковка — пружинами, медленно,
+        /// чтобы КСМ успел развернуться и причалить. Пара: DockingAutopilot.MaxApproach — сближение не быстрее.
+        /// </summary>
+        const double AdapterPush = 0.3, UndockPush = 0.3;
+        /// <summary>САС «Аполлона»: РДТТ увода даёт ~30 м/с вперёд, скос сопел — ~8 м/с вбок (§6.6).</summary>
+        const double LesPush = 30, LesSide = 8;
 
         /// <summary>
         /// Сброс обтекателя (§5): толчок вперёд, м/с. Он меньше, чем ракета набирает за долю секунды, поэтому
@@ -569,6 +705,8 @@ namespace Kare.Space.Core
             };
             Array.Copy(Attached, t.Attached, Attached.Length);
             Array.Copy(Propellant, t.Propellant, Propellant.Length);
+            Array.Copy(Order, t.Order, Order.Length);
+            Array.Copy(Flipped, t.Flipped, Flipped.Length);
             FairingHalf = 1;
             t.FairingHalf = -1;
             Name = t.Name = "Створка обтекателя";
@@ -586,14 +724,16 @@ namespace Kare.Space.Core
         /// Position борта — его центр масс, а вид рисует секции вокруг своего ЦМ. Поэтому обе части после
         /// разделения встают каждая на свой новый ЦМ, а не на общий старый — иначе меши налезали друг на друга
         /// (первая ступень оказывалась внутри второй, 01.10.2026). Толчок — с отдачей: импульс сохраняется.
+        /// Направление толчка — от оставшейся части: нижнюю назад, верхнюю (обтекатель, отстыкованный модуль) вперёд.
+        /// debris = false — отделяется управляемый борт (ЛМ, ступень с ЛМ): программа и взведённость сохраняются.
         /// </summary>
-        Vessel Split(bool[] mask, double dv)
+        Vessel Split(bool[] mask, double dv, bool debris = true)
         {
             MassProperties(out _, out double com0, out _, out _);
             var base0 = (double[])layoutBuf.Clone();
             var d = new Vessel(Design, $"{Name} — обломок")
             {
-                IsDebris = true,
+                IsDebris = debris,
                 Body = Body,
                 Position = Position,
                 Velocity = Velocity,
@@ -603,11 +743,14 @@ namespace Kare.Space.Core
                 AnchorBodyFixed = AnchorBodyFixed,
                 AttitudeBodyFixed = AttitudeBodyFixed,
                 Throttle = 0,
-                Sas = SasMode.Off,
+                Sas = debris ? SasMode.Off : SasMode.Stability,
                 LaunchTime = LaunchTime,
             };
+            Array.Copy(Order, d.Order, Order.Length);
+            Array.Copy(Flipped, d.Flipped, Flipped.Length);
             for (int i = 0; i < mask.Length; i++)
             {
+                d.Armed[i] = !debris && mask[i] && Armed[i];
                 d.Attached[i] = mask[i];
                 d.Propellant[i] = Propellant[i];
                 d.IgnitionsLeft[i] = IgnitionsLeft[i];
@@ -621,16 +764,20 @@ namespace Kare.Space.Core
                     Running[i] = false;
                 }
             }
-            d.NextStage = Design.Sequence.Count;
-            for (int i = 0; i < mask.Length; i++)
-                if (mask[i]) { d.Name = $"{Design.Sections[i].Name} (обломок)"; break; }
+            d.NextStage = debris ? Design.Sequence.Count : NextStage;
+            if (debris)
+            {
+                for (int i = 0; i < mask.Length; i++)
+                    if (mask[i]) { d.Name = $"{Design.Sections[i].Name} (обломок)"; break; }
+            }
+            else d.Name = d.CraftName();
             // Сдвиг ЦМ частей в связанных осях. Раскладка каждой части — жёсткий сдвиг старой (Layout считает
             // от нижней присоединённой секции), поэтому низ части в старых координатах — base0[нижней секции].
             var w = AngularVelocity;
-            void Recenter(Vessel p)
+            double Recenter(Vessel p)
             {
-                int low = Array.IndexOf(p.Attached, true);
-                if (low < 0) return;
+                int low = p.BottomSection();
+                if (low < 0) return 0;
                 p.MassProperties(out _, out double com, out _, out _);
                 var r = new Vector3d(0, base0[low] + com - com0, 0);
                 p.Position += LocalToWorld(r);
@@ -639,15 +786,102 @@ namespace Kare.Space.Core
                 if (p.IsLanded) p.AnchorBodyFixed += (p.AttitudeBodyFixed * r).SwapYZ;
                 // Точка жёсткого тела на плече r летит со скоростью v + ω × r.
                 p.Velocity += LocalToWorld(Vector3d.Cross(w, r));
+                return r.y;
             }
-            Recenter(d);
-            Recenter(this);
+            double rd = Recenter(d), rv = Recenter(this);
             d.MassProperties(out double md, out _, out _, out _);
             MassProperties(out double mv, out _, out _, out _);
+            if (rd < rv) dv = -dv;
             d.Velocity += NoseP * dv;
             if (mv > 0) Velocity -= NoseP * (dv * md / mv);
             SasHoldValid = false;
             return d;
+        }
+
+        /// <summary>Имя отделившегося управляемого борта: по обитаемому модулю (до двоеточия), с ведущей ступенью снизу.</summary>
+        string CraftName()
+        {
+            var secs = Design.Sections;
+            string core = null;
+            foreach (int i in Order)
+            {
+                if (!Attached[i] || (secs[i].Crew <= 0 && !secs[i].DockingPort)) continue;
+                core = secs[i].Name;
+                if (secs[i].Crew > 0) break;
+            }
+            if (core == null) return secs[TopSection()].Name;
+            int c = core.IndexOf(':');
+            if (c > 0) core = core.Substring(0, c);
+            string low = secs[BottomSection()].Name;
+            return low.StartsWith(core) ? core : $"{low} + {core}";
+        }
+
+        // ---------------------------------------------------------------- стыковка (§6.6)
+
+        /// <summary>
+        /// Развернуть борт после расстыковки: секции, что стояли в связке перевёрнутыми, снова идут снизу вверх
+        /// в своём порядке, а нос смотрит туда, где был их верх. В пространстве ничего не сдвигается: тот же ЦМ,
+        /// те же секции — меняются только связанные оси (поворот на 180° вокруг X).
+        /// </summary>
+        void Unflip()
+        {
+            var at = new List<int>();
+            for (int k = 0; k < Order.Length; k++)
+                if (Attached[Order[k]]) at.Add(k);
+            var ids = new int[at.Count];
+            for (int m = 0; m < at.Count; m++) ids[m] = Order[at[m]];
+            for (int m = 0; m < at.Count; m++)
+            {
+                int i = ids[at.Count - 1 - m];
+                Order[at[m]] = i;
+                Flipped[i] = !Flipped[i];
+            }
+            var flip = QuaternionD.AngleAxis(Math.PI, new Vector3d(1, 0, 0));
+            Attitude = Attitude * flip;
+            AttitudeBodyFixed = AttitudeBodyFixed * flip;
+            // Угловая скорость в новых осях: поворот на π вокруг X меняет знак Y и Z.
+            AngularVelocity = new Vector3d(AngularVelocity.x, -AngularVelocity.y, -AngularVelocity.z);
+            SasHoldValid = false;
+        }
+
+        /// <summary>
+        /// Причалить борт t (§6.6): его секции встают сверху носом к носу — в обратном порядке и перевёрнутыми.
+        /// Импульс сохраняется; ось связки — ось этого борта, t подтягивается на неё (захват ≤ 1 м, DockCaptureRange).
+        /// Борт t после этого лишний — его убирает Universe.
+        /// </summary>
+        public void Dock(Vessel t)
+        {
+            MassProperties(out double m0, out double com0, out _, out _);
+            t.MassProperties(out double mt, out _, out _, out _);
+            var bottom = Position - NoseP * com0;
+            if (m0 + mt > 0) Velocity = (Velocity * m0 + t.Velocity * mt) / (m0 + mt);
+            var order = new List<int>();
+            foreach (int i in Order)
+                if (Attached[i]) order.Add(i);
+            for (int k = t.Order.Length - 1; k >= 0; k--)
+            {
+                int i = t.Order[k];
+                if (!t.Attached[i] || Attached[i]) continue;
+                order.Add(i);
+                Attached[i] = true;
+                Flipped[i] = !t.Flipped[i];
+                Armed[i] = Running[i] = ignitionLatch[i] = false;
+                Propellant[i] = t.Propellant[i];
+                IgnitionsLeft[i] = t.IgnitionsLeft[i];
+                ChuteDeployed[i] = t.ChuteDeployed[i];
+                ChuteFailed[i] = t.ChuteFailed[i];
+                ChuteArmed[i] = t.ChuteArmed[i];
+                ChuteOpenTime[i] = t.ChuteOpenTime[i];
+            }
+            foreach (int i in Order)
+                if (!order.Contains(i)) order.Add(i);
+            Order = order.ToArray();
+            NextStage = NextApplicable(Math.Min(NextStage, t.NextStage));
+            IsDebris = false;
+            MassProperties(out _, out double com1, out _, out _);
+            Position = bottom + NoseP * com1;
+            SasHoldValid = false;
+            Raise($"Стыковка: {t.Name}");
         }
 
         // ---------------------------------------------------------------- оси

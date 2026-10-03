@@ -18,6 +18,8 @@ namespace Kare.Space.Game
         public const double NodeDvRate = 2, NodeAccel = 1.5, NodeFine = 0.1;
         /// <summary>Сдвиг узла [ ] — доля периода в секунду (у гиперболы — от NodePlanner.AheadTime).</summary>
         public const double NodeTimeRate = 0.02;
+        /// <summary>Орбита взлёта к цели стыковки, м: у LM ~18 км × 83 км под КСМ на 110 км. Пара: DockingAutopilot.MinClearance 15 км.</summary>
+        const double LmAscentAltitude = 30000;
 
         NodeAnchor anchor;
         float nodeHeld;
@@ -72,7 +74,38 @@ namespace Kare.Space.Game
                 if (!v.Body.HasAtmosphere && !v.IsLanded)
                     u.Landing = u.Landing == null ? new LandingAutopilot(v.Body) : null;
                 else if (u.Ascent == null)
+                {
                     u.Ascent = new AscentAutopilot { TargetAltitude = 200000 };
+                    // Взлёт с безатмосферного тела при цели стыковки (LM к КСМ, §6.6) — в её плоскость и ниже неё:
+                    // догоняющий на нижней орбите сам подходит к цели по фазе.
+                    var dock = v.IsLanded && !v.Body.HasAtmosphere ? u.NearestDockTarget() : null;
+                    if (dock != null && dock.Body == v.Body)
+                    {
+                        u.Ascent.AimAtPlane(v, dock, u.Time);
+                        u.Ascent.TargetAltitude = LmAscentAltitude;
+                    }
+                }
+            }
+            // Y — автопилот «к Луне» (§6.4, §6.11): опорная орбита, разгон, перестроение «Аполлона», коррекция, LOI. Повтор — снять.
+            if (Input.GetKeyDown(KeyCode.Y))
+            {
+                if (u.Lunar != null) { u.Lunar = null; FlightControl.Cutoff(v); u.Post("Автопилот к Луне снят"); }
+                else
+                {
+                    var moon = u.System.Get("moon");
+                    if (moon != null) { u.Lunar = new LunarAutopilot(u, moon); u.Post("Автопилот к Луне включён"); }
+                }
+            }
+            // V — сближение и стыковка с ближайшим совместимым бортом (§6.6): Ламберт, торможение, причаливание на РСУ.
+            if (Input.GetKeyDown(KeyCode.V))
+            {
+                if (u.Docking != null) { u.Docking = null; FlightControl.Cutoff(v); u.Post("Стыковка прервана"); }
+                else
+                {
+                    var t = u.NearestDockTarget();
+                    if (t == null) u.Post("Нет борта для стыковки");
+                    else { u.Docking = new DockingAutopilot(u, t); u.Post($"Стыковка: цель {t.Name}"); }
+                }
             }
         }
 
@@ -149,6 +182,8 @@ namespace Kare.Space.Game
             u.Ascent = null;
             u.NodePilot = null;
             u.Landing = null;
+            u.Docking = null;
+            u.Lunar = null;
         }
     }
 }

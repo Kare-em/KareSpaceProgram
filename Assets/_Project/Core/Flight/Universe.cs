@@ -19,6 +19,15 @@ namespace Kare.Space.Core
         public const double PassiveRange = 25000;
         /// <summary>За сколько секунд до запуска манёвра ускорение сбрасывается само.</summary>
         public const double NodeWarpMargin = 30;
+        /// <summary>
+        /// Автоускорение (§6.11): сколько РЕАЛЬНЫХ секунд должно оставаться до ближайшего события (манёвр, смена сферы,
+        /// апоцентр взлёта) на выбранной ступени. Ступень выбирается наибольшей, у которой запас не меньше, — к событию
+        /// ускорение само спускается по лестнице Warps, не перескакивая его за кадр (кадр ≤ 0,1 с, т. е. ≤ 1/40 запаса).
+        /// </summary>
+        public const double AutoWarpLead = 4;
+        /// <summary>Долгий прожиг в вакууме, с, от которого автопилот ускоряет физику до MaxPhysicsWarp: разгон к Луне
+        /// идёт ≈ 5,5 мин, на ×10 — полминуты. Шаг интегратора тот же (см. MaxPhysicsWarp), точность импульса не теряется.</summary>
+        public const double AutoBurnWarpMin = 60;
 
         public readonly SolarSystem System;
         public double Time { get; private set; }
@@ -32,6 +41,17 @@ namespace Kare.Space.Core
         public AscentAutopilot Ascent;
         public NodeAutopilot NodePilot;
         public LandingAutopilot Landing;
+        public DockingAutopilot Docking;
+        public LunarAutopilot Lunar;
+
+        /// <summary>Автопилот сам ведёт ускорение времени (настройка игрока; в тестах ядра по умолчанию выключено —
+        /// там ускорение задаёт сценарий). Ручные «,» и «/» ставят его на паузу до конца работы автопилотов.</summary>
+        public bool AutoWarp;
+        public bool AutoWarpPaused;
+        bool autoDriving;
+        public bool AutopilotActive => Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null;
+        /// <summary>Ускорением сейчас управляет автопилот — для HUD.</summary>
+        public bool AutoWarpDriving => autoDriving;
 
         public readonly List<(double time, string text)> Log = new List<(double, string)>();
         public event Action<string> Message;
@@ -81,6 +101,8 @@ namespace Kare.Space.Core
             Ascent = null;
             NodePilot = null;
             Landing = null;
+            Docking = null;
+            Lunar = null;
             eventValid = false;
         }
 
@@ -101,6 +123,14 @@ namespace Kare.Space.Core
                 Vessels.Add(d);
             }
             eventValid = false;
+            // Расстыковка с переходом экипажа (§6.6): управление — отошедшему борту (ЛМ уходит на посадку).
+            if (Active.ControlTransfer != null)
+            {
+                var c = Active.ControlTransfer;
+                Active.ControlTransfer = null;
+                SetActive(c);
+                Post($"Управление: {c.Name}");
+            }
         }
 
         // ---------------------------------------------------------------- ускорение времени
@@ -129,7 +159,13 @@ namespace Kare.Space.Core
         {
             if (v == null || !v.Alive) return null;
             if (v.AnyEngineRunning) return "работает двигатель";
-            if (v.RcsForward > 0) return "работает РСУ";
+            if (v.RcsForward > 0 || v.RcsTranslate.sqrMagnitude > 0) return "работает РСУ";
+            if (v == Active && (Docking != null && Docking.Close || Lunar != null && Lunar.Close)) return "идёт стыковка";
+            // Без узла автопилот стыковки ещё не спланировал перелёт, а планирует он только в физике: на рельсах
+            // (тест apollo11, ×6) он не вызывался ни разу — двое суток ожидания впустую.
+            if (v == Active && Docking != null && Docking.Phase == DockingAutopilot.PhaseType.Plan) return "планируется сближение";
+            // Перестроение «Аполлона» решается в Update (физика): на автоускорении до сферы Луны оно бы не наступило.
+            if (v == Active && Lunar != null && Lunar.NeedsPhysics) return "перестроение";
             // Автопилот работает только в полной физике; на рельсах допустим лишь пассивный участок.
             if (v == Active && Ascent != null && Ascent.Phase != AscentAutopilot.PhaseType.Coast) return "идёт выведение";
             if (v == Active && Landing != null && Landing.Phase != LandingAutopilot.PhaseType.Coast) return "идёт посадка";
@@ -145,6 +181,7 @@ namespace Kare.Space.Core
         {
             realDt = Math.Min(realDt, 0.1);
             if (realDt <= 0) return;
+            DriveWarp();
             double warp = Warps[WarpIndex];
             bool rails = WarpIndex > 0 && Active != null && RailsBlocker(Active) == null;
             if (rails && WarpLimitTime() <= Time + 1)
@@ -152,14 +189,16 @@ namespace Kare.Space.Core
                 SetWarp(0);
                 warp = 1;
                 rails = false;
-                Post("Ускорение сброшено: подходит время манёвра");
+                if (!autoDriving) Post("Ускорение сброшено: подходит время манёвра");
             }
 
-            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && (Ascent != null || NodePilot != null || Landing != null))
+            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && (Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null))
             {
                 Ascent = null;
                 NodePilot = null;
                 Landing = null;
+                Docking = null;
+                Lunar = null;
                 Post("Автопилот отключён: ручное управление");
             }
 
@@ -174,8 +213,11 @@ namespace Kare.Space.Core
                 EffectiveWarp = Math.Min(warp, MaxPhysicsWarp);
                 RailsActive = false;
                 AdvancePhysics(realDt * EffectiveWarp);
+                CheckDocking();
             }
             System.Update(Time);
+            // Планирование перелёта — раз в кадр и на рельсах тоже: вход в сферу Луны случается под ускорением.
+            if (Lunar != null && Lunar.Tick(this)) Lunar = null;
             Vessels.RemoveAll(v => !v.Alive && v != Active);
         }
 
@@ -231,6 +273,16 @@ namespace Kare.Space.Core
                 req = Landing.Update(Active, Time, h);
                 if (req == AutopilotRequest.Finished) Landing = null;
             }
+            else if (Docking != null)
+            {
+                req = Docking.Update(Active, Time, h);
+                if (req == AutopilotRequest.Finished) Docking = null;
+            }
+            else if (Lunar != null)
+            {
+                req = Lunar.Update(Active, Time, h);
+                if (req == AutopilotRequest.Finished) Lunar = null;
+            }
             if (req == AutopilotRequest.Stage) Stage();
         }
 
@@ -265,6 +317,8 @@ namespace Kare.Space.Core
             Ascent = null;
             NodePilot = null;
             Landing = null;
+            Docking = null;
+            Lunar = null;
             v.Node = null;
             // Над дневной стороной, чуть к утреннему терминатору — как FlightDebug.Reentry: и свет есть, и рельеф с тенями.
             var s = (System.Sun.Position - body.Position).normalized;
@@ -286,12 +340,132 @@ namespace Kare.Space.Core
             Post($"Чит: {body.Name}, {altitude / 1000:0} км{(orbital ? ", круговая орбита" : "")}");
         }
 
+        // ---------------------------------------------------------------- стыковка
+
+        /// <summary>
+        /// Захват (§6.6): узлы ближе DockCaptureRange, сближение не быстрее DockMaxSpeed, оси навстречу с точностью
+        /// DockMaxAngleDeg. Пара: DockingAutopilot.FinalSpeed &lt; DockMaxSpeed, DockingAutopilot.AlignAngleDeg &lt; DockMaxAngleDeg.
+        /// </summary>
+        public const double DockCaptureRange = 1, DockMaxSpeed = 0.5, DockMaxAngleDeg = 10;
+
+        void CheckDocking()
+        {
+            var a = Active;
+            if (a == null || !a.Alive || a.IsLanded || !a.HasFreePort) return;
+            var pa = a.Position + a.NoseP * a.PortHeight();
+            foreach (var t in Vessels)
+            {
+                if (!CanDock(a, t)) continue;
+                var pt = t.Position + t.NoseP * t.PortHeight();
+                if (Vector3d.Distance(pa, pt) > DockCaptureRange) continue;
+                if ((a.Velocity - t.Velocity).magnitude > DockMaxSpeed) continue;
+                if (Vector3d.Angle(a.NoseP, -t.NoseP) > DockMaxAngleDeg * Constants.Deg2Rad) continue;
+                // Основа связки — борт со спускаемым аппаратом: после причаливания ЛМ к «Колумбии» управлять дальше КСМ.
+                var host = a.HasCapsule() || !t.HasCapsule() ? a : t;
+                var guest = host == a ? t : a;
+                LeaveRails(a);
+                LeaveRails(t);
+                if (host != Active) SetActive(host);
+                host.Dock(guest);
+                guest.Event -= OnVesselEvent;
+                Vessels.Remove(guest);
+                Docking = null;
+                eventValid = false;
+                return;
+            }
+        }
+
+        /// <summary>Можно ли причалить a к t: один проект (секции общие), разные секции, оба узла свободны, оба в полёте у одного тела.</summary>
+        public static bool CanDock(Vessel a, Vessel t)
+        {
+            if (a == null || t == null || a == t || !a.Alive || !t.Alive || a.IsLanded || t.IsLanded) return false;
+            if (a.Body != t.Body || a.Design != t.Design || !a.HasFreePort || !t.HasFreePort) return false;
+            for (int i = 0; i < a.Attached.Length; i++)
+                if (a.Attached[i] && t.Attached[i]) return false;
+            return true;
+        }
+
+        /// <summary>Ближайший борт, к которому можно причалить активному (клавиша V).</summary>
+        public Vessel NearestDockTarget()
+        {
+            Vessel best = null;
+            double bd = double.PositiveInfinity;
+            foreach (var t in Vessels)
+            {
+                if (!CanDock(Active, t)) continue;
+                double d = Vector3d.Distance(t.Position, Active.Position);
+                if (d < bd) { bd = d; best = t; }
+            }
+            return best;
+        }
+
+        /// <summary>Состояние борта на момент time: внутри шага физики неактивный борт на рельсах ещё не сдвинут.</summary>
+        public static void StateOf(Vessel v, double time, out Vector3d r, out Vector3d vel)
+        {
+            if (v.OnRails && !v.IsLanded && v.Orbit != null) v.Orbit.GetState(time, out r, out vel);
+            else
+            {
+                r = v.Position;
+                vel = v.Velocity;
+            }
+        }
+
         void LeaveRails(Vessel v)
         {
             if (!v.OnRails) return;
             v.OnRails = false;
             // Вращение на рельсах заморожено: после ускорения корабль не должен кувыркаться.
             v.AngularVelocity = Vector3d.zero;
+        }
+
+        /// <summary>
+        /// Автоускорение (§6.11): пока работает автопилот, ступень Warps выбирает он — на рельсах наибольшая, у которой до
+        /// ближайшего события (WarpLimitTime, смена сферы влияния, вход в атмосферу) остаётся AutoWarpLead реальных секунд;
+        /// в физике — ×1, а на долгом прожиге в вакууме ×MaxPhysicsWarp. Когда автопилоты закончились, ускорение — в ×1:
+        /// иначе после выхода на орбиту Луны время продолжало бы нестись на последней ступени.
+        /// </summary>
+        void DriveWarp()
+        {
+            bool active = AutopilotActive && Active != null && Active.Alive;
+            if (!active)
+            {
+                if (autoDriving) SetWarp(0);
+                autoDriving = false;
+                AutoWarpPaused = false;
+                return;
+            }
+            autoDriving = AutoWarp && !AutoWarpPaused;
+            if (autoDriving) SetWarp(AutoWarpIndex());
+        }
+
+        int AutoWarpIndex()
+        {
+            var v = Active;
+            if (RailsBlocker(v) != null)
+            {
+                bool air = v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop;
+                if (v.AnyEngineRunning && v.Node != null && !air && FlightControl.BurnTime(v, v.Node.Remaining.magnitude) > AutoBurnWarpMin)
+                    return Array.IndexOf(Warps, MaxPhysicsWarp);
+                return 0;
+            }
+            double horizon = Math.Min(WarpLimitTime(), NextEventTime()) - Time;
+            int i = 0;
+            while (i + 1 < Warps.Length && Warps[i + 1] * AutoWarpLead <= horizon) i++;
+            return i;
+        }
+
+        /// <summary>Ближайшая смена участка траектории активного борта (тот же кеш, что у AdvanceRails).</summary>
+        double NextEventTime()
+        {
+            var a = Active;
+            if (a.IsLanded) return double.PositiveInfinity;
+            if (!eventValid)
+            {
+                var orbit = a.OnRails ? a.Orbit : KeplerOrbit.FromState(a.Position, a.Velocity, a.Body.Mu, Time);
+                nextEvent = PatchedConics.FindNext(orbit, a.Body, Time, PatchedConics.DefaultHorizon(orbit));
+                eventValid = true;
+            }
+            return nextEvent.Time;
         }
 
         /// <summary>Момент, раньше которого ускорение надо прервать (манёвр, довыведение).</summary>

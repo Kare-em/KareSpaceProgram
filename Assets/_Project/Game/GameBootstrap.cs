@@ -63,6 +63,21 @@ namespace Kare.Space.Game
         [System.Serializable]
         public struct CraftMesh { public SectionModel Model; public Mesh Mesh; }
 
+        [Header("Стартовые комплексы (Tools/blender/launch_pads.py), GDD §7")]
+        [Tooltip("Стальные модели столов и башен Pad_*; бетон строит LaunchPadView.")]
+        public PadMesh[] PadMeshes;
+
+        [System.Serializable]
+        public struct PadMesh { public string Name; public Mesh Mesh; }
+
+        /// <summary>Меш комплекса по имени FBX (Pad_Atlas…); null — модели нет, комплекс рисуется одним бетоном.</summary>
+        public Mesh PadMeshFor(string name)
+        {
+            if (PadMeshes == null) return null;
+            foreach (var p in PadMeshes) if (p.Name == name) return p.Mesh;
+            return null;
+        }
+
         public Mesh CraftMeshFor(SectionModel model)
         {
             if (CraftMeshes == null || model == SectionModel.None) return null;
@@ -108,7 +123,7 @@ namespace Kare.Space.Game
             gameObject.AddComponent<PauseMenu>();
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)
-                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh);
+                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh, PadMeshFor);
         }
 
         void OnDestroy()

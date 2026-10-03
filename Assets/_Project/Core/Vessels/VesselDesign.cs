@@ -41,6 +41,8 @@ namespace Kare.Space.Core
         // Корпуса ступеней (Tools/blender/hulls_models.py): сопла в модели, начало — днище секции.
         Redstone, JunoStage1, JunoCluster11, JunoCluster3, AtlasBooster, AtlasSustainer, AtlasSustainerAgena, AtlasSustainerCentaur,
         Agena, Centaur, TitanStage1, TitanStage2, SaturnSIC, SaturnSII, SaturnSIVB, ProtonStage1, ProtonStage2, ProtonStage3, BlokD,
+        // Сбрасываемые оболочки «Аполлона» (Tools/blender/apollo_fairings.py): САС целиком и половина переходника SLA.
+        ApolloLES, ApolloSLA,
     }
 
     public enum SectionKind
@@ -91,6 +93,10 @@ namespace Kare.Space.Core
         /// Самоходное шасси («Луноход»): став нижней секцией на грунте, ездит от W/S и A/D (FlightPhysics.StepLanded).
         /// </summary>
         public bool Rover;
+        /// <summary>Стыковочный узел на верхнем торце секции (§6.6): к нему причаливает другой борт носом к носу.</summary>
+        public bool DockingPort;
+        /// <summary>Только обтекатель: уходит целиком на своём двигателе увода, без створок (САС «Аполлона»).</summary>
+        public bool JettisonWhole;
 
         public double Mass => DryMass + Propellant;
         public double Radius => Diameter * 0.5;
@@ -104,6 +110,8 @@ namespace Kare.Space.Core
         Separate,
         JettisonFairing,
         DeployParachute,
+        /// <summary>Отстыковать пристыкованный (перевёрнутый) модуль, §6.6.</summary>
+        Undock,
     }
 
     public struct StageAction
@@ -112,12 +120,15 @@ namespace Kare.Space.Core
         public int Section;
         /// <summary>Только Separate: сразу запустить двигатели новой нижней ступени (с осадкой).</summary>
         public bool IgniteNext;
+        /// <summary>Только Undock: экипаж уходит в отстыкованный модуль — он становится активным бортом (ЛМ «Аполлона»).</summary>
+        public bool TransferControl;
 
-        public StageAction(StageActionType type, int section, bool igniteNext = false)
+        public StageAction(StageActionType type, int section, bool igniteNext = false, bool transferControl = false)
         {
             Type = type;
             Section = section;
             IgniteNext = igniteNext;
+            TransferControl = transferControl;
         }
     }
 

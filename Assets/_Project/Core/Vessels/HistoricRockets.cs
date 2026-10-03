@@ -333,46 +333,83 @@ namespace Kare.Space.Core
         {
             Name = "Служебный модуль", Kind = SectionKind.Stage, DryMass = 6110, Propellant = 18400,
             Engine = new EngineDef { Name = "SPS", ThrustVac = 91.2e3, ThrustSL = 50e3, IspVac = 314, GimbalDeg = 6, Ignitions = 36 },
-            EngineCount = 1, Length = 7.5, Diameter = 3.9, RcsTorque = 4e3, MaxHeatFlux = 2e5, Model = SectionModel.ApolloSM,
+            // Длина — только корпус (3,9 м + стык). Сопло SPS (ещё ~3 м) висит ниже, внутри переходника SLA, как у
+            // настоящего «Аполлона»; при длине 7,5 м с соплом корпус SM висел над SLA на 3,5 м. Пара: модель Apollo_SM
+            // (начало сверху, корпус y −3,9..0,08) и SLA 8,5 м − LM 6,0 м = 2,5 м под сопло.
+            EngineCount = 1, Length = 4.0, Diameter = 3.9, RcsTorque = 4e3, MaxHeatFlux = 2e5, Model = SectionModel.ApolloSM,
         };
 
         static SectionDef ApolloCM() => new SectionDef
         {
             Name = "Командный модуль", Kind = SectionKind.Capsule, DryMass = 5560, Length = 3.2, Diameter = 3.9,
             RcsTorque = 2e3, ParachuteArea = 1520, DragScale = 1.3, MaxHeatFlux = 8e6, Crew = 3, Model = SectionModel.ApolloCM,
+            DockingPort = true,
         };
 
-        /// <summary>«Сатурн-5» «Аполлон-8» (21.12.1968): первый облёт Луны с экипажем, 10 витков, возврат.</summary>
+        /// <summary>
+        /// Система аварийного спасения: башня с РДТТ и защитный колпак КМ (BPC). Обтекатель над КМ (encloses 1) —
+        /// уходит целиком после запуска S-II (§6.6). Начало модели — низ КМ, высота 13,1 м (apollo_fairings.py).
+        /// </summary>
+        static SectionDef ApolloLES()
+        {
+            var f = Fairing(1, 13.1, 3.96, 4170);
+            f.Name = "САС";
+            f.JettisonWhole = true;
+            f.Model = SectionModel.ApolloLES;
+            return f;
+        }
+
+        /// <summary>
+        /// Переходник SLA: четыре панели вокруг ЛМ между S-IVB и СМ, 8,5 м, низ 6,6 м → верх 3,9 м. Раскрывается
+        /// при отделении КСМ (Separate по самому переходнику — см. Vessel.Stage).
+        /// </summary>
+        static SectionDef ApolloSLA(int encloses)
+        {
+            var f = Fairing(encloses, 8.5, 6.6, 1800);
+            f.Name = "Переходник SLA";
+            f.Model = SectionModel.ApolloSLA;
+            return f;
+        }
+
+        /// <summary>
+        /// «Сатурн-5» «Аполлон-8» (21.12.1968): первый облёт Луны с экипажем, 10 витков, возврат. Вместо ЛМ —
+        /// макет LTA-B 9 т: остаётся на S-IVB, КСМ уходит от переходника и сам тормозит у Луны.
+        /// </summary>
         public static VesselDesign SaturnApollo8()
         {
             var d = new VesselDesign { Name = "Сатурн-5 «Аполлон-8»" };
             SaturnV(d);
+            d.Sections.Add(new SectionDef
+            {
+                Name = "Макет LTA-B", Kind = SectionKind.Payload, DryMass = 9026, Length = 5.5, Diameter = 4.2, MaxHeatFlux = 2e5,
+            });
+            d.Sections.Add(ApolloSLA(1));
             d.Sections.Add(ApolloSM());
             d.Sections.Add(ApolloCM());
+            d.Sections.Add(ApolloLES());
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 0));
             d.Sequence.Add(new StageAction(StageActionType.Separate, 0, igniteNext: true));
+            d.Sequence.Add(new StageAction(StageActionType.JettisonFairing, 7));
             d.Sequence.Add(new StageAction(StageActionType.Separate, 1, igniteNext: true));
-            // Отделение S-IVB взводит SPS: тормозной у Луны и обратный разгон — без лишнего шага.
-            d.Sequence.Add(new StageAction(StageActionType.Separate, 2, igniteNext: true));
-            d.Sequence.Add(new StageAction(StageActionType.Separate, 3));
-            d.Sequence.Add(new StageAction(StageActionType.DeployParachute, 4));
+            // Отделение КСМ от переходника взводит SPS: тормозной у Луны и обратный разгон — без лишнего шага.
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 4, igniteNext: true));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 5));
+            d.Sequence.Add(new StageAction(StageActionType.DeployParachute, 6));
             return d;
         }
 
         /// <summary>
-        /// «Сатурн-5» «Аполлон-11» (16.07.1969). Стыковка не моделируется: пакет — стопка, поэтому лунный модуль
-        /// стоит над командным, а КСМ уходит вместе с отделением («Колумбия» остаётся на орбите обломком).
-        /// Возврат на Землю — за кадром миссии: цель — посадка и взлёт с Луны.
+        /// «Сатурн-5» «Аполлон-11» (16.07.1969) со стыковочной программой (§6.6): ЛМ едет под переходником SLA на S-IVB.
+        /// После отлёта к Луне КСМ отходит от переходника, разворачивается и причаливает к ЛМ (клавиша V), ЛМ
+        /// вытаскивается с S-IVB. У Луны «Игл» отстыковывается с экипажем, садится, взлетает и причаливает к «Колумбии».
         /// </summary>
         public static VesselDesign SaturnApollo11()
         {
             var d = new VesselDesign { Name = "Сатурн-5 «Аполлон-11»" };
             SaturnV(d);
-            d.Sections.Add(ApolloSM());
-            d.Sections.Add(ApolloCM());
             d.Sections.Add(new SectionDef
             {
-                Name = "LM / посадочная ступень", Kind = SectionKind.Stage, DryMass = 2034, Propellant = 8248,
+                Name = "LM «Игл»: посадочная ступень", Kind = SectionKind.Stage, DryMass = 2034, Propellant = 8248,
                 Engine = new EngineDef
                 {
                     Name = "DPS", ThrustVac = 45.04e3, ThrustSL = 30e3, IspVac = 311, MinThrottle = 0.1, GimbalDeg = 6,
@@ -383,20 +420,32 @@ namespace Kare.Space.Core
             });
             d.Sections.Add(new SectionDef
             {
-                Name = "LM «Игл» / взлётная ступень", Kind = SectionKind.Stage, DryMass = 2445, Propellant = 2353,
-                Engine = new EngineDef { Name = "APS", ThrustVac = 15.6e3, ThrustSL = 10e3, IspVac = 311, Ignitions = 2 },
+                Name = "LM «Игл»: взлётная ступень", Kind = SectionKind.Stage, DryMass = 2445, Propellant = 2353,
+                // APS рассчитан на 35 запусков: взлёт, довыведение и импульсы сближения с КСМ (§6.6).
+                Engine = new EngineDef { Name = "APS", ThrustVac = 15.6e3, ThrustSL = 10e3, IspVac = 311, Ignitions = 35 },
                 EngineCount = 1, Length = 2.8, Diameter = 4.0, RcsTorque = 1.5e3, MaxHeatFlux = 2e5, Crew = 2,
-                Model = SectionModel.LMAscent,
+                DockingPort = true, Model = SectionModel.LMAscent,
             });
-            int fairing = d.Sections.Count;
-            d.Sections.Add(Fairing(2, 8.5, 6.6, 1800));
+            d.Sections.Add(ApolloSLA(2));  // 5
+            d.Sections.Add(ApolloSM());    // 6
+            d.Sections.Add(ApolloCM());    // 7
+            d.Sections.Add(ApolloLES());   // 8
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 0));
             d.Sequence.Add(new StageAction(StageActionType.Separate, 0, igniteNext: true));
-            d.Sequence.Add(new StageAction(StageActionType.JettisonFairing, fairing));
+            d.Sequence.Add(new StageAction(StageActionType.JettisonFairing, 8));
             d.Sequence.Add(new StageAction(StageActionType.Separate, 1, igniteNext: true));
-            d.Sequence.Add(new StageAction(StageActionType.Separate, 2, igniteNext: true));
-            d.Sequence.Add(new StageAction(StageActionType.Separate, 4, igniteNext: true));
+            // Отлёт к Луне — вторым запуском J-2 (S-IVB). Дальше КСМ уходит от переходника; ступень с ЛМ остаётся бортом.
             d.Sequence.Add(new StageAction(StageActionType.Separate, 5, igniteNext: true));
+            // После причаливания к ЛМ: отбросить S-IVB (ЛМ уже в связке перевёрнутым).
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 2));
+            // На окололунной орбите экипаж переходит в ЛМ: он отстыковывается и становится активным.
+            d.Sequence.Add(new StageAction(StageActionType.Undock, 3, transferControl: true));
+            d.Sequence.Add(new StageAction(StageActionType.Ignite, 3));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 3, igniteNext: true));
+            // Взлётная ступень причалила к «Колумбии» — экипаж вернулся, ступень отбрасывается.
+            d.Sequence.Add(new StageAction(StageActionType.Undock, 4));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 6));
+            d.Sequence.Add(new StageAction(StageActionType.DeployParachute, 7));
             return d;
         }
     }

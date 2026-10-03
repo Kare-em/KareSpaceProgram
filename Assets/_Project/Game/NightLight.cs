@@ -22,13 +22,23 @@ namespace Kare.Space.Game
         /// ночное (скотопическое) зрение, которого монитор не даёт. Пара: SkyController.EvMin — при −7 грунт
         /// с альбедо 0,2 выходит ≈ 14 % белого.</summary>
         const float SkyglowLux = 0.02f;
+        /// <summary>Минимум света на ночной стороне вне воздуха, лк (§9.3). Реально там только звёзды, свечение
+        /// атмосферы и огни городов; без Луны кадр на орбите был чёрным (замер 03.10.2026: среднее 9/255, борт и
+        /// Земля неразличимы). 0,04 лк — вдвое слабее свечения неба у земли и в 5 раз слабее полной Луны: ночь остаётся
+        /// ночью, но контур борта и материки читаются. Пара: SkyController.EvMin (−7) — при нём это ≈ 0,1 белого.</summary>
+        const float SpaceGlowLux = 0.04f;
+        /// <summary>Заполняющий свет карты, лк (§9.6). Карта идёт на фиксированной EV 13, где освещённая Солнцем сторона
+        /// ≈ 1 белого, а ночная — ровно чёрная, и орбита уходила в чёрный диск. 8000 лк — около 8 % Солнца (2500 давали средний кадр 1,0 из 255 — диск едва виден): ночная
+        /// сторона читается тёмно-серой, день не меняется. Пара: SkyController.MapEv.</summary>
+        const float MapFillLux = 8000f;
+        const float MapFillTemperature = 8000;
         /// <summary>Цветовые температуры, К. Лунный свет физически чуть краснее солнечного, но ночью глаз видит
         /// мир синеватым (эффект Пуркинье) — это и передаём. Свет Земли с Луны — голубой от океанов и облаков.</summary>
         const float MoonTemperature = 8500, EarthshineTemperature = 9000, SkyglowTemperature = 11000;
         /// <summary>Ниже этого, лк, свет выключен — экономия на теневой карте.</summary>
         const float MinLux = 1e-4f;
 
-        Light reflected, skyglow;
+        Light reflected, skyglow, mapFill;
 
         public static NightLight Create()
         {
@@ -41,6 +51,8 @@ namespace Kare.Space.Game
             reflected = MakeLight("Reflected", LightShadows.Soft);
             skyglow = MakeLight("Skyglow", LightShadows.None);
             skyglow.colorTemperature = SkyglowTemperature;
+            mapFill = MakeLight("Map Fill", LightShadows.None);
+            mapFill.colorTemperature = MapFillTemperature;
         }
 
         Light MakeLight(string name, LightShadows shadows)
@@ -96,7 +108,18 @@ namespace Kare.Space.Game
             var up = v.Position.normalized;
             skyglow.transform.rotation = Quaternion.LookRotation(FloatingOrigin.DirToUnity(-up));
             float air = v.Body.HasAtmosphere && !MapView.IsOpen ? 1 - SkyController.AirWeight(v) : 0;
-            Set(skyglow, SkyglowLux * air);
+            // Вне воздуха — минимум SpaceGlowLux в тени (Солнце закрыто телом), иначе орбитальная ночь чёрная.
+            float space = MapView.IsOpen ? 0 : SpaceGlowLux * (1 - air) * (1 - Mathf.Clamp01((float)SunLight.Visible));
+            Set(skyglow, SkyglowLux * air + space);
+
+            // Карта: свет из камеры чуть сверху-сбоку, чтобы шар не был плоским диском.
+            var cam = Camera.main;
+            if (MapView.IsOpen && cam != null)
+            {
+                mapFill.transform.rotation = cam.transform.rotation * Quaternion.Euler(25, 20, 0);
+                Set(mapFill, MapFillLux);
+            }
+            else Set(mapFill, 0);
         }
 
         static void Set(Light l, float lux)

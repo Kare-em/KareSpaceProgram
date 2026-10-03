@@ -14,7 +14,7 @@ namespace Kare.Space.Game
         public static bool IsOpen { get; private set; }
 
         const float Width = 420, Row = 34;
-        GUIStyle title, label, toggle, button, small;
+        GUIStyle title, label, toggle, button, small, small2;
 
         void OnDestroy() => IsOpen = false; // статик переживает перезагрузку сцены
 
@@ -35,7 +35,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
 
             int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + Row + 2 * (Row + 4) + 10;
+            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -83,9 +83,21 @@ namespace Kare.Space.Game
                 "  Трассировка лучей (тени Солнца, отражения)"); y += Row;
             Quality(x, y, w, ref RenderQuality.Dlss, RenderQuality.DlssSupported, "  DLSS (апскейл NVIDIA)"); y += Row + 20;
 
+            // Яркость (§9.3): общая — компенсация экспозиции, факел — отдельно (ночью его легко пересветить).
+            // Значения в PlayerPrefs, применяют SkyController и VesselView; сохраняем при отпускании кнопки мыши.
+            GUI.Label(new Rect(x, y, w, 24), "Яркость", label); y += 30;
+            BrightnessSettings.Ev = Slider(x, y, w, "Общая", BrightnessSettings.Ev,
+                BrightnessSettings.EvMin, BrightnessSettings.EvMax, "{0:+0.0;-0.0;0} EV"); y += Row + 6;
+            BrightnessSettings.Plume = Slider(x, y, w, "Факел", BrightnessSettings.Plume,
+                BrightnessSettings.PlumeMin, BrightnessSettings.PlumeMax, "×{0:0.00}"); y += Row + 6 + 20;
+            if (Event.current.type == EventType.MouseUp) BrightnessSettings.Save();
+
             // Читы для тестов: телепорт и бесконечное топливо. Миссия при этом не засчитывается честно — это отладка.
             GUI.Label(new Rect(x, y, w, 24), "Читы (для тестов)", label); y += 30;
             boot.InfiniteFuel = GUI.Toggle(new Rect(x, y, w, Row), boot.InfiniteFuel, "  Бесконечное топливо", toggle); y += Row;
+            // Зажигания у исторических двигателей считанные (Vessel.IgnitionsLeft) — тумблер снимает лимит для свободного полёта.
+            Vessel.UnlimitedIgnitions = GUI.Toggle(new Rect(x, y, w, Row), Vessel.UnlimitedIgnitions,
+                "  Бесконечные перезапуски двигателей", toggle); y += Row;
             var u = GameBootstrap.U;
             var earth = u?.System.Get("earth");
             var moon = u?.System.Get("moon");
@@ -96,6 +108,18 @@ namespace Kare.Space.Game
             y += Row + 4;
             if (GUI.Button(new Rect(x, y, hw, Row), "Над Луной 15 км (G — посадка)", small)) Jump(u, moon, 15e3, false);
             if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Марса 300 км", small)) Jump(u, mars, 300e3, true);
+        }
+
+        /// <summary>Высота блока «Яркость»: заголовок, два ползунка, отступ. Пара: код блока в OnGUI.</summary>
+        const float BrightnessBlock = 30 + 2 * (Row + 6) + 20;
+
+        /// <summary>Подпись слева, ползунок посередине, значение справа.</summary>
+        float Slider(float x, float y, float w, string text, float value, float min, float max, string format)
+        {
+            GUI.Label(new Rect(x, y, 90, Row), text, toggle);
+            value = GUI.HorizontalSlider(new Rect(x + 95, y + Row * 0.5f - 6, w - 95 - 80, 20), value, min, max);
+            GUI.Label(new Rect(x + w - 75, y, 75, Row), string.Format(format, value), small2);
+            return value;
         }
 
         void Quality(float x, float y, float w, ref bool value, bool supported, string text)
@@ -129,6 +153,8 @@ namespace Kare.Space.Game
             toggle.normal.textColor = toggle.onNormal.textColor = toggle.hover.textColor = toggle.onHover.textColor = Color.white;
             button = new GUIStyle(GUI.skin.button) { fontSize = 16 };
             small = new GUIStyle(GUI.skin.button) { fontSize = 13, wordWrap = true };
+            small2 = new GUIStyle(GUI.skin.label) { fontSize = 15, alignment = TextAnchor.MiddleRight };
+            small2.normal.textColor = Color.white;
         }
     }
 }

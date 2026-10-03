@@ -34,6 +34,9 @@
   `var u = GameBootstrap.U; u.Teleport(u.System.Get("moon"), 15e3, false);` + `u.Stage()` до нужного набора
   (`u.Active.Attached`), `Throttle = 0`. После stop вернуть `MissionId = "vostok"`. Секции под обтекателем
   (`Vessel.IsEnclosed`) не рисуются — LM на столе не виден, это не баг.
+- **Смена миссии в Play** (03.10.2026): `GameBootstrap.NextMissionId = "apollo11"; SceneManager.LoadScene(0)` —
+  `execute_code` отвечает таймаутом, но сцена грузится; проверять следующим вызовом. Правка `.cs` во время Play →
+  перезагрузка домена → поток NRE из `GameBootstrap` и `no_unity_session`: остановить `manage_editor stop`, очистить консоль.
 
 ## Правка файлов (Windows, Git Bash)
 - Длинный Python в heredoc Bash падает — писать скрипт в файл (скретчпад) и запускать `python файл`.
@@ -85,3 +88,11 @@
 - **Установка Blender MCP перезаписала `.mcp.json`** — `UnityMCP` пропал из файла. Вернул руками, но сессия,
   стартовавшая без него, сервер не видит (`session_connectors_status` — только `blender`). Лечится только
   пользователем: /mcp → одобрить UnityMCP, или новая сессия. После установки любого MCP — сверить `.mcp.json`.
+- **FBX из Blender → Unity: оси (−x, z, −y)** (03.10.2026 замер `mesh.bounds` у Pad_Atlas): модель повёрнута на 180° вокруг Y.
+  Чтобы Blender-x остался востоком, а y — севером в базисе стола, у дочернего узла `localRotation = Euler(0,180,0)`;
+  тогда Blender (x,y,z) → стол (x, z, y). Масштаб по длине (Blender y) = `localScale.z`.
+- **`remove_doubles` склеивает заглушки слотов материалов**: неиспользуемый слот FBX Unity схлопывает, субмеши
+  съезжают. Заглушки каждого слота — в разных местах; проверка после сборки: `slots == [0,1,2,3]` у всех Pad_*.
+- **`get_viewport_screenshot` в Blender отдаёт старый кадр после смены вида через bpy**; надёжно — рендер Workbench
+  из служебной камеры. `hide_set` скрывает только во вьюпорте, для рендера ещё `hide_render = True`.
+- Namespace `execute_blender_code` между вызовами не сохраняется — в каждом вызове `exec(open(...).read())`.

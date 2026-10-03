@@ -110,13 +110,18 @@ namespace Kare.Space.Game
                     // по тёмному кадру уходит к EvMin и выжигает всё вокруг (замер 03.10.2026: «Спутник» на старте,
                     // 3,8 % кадра белые, дым квадратами). Держим экспозицию такой, чтобы ядро было в PlumeNightWhite раз
                     // белого: ярко, но не заливает. Днём предел EV и так выше — max ничего не меняет.
-                    float night = 1 - Mathf.Clamp01((float)SunLight.Visible);
-                    float nightFloor = Mathf.Log(plume / (1.2f * PlumeNightWhite), 2) + comp;
-                    evMin = Mathf.Max(evMin, Mathf.Lerp(evMin, nightFloor, night));
+                    plumeNight = 1 - Mathf.Clamp01((float)SunLight.Visible);
+                    plumeEv = Mathf.Log(plume / (1.2f * PlumeNightWhite), 2) + comp;
                 }
+                // Плавно: вспышка факела за 1,5 с поднимает экспозицию, после выключения она за 3 с возвращается к
+                // автоматической. Гистограмма сама тянет EV вверх (факел яркий — «темнее»), поэтому верх тоже зажат.
+                plumeK = Mathf.MoveTowards(plumeK, plume > 0 ? plumeNight : 0,
+                    Time.unscaledDeltaTime / (plume > 0 && plumeNight > plumeK ? PlumeRampUp : PlumeRampDown));
+                evMin = Mathf.Max(evMin, Mathf.Lerp(evMin, plumeEv, plumeK));
                 float plasma = VesselView.PlasmaPeakNits;
                 if (plasma > 0) evMin = Mathf.Max(evMin, Mathf.Log(plasma / (1.2f * PlasmaWhite), 2));
                 exposure.limitMin.Override(evMin);
+                exposure.limitMax.Override(Mathf.Max(evMin, Mathf.Lerp(EvMax, plumeEv + PlumeEvSlack, plumeK)));
             }
             // На карте bloom выключен: при фиксированной EV диск Солнца (≈1,6·10⁹ нит) с порогом 0 размазывался
             // на весь кадр серой пеленой, и линии орбит в ней тонули (замер 01.10.2026: без bloom — чёрный фон).
@@ -143,10 +148,14 @@ namespace Kare.Space.Game
 
         /// <summary>
         /// Во сколько раз ядро факела ярче белого ночью (§9.5). Пара: VesselView.CoreNits (3·10³ нит) и PlumeCandela
-        /// (2·10⁶ кд): при 8 экспозиция ≈ EV 8,3 — стол в 30 м от сопла (≈ 200 нит) около 0,5 белого, ядро в 8 раз
-        /// выше белого с ореолом. Больше — кадр заливает светом, меньше — факел сереет.
+        /// (2·10⁶ кд): при 16 экспозиция ≈ EV 7,3 — стол и земля у сопла читаются, ядро в 16 раз выше белого с ореолом.
+        /// Замер «Спутника» на старте: 8 → средняя яркость кадра 5, 16 → 8,6 (до правки 87,8 и 3,8 % белых). Больше —
+        /// кадр снова заливает светом, меньше — окружение чернеет.
         /// </summary>
-        const float PlumeNightWhite = 8f;
+        const float PlumeNightWhite = 16f;
+        /// <summary>Запас вверх от ночного EV факела, ступени, и время нарастания/спада зажима, с. Пара: PlumeNightWhite.</summary>
+        const float PlumeEvSlack = 1.5f, PlumeRampUp = 1.5f, PlumeRampDown = 3f;
+        float plumeK, plumeEv, plumeNight;
 
         /// <summary>
         /// Ударный слой на входе — во столько раз ярче белого после экспозиции (§4.6, §9.3). Ночью предел EV — EvMin,

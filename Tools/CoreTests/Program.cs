@@ -44,8 +44,8 @@ static class Program
         Run("ranger7", () => TestLunar("ranger7", 1000e3), only);
         Run("surveyor1", () => TestLunar("surveyor1", 1000e3, land: true), only);
         Run("luna17", () => TestLunar("luna17", 1000e3, land: true, afterLanding: DriveLunokhod), only);
-        Run("apollo8", () => TestLunar("apollo8", 1737.4e3 + 110e3, lunarOrbit: true), only);
-        Run("apollo11", () => TestLunar("apollo11", 1000e3, land: true, afterLanding: LunarLiftoff), only);
+        Run("apollo8", () => TestApollo("apollo8"), only);
+        Run("apollo11", () => TestApollo("apollo11"), only);
         Console.WriteLine($"\nИтого: {passed} ok, {failed} fail");
         return failed == 0 ? 0 : 1;
     }
@@ -210,10 +210,11 @@ static class Program
     }
 
     /// <summary>Вывод на опорную орбиту автопилотом с телеметрией каждые 30 с.</summary>
-    static bool Ascend(Universe u, MissionTracker tr, double target)
+    static bool Ascend(Universe u, MissionTracker tr, double target, Vessel planeOf = null)
     {
         var v = u.Active;
         u.Ascent = new AscentAutopilot { TargetAltitude = target };
+        if (planeOf != null) u.Ascent.AimAtPlane(v, planeOf, u.Time);
         double t0 = u.Time, maxQ = 0, maxG = 0, nextLog = 0;
         var phase = u.Ascent.Phase;
         Fly(u, tr, 2, 3000, () => u.Ascent != null && u.Active.Alive, () =>
@@ -461,6 +462,129 @@ static class Program
         Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
     }
 
+    /// <summary>
+    /// «Аполлон» целиком на автопилотах (§6.4, §6.6, §6.11): окно старта, опорная орбита, LunarAutopilot (разгон,
+    /// перестроение с причаливанием к ЛМ, отброс S-IVB, коррекция, торможение до 110 км). У «Аполлона-11» дальше —
+    /// расстыковка (управление ЛМ), посадка, взлёт взлётной ступени и сближение со стыковкой к КСМ.
+    /// </summary>
+    static void TestApollo(string id)
+    {
+        var (u, tr) = StartMission(id);
+        var earth = u.Active.Body;
+        var moon = u.System.Get("moon");
+        double tL = LaunchWindow.NextPlaneWindow(earth, SolarSystem.GetSite(tr.Def.SiteId), 90, moon, u.Time + 60, 3300 + 5 * 86400);
+        Check($"{id}: окно старта найдено", !double.IsNaN(tL));
+        if (tL - u.Time > 300) Fly(u, tr, 5, tL - u.Time - 200, () => true);
+        Fly(u, tr, 3, tL - u.Time, () => true);
+        if (!Ascend(u, tr, 200000)) { Check($"{id}: опорная орбита", false); return; }
+
+        u.Lunar = new LunarAutopilot(u, moon);
+        var lp = u.Lunar.Phase;
+        string ls = null;
+        double nextLog = 0;
+        // «Аполлон-8» летит на автоускорении (§6.11: ускорение ведёт автопилот, игрок ничего не жмёт), «Аполлон-11» —
+        // на ручном ×1e4: автопилот обязан работать и под ускорением, выставленным игроком.
+        bool auto = id == "apollo8";
+        u.AutoWarp = auto;
+        int frames = 0;
+        double maxWarp = 0;
+        Fly(u, tr, auto ? 0 : 6, 8 * 86400, () => u.Lunar != null && u.Active.Alive, () =>
+        {
+            frames++;
+            maxWarp = Math.Max(maxWarp, u.EffectiveWarp);
+            var a = u.Lunar;
+            if (a == null) return;
+            bool docking = a.Phase == LunarAutopilot.PhaseType.Docking;
+            if (a.Phase != lp || docking && u.Time >= nextLog && a.Status != ls)
+            {
+                lp = a.Phase;
+                ls = a.Status;
+                nextLog = u.Time + 20;
+                var lp2 = u.PredictActive().Find(p => p.Body == moon);
+                Console.WriteLine($"      {a.Phase,-13} {u.Active.Name}, {u.Active.Mass / 1000:F1} т  {a.Status}  прогноз Pe {(lp2 != null ? ((lp2.Orbit.PeriapsisRadius - moon.Radius) / 1000).ToString("F0") : "—")} км");
+            }
+        });
+        var v = u.Active;
+        Console.WriteLine($"   после автопилота: {OrbitText(v, u.Time)}, {v.Name}, {v.Mass / 1000:F2} т; кадров {frames} ({frames / 600.0:F1} мин при 60 к/с), макс. ×{maxWarp:0}, в конце ×{Universe.Warps[u.WarpIndex]:0}");
+        if (auto) Check($"{id}: автоускорение — перелёт меньше 10 мин реального времени, в конце ×1", frames < 6000 && u.WarpIndex == 0, $"{frames} кадров");
+        u.AutoWarp = false;
+        var o = v.Body == moon ? KeplerOrbit.FromState(v.Position, v.Velocity, moon.Mu, u.Time) : null;
+        Check($"{id}: окололунная орбита автопилотом", o != null && o.PeriapsisRadius - moon.Radius > 60e3 &&
+                                                     o.ApoapsisRadius - moon.Radius < 200e3, OrbitText(v, u.Time));
+        if (o == null) return;
+
+        if (id == "apollo8")
+        {
+            Fly(u, tr, 5, 6 * 3600, () => !tr.Done[0] && u.Active.Alive);
+            Check($"{id}: виток вокруг Луны", tr.Done[0], OrbitText(u.Active, u.Time));
+            return;
+        }
+
+        // Перестроение: ЛМ (секции 3–4) в связке с КСМ (7), S-IVB (2) отброшена.
+        Check($"{id}: ЛМ пристыкован, S-IVB отброшена", v.Attached[3] && v.Attached[4] && v.Attached[7] && !v.Attached[2],
+              string.Join("", Array.ConvertAll(v.Attached, b => b ? "1" : "0")));
+        var csm = v;
+        while (u.Active == csm && csm.NextStageLabel != null) u.Stage(); // расстыковка с переходом экипажа
+        var lm = u.Active;
+        Check($"{id}: управление перешло на ЛМ", lm != csm && lm.Attached[3] && !lm.Attached[7], lm.Name);
+        if (lm == csm) return;
+        Fly(u, tr, 0, 30, () => true); // отход на безопасное расстояние
+
+        u.Landing = new LandingAutopilot(moon);
+        var lph = u.Landing.Phase;
+        Fly(u, tr, 6, 86400, () => u.Active.Alive && !u.Active.IsLanded, () =>
+        {
+            var a = u.Landing;
+            if (a != null && a.Phase != lph)
+            {
+                lph = a.Phase;
+                Console.WriteLine($"      {a.Phase,-9} h {moon.AltitudeAboveTerrain(u.Active.Position),8:F0} м  {u.Active.Mass,7:F0} кг  {a.Status}");
+            }
+        });
+        lm = u.Active;
+        Console.WriteLine($"   посадка: {lm.Situation}, {lm.DestroyReason}");
+        Check($"{id}: ЛМ сел", lm.IsLanded && lm.Body == moon && tr.Done[0], lm.Situation.ToString());
+        if (!lm.IsLanded) return;
+        Fly(u, tr, 0, 10, () => true);
+
+        u.Stage(); // отделение взлётной ступени с зажиганием
+        Console.WriteLine($"   азимут в плоскость КСМ: {AscentAutopilot.AzimuthToPlane(u.Active, csm, u.Time):F1}°");
+        bool orbit = Ascend(u, tr, 30000, csm);
+        lm = u.Active;
+        Check($"{id}: взлётная ступень на орбите", orbit, OrbitText(lm, u.Time));
+        Console.WriteLine($"   КСМ: {OrbitText(csm, u.Time)}");
+        if (!orbit) return;
+
+        u.Docking = new DockingAutopilot(u, csm);
+        var dp = u.Docking.Phase;
+        string ds = null;
+        double dLog = 0, minD = double.PositiveInfinity;
+        Fly(u, tr, 6, 2 * 86400, () => u.Docking != null && u.Active.Alive, () =>
+        {
+            var a = u.Docking;
+            if (a == null) return;
+            Universe.StateOf(csm, u.Time, out var rc, out _);
+            double d = Vector3d.Distance(rc, u.Active.Position);
+            minD = Math.Min(minD, d);
+            if (a.Phase != dp || a.Phase == DockingAutopilot.PhaseType.Rcs && u.Time >= dLog && a.Status != ds)
+            {
+                dp = a.Phase;
+                ds = a.Status;
+                dLog = u.Time + 30;
+                Console.WriteLine($"      {a.Phase,-7} d {d,9:F0} м  {u.Active.Mass,6:F0} кг  {a.Status}");
+            }
+        });
+        v = u.Active;
+        bool docked = !u.Vessels.Contains(csm) || !u.Vessels.Contains(lm);
+        Console.WriteLine($"   сближение: min {minD:F1} м, активный {v.Name}, {OrbitText(v, u.Time)}");
+        Check($"{id}: взлётная ступень причалила к КСМ", docked && v.Attached[4] && v.Attached[7],
+              string.Join("", Array.ConvertAll(v.Attached, b => b ? "1" : "0")));
+
+        Fly(u, tr, 5, 4 * 3600, () => tr.Status == MissionStatus.Active && u.Active.Alive);
+        Console.WriteLine($"   итог: {(u.Active.Alive ? OrbitText(u.Active, u.Time) : u.Active.DestroyReason)}");
+        Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
     /// <summary>«Луноход-1»: сброс посадочной ступени (съезд по трапам) и 100 м своим ходом (GDD §6.12).</summary>
     static void DriveLunokhod(Universe u, MissionTracker tr)
     {
@@ -471,17 +595,6 @@ static class Program
         Fly(u, tr, 0, 600, () => tr.Status == MissionStatus.Active && v.Alive);
         v.PilotInput = Vector3d.zero;
         Console.WriteLine($"   проехал {v.DriveDistance:F0} м, {v.Situation}");
-    }
-
-    /// <summary>«Аполлон-11»: взлётная ступень уходит с посадочной на окололунную орбиту.</summary>
-    static void LunarLiftoff(Universe u, MissionTracker tr)
-    {
-        u.Stage(); // отделение взлётной ступени с зажиганием
-        bool orbit = Ascend(u, tr, 30000);
-        var lm = u.Active;
-        double pe = KeplerOrbit.FromState(lm.Position, lm.Velocity, lm.Body.Mu, u.Time).PeriapsisRadius - lm.Body.Radius;
-        Check("apollo11: взлётная ступень на орбите", orbit && pe > 10000, OrbitText(lm, u.Time));
-        Fly(u, tr, 2, 3600, () => tr.Status == MissionStatus.Active && u.Active.Alive);
     }
 
     /// <summary>Орбита, виток, торможение (жидкостное по SAS-ретро или РДТТ) и спуск капсулы на парашюте.</summary>

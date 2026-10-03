@@ -139,6 +139,9 @@ namespace Kare.Space.Game
                 case SectionModel.LMAscent: return new[] { MetalColor, FoilColor, PolishedColor, BlackColor };
                 case SectionModel.ApolloCM: return new[] { ShieldColor, MetalColor, PolishedColor };
                 case SectionModel.ApolloSM: return new[] { StageColor, MetalColor, NozzleColor };
+                // САС и SLA: слоты Hull/Black/Metal/Nozzle (apollo_fairings.py). Колпак и панели белые, башня — металл.
+                case SectionModel.ApolloLES:
+                case SectionModel.ApolloSLA: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
                 case SectionModel.Mercury:
                 case SectionModel.Gemini: return new[] { ShieldColor, BlackColor, MetalColor };
                 case SectionModel.GeminiAdapter: return new[] { WhiteColor, MetalColor };
@@ -183,6 +186,8 @@ namespace Kare.Space.Game
             Rebuild();
             LateUpdate();
         }
+
+        static readonly Quaternion FlipRotation = Quaternion.Euler(180, 0, 0);
 
         string Signature()
         {
@@ -245,7 +250,20 @@ namespace Kare.Space.Game
                 bool craft = model != null && boot.CraftMeshFor(s.Model) == model;
                 // Низ модели в осях секции: у верхних ступеней сопла свисают в юбку нижней — факел ставим под срез.
                 float ownBottom = 0;
-                if (model != null)
+                if (craft && s.Kind == SectionKind.Fairing && !s.JettisonWhole)
+                {
+                    // Переходник SLA из Blender: половина со стороны −X в натуральную величину. Целый — две, панель
+                    // после раскрытия (Vessel.FairingHalf ±1) — одна, как у створок обтекателя ниже.
+                    var palette = CraftPalette(s.Model);
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        if (Vessel.FairingHalf != 0 && Vessel.FairingHalf != side) continue;
+                        var m = AddChild(go, side < 0 ? "Panel −X" : "Panel +X");
+                        m.localRotation = Quaternion.Euler(0, side < 0 ? 0 : 180, 0);
+                        part.AddBody(AddRenderer(m.gameObject, model, palette), palette);
+                    }
+                }
+                else if (model != null)
                 {
                     var m = AddChild(go, "Model");
                     Color[] palette;
@@ -792,7 +810,11 @@ namespace Kare.Space.Game
             UpdatePlasma(airflow, com, vesselLen, vesselR);
             foreach (var p in parts)
             {
-                p.Tr.localPosition = new Vector3(0, (float)(baseHeight[p.Index] - com), 0);
+                // После перестроения (§6.6) ЛМ стоит на КСМ вверх ногами: низ секции — сверху её места в пакете.
+                bool flip = Vessel.Flipped[p.Index];
+                float lift = flip ? (float)Vessel.Design.Sections[p.Index].Length : 0;
+                p.Tr.localPosition = new Vector3(0, (float)(baseHeight[p.Index] - com) + lift, 0);
+                p.Tr.localRotation = flip ? FlipRotation : Quaternion.identity;
                 if (p.Chute != null) UpdateChute(p, airflow);
                 if (p.Plume == null) continue;
                 bool on = Vessel.Running[p.Index];

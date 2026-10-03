@@ -150,7 +150,7 @@ namespace Kare.Space.Core
             {
                 var s = secs[i];
                 if (!v.Attached[i] || !s.HasEngine || !v.Armed[i] || v.Propellant[i] <= 0) continue;
-                if (!v.Running[i] && v.IgnitionsLeft[i] <= 0) continue;
+                if (!v.Running[i] && !v.CanIgnite(i)) continue;
                 t += s.Engine.ThrustVac * s.EngineCount;
                 massFlow += s.Engine.MassFlow * s.EngineCount;
             }
@@ -172,7 +172,7 @@ namespace Kare.Space.Core
         public static bool NextIsSolidKick(Vessel v)
         {
             if (!v.HasNextStage) return false;
-            var a = v.Design.Sequence[v.NextStage];
+            var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
             int s = a.Type == StageActionType.Ignite ? a.Section
                   : a.Type == StageActionType.Separate && a.IgniteNext ? a.Section + 1 : -1;
             var secs = v.Design.Sections;
@@ -209,12 +209,12 @@ namespace Kare.Space.Core
         public static bool NextStageBringsEngine(Vessel v)
         {
             if (!v.HasNextStage) return false;
-            var a = v.Design.Sequence[v.NextStage];
+            var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
             int s = a.Type == StageActionType.Ignite ? a.Section
                   : a.Type == StageActionType.Separate && a.IgniteNext ? a.Section + 1 : -1;
             var secs = v.Design.Sections;
             return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && v.Propellant[s] > 0 &&
-                   v.IgnitionsLeft[s] > 0;
+                   v.CanIgnite(s);
         }
 
         public static bool NeedsUllageForStart(Vessel v)
@@ -248,6 +248,7 @@ namespace Kare.Space.Core
         {
             v.Throttle = 0;
             v.RcsForward = 0;
+            v.RcsTranslate = Vector3d.zero;
         }
     }
 
@@ -288,6 +289,12 @@ namespace Kare.Space.Core
         public double MaxG = 4.5;
         /// <summary>Азимут, градусы от севера (90 — восток, максимум выигрыша от вращения Земли).</summary>
         public double Azimuth = 90;
+        /// <summary>
+        /// Нормаль плоскости целевой орбиты (инерциальная), ноль — без цели. Наведение по горизонтальной скорости
+        /// на Луне подхватывает её вращение (4,6 м/с на восток) и уводит с любого азимута: взлёт LM на запад дал
+        /// ту же i 4,29°, что и на восток. С нормалью тяга гасит и боковую скорость.
+        /// </summary>
+        public Vector3d PlaneNormal;
         public bool AutoStage = true;
         public PhaseType Phase = PhaseType.Vertical;
 
@@ -295,10 +302,12 @@ namespace Kare.Space.Core
         const double QAlphaBudget = 2400;
         const double FairingAltitude = 110000;
         /// <summary>Замкнутое наведение — после максимального напора: q ниже GuidedQ и высота выше GuidedAltitude.</summary>
-        const double GuidedQ = 1500;
-        const double GuidedAltitude = 35000;
+        public const double GuidedQ = 1500;
+        public const double GuidedAltitude = 35000;
         /// <summary>Нижняя граница времени до орбиты в законе наведения, с: у отсечки закон вырождается.</summary>
         const double MinTimeToGo = 10;
+        /// <summary>Недобор скорости, ниже которого направление по плоскости цели уже шумит, м/с.</summary>
+        const double PlaneGapMin = 2;
         /// <summary>
         /// Постоянная времени набора вертикальной скорости перед твердотопливным «пинком», с. Закон до орбиты
         /// задирал «Редстоун» Juno до 72° (vz 1691 при vh 2095): вертикаль уходила в лишний подъём, а горизонтали
@@ -323,6 +332,27 @@ namespace Kare.Space.Core
         /// и его же подсказывает HUD ручному пилоту (FlightHud.Tutor) — один закон на двоих.</summary>
         public static double ProgramPitch(double altitude, double turnAltitude) =>
             Math.PI / 2 * (1 - Math.Sqrt(MathD.Clamp01(altitude / turnAltitude)));
+
+        /// <summary>
+        /// Азимут старта в плоскость орбиты цели, градусы от севера (рандеву, §6.6). Окололунная орбита «Аполлона»
+        /// ретроградная (i ≈ 176°): взлёт LM на восток дал i 4° — плоскости разошлись на 172°, сближение невозможно.
+        /// Направление — вдоль движения цели над точкой старта: h × up.
+        /// </summary>
+        public static double AzimuthToPlane(Vessel v, Vessel target, double t)
+        {
+            Universe.StateOf(target, t, out var rT, out var vT);
+            FlightControl.LocalFrame(v, t, out var up, out var north, out var east);
+            var dir = Vector3d.Cross(Vector3d.Cross(rT, vT), up);
+            return Math.Atan2(Vector3d.Dot(dir, east), Vector3d.Dot(dir, north)) / Constants.Deg2Rad;
+        }
+
+        /// <summary>Взлёт в плоскость орбиты цели: азимут старта и нормаль, к которой наведение доворачивает скорость.</summary>
+        public void AimAtPlane(Vessel v, Vessel target, double t)
+        {
+            Universe.StateOf(target, t, out var rT, out var vT);
+            PlaneNormal = Vector3d.Cross(rT, vT).normalized;
+            Azimuth = AzimuthToPlane(v, target, t);
+        }
 
         public AutopilotRequest Update(Vessel v, double t, double dt)
         {
@@ -391,27 +421,9 @@ namespace Kare.Space.Core
 
                 case PhaseType.Guided:
                 {
-                    double r = v.Position.magnitude;
                     double rT = v.Body.Radius + TargetAltitude;
-                    double g = v.Body.Mu / (r * r);
-                    double vz = Vector3d.Dot(v.Velocity, up);
-                    var hv = v.Velocity - up * vz;
-                    double vh = hv.magnitude;
-                    var hdir = vh > 1 ? hv / vh : heading;
-                    double vCirc = Math.Sqrt(v.Body.Mu / rT);
-                    double dvGo = Math.Sqrt((vCirc - vh) * (vCirc - vh) + vz * vz);
-                    double T = Math.Max(MinTimeToGo, TimeToGo(v, dvGo));
-                    // Линейный по времени закон: к моменту T высота rT и нулевая вертикальная скорость.
-                    double azReq = 6 * (rT - r) / (T * T) - 4 * vz / T;
-                    if (FlightControl.NextIsSolidKick(v))
-                    {
-                        double gEff = Math.Max(0.5, g - vh * vh / r);
-                        double vzReq = Math.Sqrt(2 * gEff * Math.Max(0, rT - r));
-                        azReq = (vzReq - vz) / KickLoftTime;
-                    }
-                    double thrust = FlightControl.AvailableThrust(v, out _);
-                    double a = thrust / v.Mass;
-                    double sinT = a > 0 ? MathD.Clamp((azReq + g - vh * vh / r) / a, -0.6, 0.95) : 0;
+                    double sinT = GuidedSin(v, up, heading, TargetAltitude, out double dvGo, out double T, out var hdir, PlaneNormal);
+                    double a = FlightControl.AvailableThrust(v, out _) / v.Mass;
                     var dir = hdir * Math.Sqrt(1 - sinT * sinT) + up * sinT;
                     FlightControl.PointAt(v, LimitAoA(v, t, dir));
                     v.Throttle = a > 0 ? MathD.Clamp(MaxG * Constants.G0 / a, 0, 1) : 1;
@@ -472,15 +484,8 @@ namespace Kare.Space.Core
 
                 case PhaseType.Circularize:
                 {
-                    double r = v.Position.magnitude;
-                    double g = v.Body.Mu / (r * r);
-                    var hv = Vector3d.ProjectOnPlane(v.Velocity, up);
-                    double vh = hv.magnitude;
-                    double thrust = FlightControl.AvailableThrust(v, out _);
-                    double a = thrust / v.Mass;
-                    // Горизонтально по скорости + вертикальная поправка: держим вертикальную скорость у нуля.
-                    double sinT = a > 0 ? MathD.Clamp((g - vh * vh / r - 0.05 * v.VerticalSpeed) / a, -0.5, 0.9) : 0;
-                    var dir = hv.normalized * Math.Sqrt(1 - sinT * sinT) + up * sinT;
+                    double sinT = CircularizeSin(v, up, out var hdir);
+                    var dir = hdir * Math.Sqrt(1 - sinT * sinT) + up * sinT;
                     FlightControl.PointAt(v, dir);
                     bool aligned = Vector3d.Angle(v.NoseP, dir) < 5 * Constants.Deg2Rad;
                     if (aligned) FlightControl.Ignite(v, 1);
@@ -527,6 +532,54 @@ namespace Kare.Space.Core
             return AutopilotRequest.Finished;
         }
 
+        /// <summary>
+        /// Синус тангажа замкнутого наведения над горизонтом (по горизонтальной скорости hdir). Линейный по времени
+        /// закон: к моменту выхода высота цели и нулевая вертикальная скорость. Им ведёт автопилот и его же
+        /// подсказывает HUD ручному пилоту (FlightHud.Tutor) — один закон на двоих, как ProgramPitch.
+        /// </summary>
+        public static double GuidedSin(Vessel v, Vector3d up, Vector3d heading, double targetAltitude,
+                                       out double dvGo, out double timeToGo, out Vector3d hdir,
+                                       Vector3d planeNormal = default)
+        {
+            double r = v.Position.magnitude;
+            double rT = v.Body.Radius + targetAltitude;
+            double g = v.Body.Mu / (r * r);
+            double vz = Vector3d.Dot(v.Velocity, up);
+            var hv = v.Velocity - up * vz;
+            double vh = hv.magnitude;
+            hdir = vh > 1 ? hv / vh : heading;
+            double vCirc = Math.Sqrt(v.Body.Mu / rT);
+            if (planeNormal.sqrMagnitude > 0)
+            {
+                // Горизонталь — по недобору скорости до круговой в плоскости цели (вдоль её движения: n × up).
+                var gap = Vector3d.Cross(planeNormal, up).normalized * vCirc - hv;
+                if (gap.magnitude > PlaneGapMin) hdir = gap.normalized;
+            }
+            dvGo = Math.Sqrt((vCirc - vh) * (vCirc - vh) + vz * vz);
+            double T = timeToGo = Math.Max(MinTimeToGo, TimeToGo(v, dvGo));
+            double azReq = 6 * (rT - r) / (T * T) - 4 * vz / T;
+            if (FlightControl.NextIsSolidKick(v))
+            {
+                double gEff = Math.Max(0.5, g - vh * vh / r);
+                double vzReq = Math.Sqrt(2 * gEff * Math.Max(0, rT - r));
+                azReq = (vzReq - vz) / KickLoftTime;
+            }
+            double a = FlightControl.AvailableThrust(v, out _) / v.Mass;
+            return a > 0 ? MathD.Clamp((azReq + g - vh * vh / r) / a, -0.6, 0.95) : 0;
+        }
+
+        /// <summary>Синус тангажа довыведения: горизонтально по скорости + поправка, держащая вертикальную скорость у нуля.</summary>
+        public static double CircularizeSin(Vessel v, Vector3d up, out Vector3d hdir)
+        {
+            double r = v.Position.magnitude;
+            double g = v.Body.Mu / (r * r);
+            var hv = Vector3d.ProjectOnPlane(v.Velocity, up);
+            double vh = hv.magnitude;
+            hdir = hv.normalized;
+            double a = FlightControl.AvailableThrust(v, out _) / v.Mass;
+            return a > 0 ? MathD.Clamp((g - vh * vh / r - 0.05 * v.VerticalSpeed) / a, -0.5, 0.9) : 0;
+        }
+
         /// <summary>Время набора dv по оставшимся ступеням (вакуумные характеристики, с паузой на разделение).</summary>
         static double TimeToGo(Vessel v, double dv)
         {
@@ -565,7 +618,7 @@ namespace Kare.Space.Core
         }
 
         /// <summary>Импульс, чтобы в апоцентре орбита стала круговой, м/с.</summary>
-        static double CircularizeDv(Vessel v, KeplerOrbit orbit, double t)
+        public static double CircularizeDv(Vessel v, KeplerOrbit orbit, double t)
         {
             double rAp = orbit.ApoapsisRadius;
             if (double.IsInfinity(rAp)) return 0;

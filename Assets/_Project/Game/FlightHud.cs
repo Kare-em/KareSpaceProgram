@@ -245,6 +245,8 @@ namespace Kare.Space.Game
             if (u.Ascent != null) { icon = Icon.Autopilot; title = "АВТОПИЛОТ"; status = u.Ascent.Status; col = Accent; }
             else if (u.NodePilot != null) { icon = Icon.Maneuver; title = "МАНЁВР"; status = u.NodePilot.Status; col = Accent; }
             else if (u.Landing != null) { icon = Icon.Autopilot; title = "ПОСАДКА"; status = u.Landing.Phase.ToString(); col = Accent; }
+            else if (u.Docking != null) { icon = Icon.Maneuver; title = "СТЫКОВКА"; status = u.Docking.Status; col = Accent; }
+            else if (u.Lunar != null) { icon = Icon.Autopilot; title = "К ЛУНЕ"; status = u.Lunar.Status; col = Accent; }
             else if (v.Sas != SasMode.Off) { icon = SasIcon(v.Sas); title = "SAS"; status = SasName(v.Sas); col = Color.white; }
             else { icon = Icon.Stability; title = "РУЧНОЕ"; status = "G — автопилот, T — SAS"; col = Warn; }
             GUI.color = col;
@@ -394,7 +396,7 @@ namespace Kare.Space.Game
         /// </summary>
         void Tutor(Universe u, Vessel v)
         {
-            if (u.Ascent != null || u.NodePilot != null || u.Landing != null || !v.Body.HasAtmosphere) return;
+            if (u.Ascent != null || u.NodePilot != null || u.Landing != null || u.Lunar != null || u.Docking != null || !v.Body.HasAtmosphere) return;
             // На воде полёт окончен: Splashed не Landed, и без этой проверки после приводнения (vs = 0, двигатель
             // молчит, ниже атмосферы) снова вылезала «2. Вертикальный подъём» (замер 01.10.2026).
             if (v.Situation == Situation.Splashed) return;
@@ -402,9 +404,10 @@ namespace Kare.Space.Game
             if (landed && v.Site == null) return;
             double atm = v.Body.AtmosphereTop;
             double apAlt = 0, peAlt = 0, toAp = double.NaN;
+            KeplerOrbit o = null;
             if (!landed)
             {
-                var o = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, u.Time);
+                o = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, u.Time);
                 apAlt = o.IsElliptic ? o.ApoapsisRadius - v.Body.Radius : double.PositiveInfinity;
                 peAlt = o.PeriapsisRadius - v.Body.Radius;
                 toAp = o.TimeToApoapsis(u.Time);
@@ -417,12 +420,21 @@ namespace Kare.Space.Game
             string step, hint;
             double target = double.NaN; // тангаж над горизонтом, градусы; NaN — угол сейчас не важен
             bool burning = v.AnyEngineRunning;
+            // Довыводить в апоцентре можно, только если работающий двигатель запустится снова. У Блока Е «Востока»
+            // и большинства исторических ступеней запуск один: старая подсказка «X — отсечка, в апоцентре Z»
+            // оставляла борт на суборбите без тяги (§10.2). Такие ступени ведём прямым выведением до орбиты.
+            bool restart = false;
+            for (int i = 0; i < v.Attached.Length; i++)
+                if (v.Running[i] && v.CanIgnite(i)) restart = true;
+            bool energy = o != null && o.IsElliptic && o.A >= v.Body.Radius + TutorApoapsis - 500;
+            double circDv = o != null ? AscentAutopilot.CircularizeDv(v, o, u.Time) : 0;
+            double circBurn = FlightControl.BurnTime(v, circDv);
             if (landed)
             {
                 step = "1. Старт";
                 hint = "Z — полный газ, Пробел — зажигание. Нос строго вверх.";
             }
-            else if (!burning && v.HasNextStage && apAlt < TutorApoapsis)
+            else if (!burning && FlightControl.NextStageBringsEngine(v) && double.IsInfinity(FlightControl.BurnTime(v, 1)))
             {
                 step = "Ступень";
                 hint = "Двигатель молчит — Пробел: следующая ступень.";
@@ -433,37 +445,53 @@ namespace Kare.Space.Game
                 hint = $"Вверх до {AscentAutopilot.VerticalSpeedEnd:0} м/с, потом плавно на восток.";
                 target = 90;
             }
-            else if (apAlt < TutorApoapsis)
+            else if (burning && (v.Altitude < AscentAutopilot.GuidedAltitude || v.DynamicPressure > AscentAutopilot.GuidedQ))
             {
                 step = "3. Разворот на восток";
                 hint = "Нос по голубой линии. Плавно: резкий угол атаки ломает ракету.";
                 target = AscentAutopilot.ProgramPitch(v.Altitude, TutorTurnAltitude) * Constants.Rad2Deg;
             }
-            else if (burning && toAp > 60)
+            else if (burning && !energy)
             {
-                step = "4. Отсечка";
-                hint = $"Апоцентр {Km(apAlt)} — X: выключить двигатель.";
+                double sinT = AscentAutopilot.GuidedSin(v, up, east, TutorApoapsis, out double dvGo, out double tGo, out _);
+                step = "4. Выведение";
+                hint = $"Полный газ, нос по линии. До орбиты ~{tGo:0} с, Δv {dvGo:0} м/с. Двигатель не глушить.";
+                target = System.Math.Asin(sinT) * Constants.Rad2Deg;
             }
-            else if (!burning)
+            else if (burning && restart && v.VerticalSpeed > 0 && toAp > circBurn / 2 + 10)
             {
-                step = "5. Полёт к апоцентру";
-                hint = $"До апоцентра {GameCalendar.FormatDuration(toAp)}. За ~30 с до него — нос на горизонт, Z.";
-                target = 0;
+                step = "5. Отсечка";
+                hint = $"Апоцентр {Km(apAlt)} набран — X: выключить. Довыведение — в апоцентре.";
+            }
+            else if (burning)
+            {
+                double sinT = AscentAutopilot.CircularizeSin(v, up, out _);
+                step = "6. Довыведение";
+                hint = $"Нос по линии, газ не сбрасывать, пока перицентр не выше {Km(atm + TutorPeriapsisMargin)} (сейчас {Km(peAlt)}).";
+                target = System.Math.Asin(sinT) * Constants.Rad2Deg;
+            }
+            else if (double.IsInfinity(circBurn))
+            {
+                step = "Нет запуска";
+                hint = "Двигатель больше не запустится — орбиту не довести. Esc → Читы: бесконечные перезапуски.";
             }
             else
             {
-                step = "6. Разгон по горизонту";
-                hint = $"Держать 0°, пока перицентр не выше {Km(atm + TutorPeriapsisMargin)} (сейчас {Km(peAlt)}).";
+                double lead = circBurn / 2;
+                bool now = toAp <= lead + 4 || v.VerticalSpeed < 0;
+                step = "5. Полёт к апоцентру";
+                hint = now ? $"Сейчас: Z — полный газ! Импульс {circDv:0} м/с, ~{circBurn:0} с."
+                           : $"Импульс {circDv:0} м/с, ~{circBurn:0} с работы. Z через {GameCalendar.FormatDuration(toAp - lead)}. Нос — на горизонт.";
                 target = 0;
             }
 
-            var r = new Rect(12, 12, 340, double.IsNaN(target) ? 74 : 196);
+            var r = new Rect(12, 12, 340, double.IsNaN(target) ? 92 : 214);
             Fill(r, Panel);
             GUI.color = Accent;
             GUI.Label(new Rect(r.x + 12, r.y + 6, r.width - 24, 22), "ПОДСКАЗКА · " + step, label);
             GUI.color = Color.white;
             var wrap = new GUIStyle(small) { wordWrap = true, alignment = TextAnchor.UpperLeft };
-            GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 40), hint, wrap);
+            GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 58), hint, wrap);
             if (double.IsNaN(target)) return;
 
             // Угол носа в вертикальной плоскости «восток — зенит»: 0° — горизонт на восток, 90° — вверх.
@@ -474,7 +502,7 @@ namespace Kare.Space.Game
             double err = Vector3d.Angle(nose, want) * Constants.Rad2Deg;
 
             // Шкала-четверть: горизонт и вертикаль, цель — акцентом, нос — белым.
-            var pivot = new Vector2(r.x + 24, r.y + 182);
+            var pivot = new Vector2(r.x + 24, r.y + 200);
             const float len = 100;
             Line(pivot, 0, len, Dim, 1);
             Line(pivot, 90, len, Dim, 1);
@@ -482,14 +510,14 @@ namespace Kare.Space.Game
             Line(pivot, (float)noseDeg, len * 0.85f, Color.white, 3);
 
             float tx = r.x + 140;
-            GUI.color = Dim; GUI.Label(new Rect(tx, r.y + 76, 60, 20), "ЦЕЛЬ", small);
-            GUI.Label(new Rect(tx + 90, r.y + 76, 60, 20), "НОС", small);
-            GUI.color = Accent; GUI.Label(new Rect(tx, r.y + 94, 90, 30), target.ToString("0") + "°", mid);
-            GUI.color = Color.white; GUI.Label(new Rect(tx + 90, r.y + 94, 90, 30), noseDeg.ToString("0") + "°", mid);
+            GUI.color = Dim; GUI.Label(new Rect(tx, r.y + 94, 60, 20), "ЦЕЛЬ", small);
+            GUI.Label(new Rect(tx + 90, r.y + 94, 60, 20), "НОС", small);
+            GUI.color = Accent; GUI.Label(new Rect(tx, r.y + 112, 90, 30), target.ToString("0") + "°", mid);
+            GUI.color = Color.white; GUI.Label(new Rect(tx + 90, r.y + 112, 90, 30), noseDeg.ToString("0") + "°", mid);
             string key;
             if (err < TutorOkAngle) { GUI.color = new Color(0.45f, 1f, 0.55f); key = "✓ так держать"; }
             else { GUI.color = Warn; key = "жми " + KeyToward(v, want - nose); }
-            GUI.Label(new Rect(tx, r.y + 140, 190, 30), key, mid);
+            GUI.Label(new Rect(tx, r.y + 158, 190, 30), key, mid);
             GUI.color = Color.white;
         }
 
