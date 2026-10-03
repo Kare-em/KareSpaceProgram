@@ -97,10 +97,24 @@ namespace Kare.Space.Core
         public bool DockingPort;
         /// <summary>Только обтекатель: уходит целиком на своём двигателе увода, без створок (САС «Аполлона»).</summary>
         public bool JettisonWhole;
+        /// <summary>
+        /// Радиальная группа (конструктор, §5.4): RadialCount ≥ 2 одинаковых блоков по кругу у секции RadialParent, ось блока —
+        /// в RadialOffset от оси пакета. Масса, топливо, EngineCount и площади — на всю группу; блоку достаётся 1/N
+        /// (VesselDesign.RadialPiece), поэтому EngineCount кратен RadialCount. В Sections группа стоит после родителя.
+        /// </summary>
+        public int RadialCount;
+        public int RadialParent;
+        public double RadialOffset;
+        /// <summary>Подъём низа блока над низом родителя, м.</summary>
+        public double RadialLift;
+        /// <summary>Толчок разделителя под этой секцией, м/с; 0 — штатный (Vessel.StagePush, у радиальных — Vessel.RadialPush).</summary>
+        public double DecouplerPush;
 
         public double Mass => DryMass + Propellant;
         public double Radius => Diameter * 0.5;
         public bool HasEngine => Engine != null && EngineCount > 0;
+        public bool IsRadial => RadialCount >= 2;
+        public SectionDef Clone() => (SectionDef)MemberwiseClone();
     }
 
     public enum StageActionType
@@ -122,13 +136,16 @@ namespace Kare.Space.Core
         public bool IgniteNext;
         /// <summary>Только Undock: экипаж уходит в отстыкованный модуль — он становится активным бортом (ЛМ «Аполлона»).</summary>
         public bool TransferControl;
+        /// <summary>Выполняется тем же нажатием пробела, что и предыдущий шаг (группа ступени KSP: старт ядра и ускорителей).</summary>
+        public bool WithPrevious;
 
-        public StageAction(StageActionType type, int section, bool igniteNext = false, bool transferControl = false)
+        public StageAction(StageActionType type, int section, bool igniteNext = false, bool transferControl = false, bool withPrevious = false)
         {
             Type = type;
             Section = section;
             IgniteNext = igniteNext;
             TransferControl = transferControl;
+            WithPrevious = withPrevious;
         }
     }
 
@@ -153,6 +170,59 @@ namespace Kare.Space.Core
                 foreach (var s in Sections) m += s.Mass;
                 return m;
             }
+        }
+
+        /// <summary>
+        /// Уходит ли секция i при отделении Separate(k). Отделение радиальной группы снимает только её; отделение секции
+        /// пакета — всё, что ниже, вместе с радиальными блоками на этих секциях (они крепятся к родителю, а не к индексу).
+        /// </summary>
+        public bool DetachedBy(int i, int k)
+        {
+            if (Sections[k].IsRadial) return i == k;
+            var s = Sections[i];
+            return s.IsRadial ? s.RadialParent <= k : i <= k;
+        }
+
+        /// <summary>Следующая секция пакета над k (радиальные группы пропускаются): её взводит Separate с IgniteNext.</summary>
+        public int NextCore(int k)
+        {
+            int i = k + 1;
+            while (i < Sections.Count && Sections[i].IsRadial) i++;
+            return i;
+        }
+
+        /// <summary>Пакет с параллельной работой двигателей: Δv считается совместным прожигом, а не по одной секции.</summary>
+        public bool Parallel
+        {
+            get
+            {
+                foreach (var s in Sections) if (s.IsRadial) return true;
+                foreach (var a in Sequence) if (a.WithPrevious) return true;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Проект одного блока радиальной группы i — отдельного борта после отделения: 1/N массы, топлива, двигателей.
+        /// Общий для всех N блоков: состояние у каждого своё (Vessel), проект только описывает.
+        /// </summary>
+        public VesselDesign RadialPiece(int i)
+        {
+            var s = Sections[i];
+            int n = Math.Max(1, s.RadialCount);
+            var p = s.Clone();
+            p.RadialCount = 0;
+            p.RadialParent = 0;
+            p.RadialOffset = p.RadialLift = 0;
+            p.DryMass /= n;
+            p.Propellant /= n;
+            p.EngineCount /= n;
+            p.RcsTorque /= n;
+            p.FinArea /= n;
+            p.ParachuteArea /= n;
+            var d = new VesselDesign { Name = s.Name };
+            d.Sections.Add(p);
+            return d;
         }
 
         /// <summary>Δv и тяговооружённость по ступеням в порядке работы (по g Земли).</summary>
@@ -203,6 +273,8 @@ namespace Kare.Space.Core
                 prop[idx] = 0;
             }
 
+            // Исторические пакеты — строго последовательные: их цифры (и тесты) считаются по-старому, секция за секцией.
+            if (Parallel) return ParallelStats(attached, prop, fromStage, runningNow);
             if (runningNow != null)
                 for (int i = 0; i < n; i++)
                     if (runningNow[i]) Burn(i);
@@ -222,6 +294,106 @@ namespace Kare.Space.Core
                         attached[a.Section] = false;
                         break;
                 }
+            }
+            return res;
+        }
+
+        /// <summary>
+        /// Совместный прожиг (ускорители + ядро, как в KSP): все работающие двигатели жгут одновременно, участок кончается
+        /// на первой выработке. Пилот, по допущению, жмёт пробел сразу на выработке — следующая группа шагов идёт тут же,
+        /// а оставшиеся двигатели продолжают. Строка статистики — одна группа (одно нажатие пробела).
+        /// </summary>
+        List<StageStats> ParallelStats(bool[] attached, double[] prop, int fromStage, bool[] runningNow)
+        {
+            var res = new List<StageStats>();
+            int n = Sections.Count;
+            var running = new bool[n];
+            if (runningNow != null)
+                for (int i = 0; i < n; i++) running[i] = runningNow[i] && attached[i];
+
+            double AttachedMass()
+            {
+                double m = 0;
+                for (int i = 0; i < n; i++)
+                    if (attached[i]) m += Sections[i].DryMass + prop[i];
+                return m;
+            }
+
+            void Burn(bool toEnd)
+            {
+                StageStats st = null;
+                var names = new List<string>();
+                while (true)
+                {
+                    double tv = 0, ts = 0, flow = 0, dt = double.PositiveInfinity;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (!running[i] || !attached[i] || prop[i] <= 0) { running[i] = false; continue; }
+                        var s = Sections[i];
+                        double f = s.Engine.MassFlow * s.EngineCount;
+                        tv += s.Engine.ThrustVac * s.EngineCount;
+                        ts += s.Engine.Thrust(101325) * s.EngineCount;
+                        flow += f;
+                        dt = Math.Min(dt, prop[i] / f);
+                        if (!names.Contains(s.Name)) names.Add(s.Name);
+                    }
+                    if (flow <= 0) break;
+                    double m0 = AttachedMass(), m1 = m0 - flow * dt;
+                    double ln = Math.Log(m0 / m1);
+                    if (st == null)
+                        st = new StageStats
+                        {
+                            StartMass = m0,
+                            TwrVac = tv / (m0 * Constants.G0),
+                            TwrSL = ts / (m0 * Constants.G0),
+                        };
+                    // Эффективный УИ связки — суммарная тяга на суммарный расход.
+                    st.DeltaVVac += tv / flow * ln;
+                    st.DeltaVSL += ts / flow * ln;
+                    st.BurnTime += dt;
+                    st.EndMass = m1;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (!running[i]) continue;
+                        var s = Sections[i];
+                        prop[i] -= s.Engine.MassFlow * s.EngineCount * dt;
+                        if (prop[i] <= 1e-6 * Math.Max(1, s.Propellant)) { prop[i] = 0; running[i] = false; }
+                    }
+                    if (!toEnd) break;
+                }
+                if (st == null) return;
+                st.Name = string.Join(" + ", names);
+                res.Add(st);
+            }
+
+            void Ignite(int i)
+            {
+                if (i < n && attached[i] && Sections[i].HasEngine && prop[i] > 0) running[i] = true;
+            }
+
+            Burn(fromStage >= Sequence.Count);
+            int k = fromStage;
+            while (k < Sequence.Count)
+            {
+                do
+                {
+                    var a = Sequence[k++];
+                    switch (a.Type)
+                    {
+                        case StageActionType.Ignite:
+                            Ignite(a.Section);
+                            break;
+                        case StageActionType.Separate:
+                            for (int i = 0; i < n; i++)
+                                if (DetachedBy(i, a.Section)) attached[i] = running[i] = false;
+                            if (a.IgniteNext) Ignite(NextCore(a.Section));
+                            break;
+                        case StageActionType.JettisonFairing:
+                            attached[a.Section] = running[a.Section] = false;
+                            break;
+                    }
+                } while (k < Sequence.Count && Sequence[k].WithPrevious);
+                Burn(k >= Sequence.Count);
             }
             return res;
         }

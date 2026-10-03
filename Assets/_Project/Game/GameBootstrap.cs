@@ -22,6 +22,10 @@ namespace Kare.Space.Game
         /// <summary>Миссия, выбранная в меню Esc: переживает перезагрузку сцены и перекрывает MissionId.</summary>
         public static string NextMissionId;
 
+        /// <summary>Ракета из конструктора (§5.4, сцена Hangar): встаёт на стол миссии вместо её исторического носителя.
+        /// Статик переживает загрузку сцены и «Начать заново»; выбор другой миссии в Esc его сбрасывает.</summary>
+        public static VesselDesign NextDesign;
+
         public Camera Camera;
         public Light Sun;
         public Volume Volume;
@@ -118,6 +122,11 @@ namespace Kare.Space.Game
             // Карту читаем один раз: статическое поле переживает перезагрузку сцены (выбор миссии в Esc).
             if (EarthLand != null && SolarSystem.EarthLand == null) SolarSystem.EarthLand = new LandMap(EarthLand.bytes);
             universe = MissionTracker.CreateUniverse(Mission, SolarSystem.CreateReal());
+            if (NextDesign != null)
+            {
+                universe.Vessels.Remove(universe.Active);
+                universe.Launch(NextDesign, Mission.SiteId);
+            }
             Tracker = new MissionTracker(Mission);
             universe.Message += OnMessage;
             Tracker.Changed += OnMessage;

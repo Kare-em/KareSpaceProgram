@@ -128,6 +128,7 @@ namespace Kare.Space.Game
             float z = 0;
             foreach (var s in v.Design.Sections)
             {
+                if (s.IsRadial) continue; // боковые блоки стоят рядом с ядром, ярусы ферм — по ядру
                 stack.Add(new Vector3(z, z + (float)s.Length, (float)s.Radius));
                 z += (float)s.Length;
             }

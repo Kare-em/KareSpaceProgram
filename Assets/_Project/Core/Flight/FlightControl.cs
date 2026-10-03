@@ -174,7 +174,7 @@ namespace Kare.Space.Core
             if (!v.HasNextStage) return false;
             var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
             int s = a.Type == StageActionType.Ignite ? a.Section
-                  : a.Type == StageActionType.Separate && a.IgniteNext ? a.Section + 1 : -1;
+                  : a.Type == StageActionType.Separate && a.IgniteNext ? v.Design.NextCore(a.Section) : -1;
             var secs = v.Design.Sections;
             return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && secs[s].Engine.Solid &&
                    v.Propellant[s] > 0;
@@ -211,10 +211,23 @@ namespace Kare.Space.Core
             if (!v.HasNextStage) return false;
             var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
             int s = a.Type == StageActionType.Ignite ? a.Section
-                  : a.Type == StageActionType.Separate && a.IgniteNext ? a.Section + 1 : -1;
+                  : a.Type == StageActionType.Separate && a.IgniteNext ? v.Design.NextCore(a.Section) : -1;
             var secs = v.Design.Sections;
             return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && v.Propellant[s] > 0 &&
                    v.CanIgnite(s);
+        }
+
+        /// <summary>
+        /// Следующий шаг — сброс радиальной группы с выработанным топливом: её сбрасывают сразу, пока ядро ещё работает
+        /// (§5.4, боковые блоки «Союза» уходят на 118-й секунде) — иначе ядро тащит пустые блоки до своей выработки.
+        /// </summary>
+        public static bool NextDropsSpentRadial(Vessel v)
+        {
+            if (!v.HasNextStage) return false;
+            var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
+            if (a.Type != StageActionType.Separate) return false;
+            var s = v.Design.Sections[a.Section];
+            return s.IsRadial && s.HasEngine && v.Attached[a.Section] && v.Propellant[a.Section] <= 0;
         }
 
         public static bool NeedsUllageForStart(Vessel v)
@@ -391,6 +404,8 @@ namespace Kare.Space.Core
                     Phase = PhaseType.Coast;
                     Raise(v, $"Выработка: апоцентр {apAlt / 1000:F0} км — твердотопливные ступени в апоцентре");
                 }
+                else if (FlightControl.NextDropsSpentRadial(v))
+                    return RequestStage();
                 // Отсечка по выработке: сбросить пустую ступень, следующую запустить.
                 else if (burning && !v.AnyEngineRunning && v.HasNextStage &&
                     (next.Type == StageActionType.Ignite ||

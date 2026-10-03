@@ -15,8 +15,21 @@ namespace Kare.Space.Core
         /// остаётся MaxStep — ×10 только множит подшаги кадра (≈8 при 60 к/с), точность не теряется.
         /// Пара: индекс 2 в Warps = ×10, до него WarpUp пускает при закрытых рельсах.</summary>
         public const double MaxPhysicsWarp = 10;
-        /// <summary>Ближе этого к активному кораблю обломки в атмосфере считаются физикой.</summary>
-        public const double PassiveRange = 25000;
+        /// <summary>
+        /// Сколько неактивных бортов ниже «пола» рельсов (атмосфера, низкий пролёт над безатмосферным телом) считается полной
+        /// физикой — ближайшие к активному, на любом расстоянии (§5: обломок падает, сгорает или ложится на грунт сам, а не
+        /// исчезает за 25 км). Остальные теряются, как раньше. Пара: шаг FlightPhysics.MaxStep × число бортов — цена кадра.
+        /// </summary>
+        public const int MaxPassivePhysics = 32;
+        /// <summary>Столкновения бортов (§5): выключатель для отладки.</summary>
+        public bool Collisions = true;
+        /// <summary>
+        /// Скорость сближения, м/с, выше которой столкновение разрушает оба борта (тонкостенные баки), и коэффициент
+        /// восстановления ниже неё. Пара: Vessel.StagePush 1,5 м/с и RadialPush 2 м/с — штатное разделение не крушит.
+        /// </summary>
+        public const double CrashSpeed = 12, Restitution = 0.2;
+        /// <summary>Секунды после разделения, пока части не сталкиваются: в момент отстрела они стоят вплотную.</summary>
+        public const double CollisionGrace = 1.5;
         /// <summary>За сколько секунд до запуска манёвра ускорение сбрасывается само.</summary>
         public const double NodeWarpMargin = 30;
         /// <summary>
@@ -124,8 +137,11 @@ namespace Kare.Space.Core
         {
             if (Active == null || !Active.Alive) return;
             if (Active.OnRails) LeaveRails(Active);
-            foreach (var d in Active.Stage())
+            var parts = Active.Stage();
+            if (parts.Count > 0) Active.NoCollideUntil = Time + CollisionGrace;
+            foreach (var d in parts)
             {
+                d.NoCollideUntil = Time + CollisionGrace;
                 d.Event += OnVesselEvent;
                 Vessels.Add(d);
             }
@@ -243,11 +259,12 @@ namespace Kare.Space.Core
             int n = Math.Max(1, (int)Math.Ceiling(dt / FlightPhysics.MaxStep - 1e-9));
             double h = dt / n;
             var physics = new List<Vessel>();
+            var passive = PassivePhysicsSet();
             for (int s = 0; s < n; s++)
             {
                 physics.Clear();
                 foreach (var v in Vessels)
-                    if (v.Alive && (v == Active || NeedsPassivePhysics(v))) physics.Add(v);
+                    if (v.Alive && (v == Active || passive.Contains(v) && NeedsPassivePhysics(v))) physics.Add(v);
 
                 foreach (var v in physics)
                 {
@@ -258,12 +275,13 @@ namespace Kare.Space.Core
                 foreach (var v in physics) FlightPhysics.Step(v, Time, h);
                 Time += h;
                 foreach (var v in physics) CheckSoi(v);
+                if (Collisions) Collide(physics);
             }
             foreach (var v in Vessels)
             {
                 if (v == Active || !v.Alive) continue;
                 if (v.IsLanded) FlightPhysics.UpdateLandedPose(v, Time);
-                else if (!physics.Contains(v)) MovePassive(v, Time);
+                else if (!physics.Contains(v)) MovePassive(v, Time, passive.Contains(v) || passive.Count < MaxPassivePhysics);
             }
             eventValid = false;
         }
@@ -305,8 +323,155 @@ namespace Kare.Space.Core
         bool NeedsPassivePhysics(Vessel v)
         {
             if (v == Active || v.IsLanded || Active == null) return false;
-            if (v.Position.magnitude >= PatchedConics.RailsFloorRadius(v.Body)) return false;
-            return v.Body == Active.Body && Vector3d.Distance(v.Position, Active.Position) < PassiveRange;
+            return v.Position.magnitude < PatchedConics.RailsFloorRadius(v.Body);
+        }
+
+        /// <summary>Неактивные борта под полной физикой на этот кадр: ниже «пола», ближайшие к активному, не больше MaxPassivePhysics.</summary>
+        HashSet<Vessel> PassivePhysicsSet()
+        {
+            var set = new HashSet<Vessel>();
+            if (Active == null) return set;
+            var cand = new List<(double d, Vessel v)>();
+            var at = Active.Body.Position + Active.Position;
+            foreach (var v in Vessels)
+            {
+                if (!v.Alive || v == Active) continue;
+                bool below = NeedsPassivePhysics(v);
+                // Падающий на рельсах в этот кадр пересечёт «пол» — место под него держим заранее.
+                if (!below && v.OnRails && !v.IsLanded && v.Orbit.PeriapsisRadius < PatchedConics.RailsFloorRadius(v.Body)) below = true;
+                if (below) cand.Add(((v.Body.Position + v.Position - at).sqrMagnitude, v));
+            }
+            cand.Sort((x, y) => x.d.CompareTo(y.d));
+            for (int i = 0; i < cand.Count && i < MaxPassivePhysics; i++) set.Add(cand[i].v);
+            return set;
+        }
+
+        // ---------------------------------------------------------------- столкновения (§5)
+
+        /// <summary>
+        /// Столкновения бортов под физикой: каждый — капсула по оси (отрезок от низа до верха, ужатый на радиус корпуса).
+        /// При сближении точек контакта — импульс с восстановлением Restitution, с плечом (закручивает); быстрее CrashSpeed —
+        /// оба разрушены. Расходящиеся пары не трогаются: так отстрел вплотную и толчки разделения не дают ложных ударов.
+        /// </summary>
+        internal void Collide(List<Vessel> list)
+        {
+            for (int i = 0; i < list.Count; i++)
+                for (int j = i + 1; j < list.Count; j++)
+                {
+                    var a = list[i];
+                    var b = list[j];
+                    if (!CanCollide(a, b)) continue;
+                    var dp = b.Position - a.Position;
+                    if (dp.sqrMagnitude > 1e8) continue; // дальше 10 км — заведомо мимо
+                    Hull(a, out var a0, out var a1, out double ra, out double la);
+                    Hull(b, out var b0, out var b1, out double rb, out double lb);
+                    if (dp.magnitude > (la + lb) * 0.5 + ra + rb) continue;
+                    ClosestPoints(a0, a1, b0, b1, out var ca, out var cb);
+                    var d = cb - ca;
+                    double dist = d.magnitude;
+                    double pen = ra + rb - dist;
+                    if (pen <= 0) continue;
+                    var nrm = dist > 1e-6 ? d / dist : Vector3d.AnyPerpendicular(a.NoseP).normalized;
+                    var contact = ca + nrm * (ra - pen * 0.5);
+                    var rA = contact - a.Position;
+                    var rB = contact - b.Position;
+                    var vA = a.Velocity + a.LocalToWorld(Vector3d.Cross(a.AngularVelocity, a.WorldToLocal(rA)));
+                    var vB = b.Velocity + b.LocalToWorld(Vector3d.Cross(b.AngularVelocity, b.WorldToLocal(rB)));
+                    double vn = Vector3d.Dot(vB - vA, nrm);
+                    if (vn >= 0) continue;
+                    if (-vn > CrashSpeed)
+                    {
+                        a.Destroy($"Столкновение с «{b.Name}» на {-vn:F0} м/с");
+                        b.Destroy($"Столкновение с «{a.Name}» на {-vn:F0} м/с");
+                        continue;
+                    }
+                    double ma = a.Mass, mb = b.Mass;
+                    var Ia = a.Inertia();
+                    var Ib = b.Inertia();
+                    // Угловой вклад в эффективную массу: n · ((I⁻¹ (r × n)) × r), всё в связанных осях своего борта.
+                    double Ang(Vessel v, Vector3d I, Vector3d r)
+                    {
+                        var rl = v.WorldToLocal(r);
+                        var nl = v.WorldToLocal(nrm);
+                        var t = Vector3d.Cross(rl, nl);
+                        var w = new Vector3d(t.x / I.x, t.y / I.y, t.z / I.z);
+                        return Vector3d.Dot(Vector3d.Cross(w, rl), nl);
+                    }
+                    double k = 1 / ma + 1 / mb + Ang(a, Ia, rA) + Ang(b, Ib, rB);
+                    double J = -(1 + Restitution) * vn / k;
+                    var imp = nrm * J;
+                    a.Velocity -= imp / ma;
+                    b.Velocity += imp / mb;
+                    void Spin(Vessel v, Vector3d I, Vector3d r, Vector3d p)
+                    {
+                        var t = Vector3d.Cross(v.WorldToLocal(r), v.WorldToLocal(p));
+                        v.AngularVelocity += new Vector3d(t.x / I.x, t.y / I.y, t.z / I.z);
+                        v.SasHoldValid = false;
+                    }
+                    Spin(a, Ia, rA, -imp);
+                    Spin(b, Ib, rB, imp);
+                    // Разводим перекрытие по массам, чтобы следующий шаг не начинался внутри.
+                    a.Position -= nrm * (pen * mb / (ma + mb));
+                    b.Position += nrm * (pen * ma / (ma + mb));
+                    if (a == Active || b == Active) Post($"Удар: {(a == Active ? b : a).Name}, {-vn:F1} м/с");
+                }
+        }
+
+        bool CanCollide(Vessel a, Vessel b)
+        {
+            if (!a.Alive || !b.Alive || a.IsLanded || b.IsLanded || a.Body != b.Body) return false;
+            if (a.NoCollideUntil > Time || b.NoCollideUntil > Time) return false;
+            // Створки обтекателя раскрываются вокруг груза вплотную — их разводит сам сброс (Vessel.SplitFairing).
+            if (a.FairingHalf != 0 || b.FairingHalf != 0) return false;
+            // Сближение двух бортов с узлами — дело стыковки (§6.6), её захват мягче удара.
+            return !(a.HasPort() && b.HasPort());
+        }
+
+        /// <summary>Ось борта как капсула: концы отрезка в P (от центра тела), радиус и длина.</summary>
+        static void Hull(Vessel v, out Vector3d p0, out Vector3d p1, out double r, out double len)
+        {
+            v.MassProperties(out _, out double com, out len, out _);
+            r = v.HullRadius();
+            var nose = v.NoseP;
+            var bottom = v.Position - nose * com;
+            double lo = Math.Min(r, len * 0.5), hi = Math.Max(len - r, len * 0.5);
+            p0 = bottom + nose * lo;
+            p1 = bottom + nose * hi;
+        }
+
+        /// <summary>Ближайшие точки двух отрезков (Ericson, Real-Time Collision Detection, §5.1.9).</summary>
+        static void ClosestPoints(Vector3d p1, Vector3d q1, Vector3d p2, Vector3d q2, out Vector3d c1, out Vector3d c2)
+        {
+            var d1 = q1 - p1;
+            var d2 = q2 - p2;
+            var r = p1 - p2;
+            double a = Vector3d.Dot(d1, d1), e = Vector3d.Dot(d2, d2), f = Vector3d.Dot(d2, r);
+            double s, t;
+            if (a <= 1e-12 && e <= 1e-12) { s = t = 0; }
+            else if (a <= 1e-12) { s = 0; t = MathD.Clamp(f / e, 0, 1); }
+            else
+            {
+                double c = Vector3d.Dot(d1, r);
+                if (e <= 1e-12) { t = 0; s = MathD.Clamp(-c / a, 0, 1); }
+                else
+                {
+                    double b = Vector3d.Dot(d1, d2), den = a * e - b * b;
+                    if (den > 1e-9 * a * e) s = MathD.Clamp((b * f - c * e) / den, 0, 1);
+                    else
+                    {
+                        // Параллельные корпуса (бок о бок): ближайших точек целый отрезок, Эриксон берёт его край. Удар в торец
+                        // уводит импульс во вращение, и ЦМ продолжают сближаться — берём середину перекрытия проекций.
+                        double s0 = -c / a, s1 = (b - c) / a;
+                        double lo = Math.Max(0, Math.Min(s0, s1)), hi = Math.Min(1, Math.Max(s0, s1));
+                        s = lo <= hi ? (lo + hi) * 0.5 : MathD.Clamp(s0, 0, 1);
+                    }
+                    t = (b * s + f) / e;
+                    if (t < 0) { t = 0; s = MathD.Clamp(-c / a, 0, 1); }
+                    else if (t > 1) { t = 1; s = MathD.Clamp((b - c) / a, 0, 1); }
+                }
+            }
+            c1 = p1 + d1 * s;
+            c2 = p2 + d2 * t;
         }
 
         // ---------------------------------------------------------------- рельсы
@@ -590,8 +755,11 @@ namespace Kare.Space.Core
             }
         }
 
-        /// <summary>Неактивный корабль в полёте: рельсы, а провалившийся в атмосферу — потерян.</summary>
-        void MovePassive(Vessel v, double t)
+        /// <summary>
+        /// Неактивный корабль в полёте: рельсы. Провалившийся под «пол» в полной физике (keep) сходит с рельсов и со
+        /// следующего кадра падает по физике; на ускорении (или сверх MaxPassivePhysics) — потерян.
+        /// </summary>
+        void MovePassive(Vessel v, double t, bool keep = false)
         {
             double floor = PatchedConics.RailsFloorRadius(v.Body);
             if (!v.OnRails)
@@ -609,7 +777,12 @@ namespace Kare.Space.Core
                 double tIn = v.Orbit.NextTimeAtRadius(floor, Time, false);
                 if (!double.IsNaN(tIn) && tIn <= t)
                 {
-                    LoseVessel(v);
+                    if (keep)
+                    {
+                        v.Orbit.GetState(t, out v.Position, out v.Velocity);
+                        LeaveRails(v);
+                    }
+                    else LoseVessel(v);
                     return;
                 }
             }

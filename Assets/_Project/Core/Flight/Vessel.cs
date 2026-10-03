@@ -125,6 +125,8 @@ namespace Kare.Space.Core
         public double HighGTimer;
         public bool CrewLost;
         public double CurrentThrust;
+        /// <summary>До этого момента борт не сталкивается: только что разделённые части стоят вплотную (Universe.CollisionGrace).</summary>
+        public double NoCollideUntil = double.NegativeInfinity;
 
         public event Action<Vessel, string> Event;
 
@@ -191,6 +193,8 @@ namespace Kare.Space.Core
         int EnclosingFairing(int i)
         {
             var secs = Design.Sections;
+            // Радиальные блоки снаружи пакета: обтекатель их не закрывает (конструктор ставит его выше).
+            if (secs[i].IsRadial) return -1;
             for (int f = i + 1; f < secs.Count; f++)
                 if (Attached[f] && secs[f].Kind == SectionKind.Fairing && f - secs[f].EnclosesBelow <= i)
                     return f;
@@ -229,13 +233,13 @@ namespace Kare.Space.Core
             double h = 0;
             foreach (int i in Order)
             {
-                if (!Attached[i]) continue;
+                if (!Attached[i] || secs[i].IsRadial) continue;
                 var s = secs[i];
                 if (s.Kind == SectionKind.Fairing)
                 {
                     double b = h;
                     for (int j = i - s.EnclosesBelow; j < i; j++)
-                        if (j >= 0 && Attached[j]) { b = baseHeight[j]; break; }
+                        if (j >= 0 && Attached[j] && !secs[j].IsRadial) { b = baseHeight[j]; break; }
                     baseHeight[i] = b;
                     h = Math.Max(h, b + s.Length);
                 }
@@ -244,6 +248,14 @@ namespace Kare.Space.Core
                     baseHeight[i] = h;
                     h += s.Length;
                 }
+            }
+            // Второй проход: радиальные блоки встают от низа родителя и длину пакета не добавляют (если не длиннее его).
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!Attached[i] || !secs[i].IsRadial) continue;
+                int p = secs[i].RadialParent;
+                baseHeight[i] = (Attached[p] ? baseHeight[p] : 0) + secs[i].RadialLift;
+                h = Math.Max(h, baseHeight[i] + secs[i].Length);
             }
             return h;
         }
@@ -264,7 +276,7 @@ namespace Kare.Space.Core
                 double m = SectionMass(i);
                 mass += m;
                 moment += m * (layoutBuf[i] + secs[i].Length * 0.5);
-                maxRadius = Math.Max(maxRadius, secs[i].Radius);
+                maxRadius = Math.Max(maxRadius, secs[i].Radius + secs[i].RadialOffset);
             }
             comHeight = mass > 0 ? moment / mass : 0;
         }
@@ -296,8 +308,9 @@ namespace Kare.Space.Core
                 double t = s.Engine.Thrust(pressure) * s.EngineCount * EffectiveThrottle(i);
                 double side = t * Math.Sin(s.Engine.GimbalDeg * Constants.Deg2Rad);
                 pitch += side * Math.Max(0.5, com - layoutBuf[i]);
-                // Крен качанием возможен только у связки из нескольких камер.
-                if (s.EngineCount > 1) roll += side * s.Radius * 0.5;
+                // Крен качанием возможен только у связки из нескольких камер; у радиальных блоков плечо — их вынос от оси.
+                if (s.IsRadial) roll += side * s.RadialOffset;
+                else if (s.EngineCount > 1) roll += side * s.Radius * 0.5;
             }
             return new Vector3d(pitch, roll, pitch);
         }
@@ -317,19 +330,36 @@ namespace Kare.Space.Core
             }
         }
 
-        /// <summary>Верхняя присоединённая секция по порядку связки (после стыковки — секция второго борта).</summary>
+        /// <summary>Верхняя присоединённая секция по порядку связки (после стыковки — секция второго борта). Радиальные блоки — не торцы.</summary>
         public int TopSection()
         {
             for (int k = Order.Length - 1; k >= 0; k--)
-                if (Attached[Order[k]]) return Order[k];
+                if (Attached[Order[k]] && !Design.Sections[Order[k]].IsRadial) return Order[k];
             return -1;
         }
 
         public int BottomSection()
         {
             for (int k = 0; k < Order.Length; k++)
-                if (Attached[Order[k]]) return Order[k];
+                if (Attached[Order[k]] && !Design.Sections[Order[k]].IsRadial) return Order[k];
             return -1;
+        }
+
+        /// <summary>Радиус корпуса пакета без радиальных блоков, м — для столкновений (Universe.Collide).</summary>
+        public double HullRadius()
+        {
+            double r = 0.1;
+            for (int i = 0; i < Attached.Length; i++)
+                if (Attached[i] && !Design.Sections[i].IsRadial) r = Math.Max(r, Design.Sections[i].Radius);
+            return r;
+        }
+
+        /// <summary>Есть стыковочный узел (свободный или занятый): такие пары не сталкиваются — их сводит стыковка.</summary>
+        public bool HasPort()
+        {
+            for (int i = 0; i < Attached.Length; i++)
+                if (Attached[i] && Design.Sections[i].DockingPort) return true;
+            return false;
         }
 
         /// <summary>Стыковочный узел — верхний торец связки: его высота над центром масс, м (§6.6).</summary>
@@ -490,11 +520,12 @@ namespace Kare.Space.Core
                     return Attached[i] && secs[i].HasEngine && !Flipped[i];
                 case StageActionType.Separate:
                 {
+                    if (secs[i].IsRadial) return Attached[i];
                     bool below = false, above = false;
                     for (int j = 0; j < secs.Count; j++)
-                        if (Attached[j]) { if (j <= i) below = true; else above = true; }
+                        if (Attached[j]) { if (Design.DetachedBy(j, i)) below = true; else above = true; }
                     if (below && above) return true;
-                    int next = i + 1;
+                    int next = Design.NextCore(i);
                     return a.IgniteNext && next < secs.Count && Attached[next] && secs[next].HasEngine && !Armed[next] && !Flipped[next];
                 }
                 case StageActionType.JettisonFairing:
@@ -541,14 +572,29 @@ namespace Kare.Space.Core
             }
         }
 
-        /// <summary>Следующая ступень (пробел). Возвращает отделившиеся борта — их добавит Universe.</summary>
+        /// <summary>
+        /// Следующая ступень (пробел). Возвращает отделившиеся борта — их добавит Universe. Шаги с WithPrevious идут тем же
+        /// нажатием (группа ступени конструктора: ядро и ускорители, отделение и запуск).
+        /// </summary>
         public List<Vessel> Stage()
         {
             var debris = new List<Vessel>();
             if (!Alive) return debris;
             NextStage = NextApplicable(NextStage);
             if (NextStage >= Design.Sequence.Count) return debris;
-            var a = Design.Sequence[NextStage++];
+            var seq = Design.Sequence;
+            Execute(seq[NextStage++], debris);
+            while (NextStage < seq.Count && seq[NextStage].WithPrevious)
+            {
+                var a = seq[NextStage++];
+                if (Applicable(a)) Execute(a, debris);
+            }
+            UpdateEngines();
+            return debris;
+        }
+
+        void Execute(StageAction a, List<Vessel> debris)
+        {
             var secs = Design.Sections;
             switch (a.Type)
             {
@@ -560,7 +606,15 @@ namespace Kare.Space.Core
                 {
                     var mask = new bool[secs.Count];
                     bool any = false;
-                    if (secs[a.Section].Kind == SectionKind.Fairing)
+                    if (secs[a.Section].IsRadial)
+                    {
+                        if (Attached[a.Section])
+                        {
+                            debris.AddRange(SplitRadial(a.Section));
+                            Raise($"Отделение: {secs[a.Section].Name}");
+                        }
+                    }
+                    else if (secs[a.Section].Kind == SectionKind.Fairing)
                     {
                         // Переходник (SLA «Аполлона», §6.6): ниже — ступень с грузом. Груз со стыковочным узлом (ЛМ) — не обломок:
                         // к нему ещё причаливают. Сам переходник раскрывается створками, как обтекатель.
@@ -581,15 +635,16 @@ namespace Kare.Space.Core
                     }
                     else
                     {
-                        for (int i = 0; i <= a.Section; i++)
-                            if (Attached[i]) { mask[i] = true; any = true; }
+                        for (int i = 0; i < secs.Count; i++)
+                            if (Attached[i] && Design.DetachedBy(i, a.Section)) { mask[i] = true; any = true; }
                         if (any)
                         {
-                            debris.Add(Split(mask, StagePush));
+                            double push = secs[a.Section].DecouplerPush > 0 ? secs[a.Section].DecouplerPush : StagePush;
+                            debris.Add(Split(mask, push));
                             Raise($"Отделение: {secs[a.Section].Name}");
                         }
                     }
-                    if (a.IgniteNext) ArmNext(a.Section + 1);
+                    if (a.IgniteNext) ArmNext(Design.NextCore(a.Section));
                     break;
                 }
 
@@ -639,8 +694,6 @@ namespace Kare.Space.Core
                     }
                     break;
             }
-            UpdateEngines();
-            return debris;
         }
 
         void Arm(int i)
@@ -748,9 +801,16 @@ namespace Kare.Space.Core
             };
             Array.Copy(Order, d.Order, Order.Length);
             Array.Copy(Flipped, d.Flipped, Flipped.Length);
+            bool burning = false;
             for (int i = 0; i < mask.Length; i++)
             {
-                d.Armed[i] = !debris && mask[i] && Armed[i];
+                // Отделённая на ходу ступень не глохнет (§5, «разделение по-честному»): работающий двигатель уходит с ней
+                // на прежнем газе и жжёт до выработки — догоняет и бьёт верхнюю ступень, если пилот поспешил.
+                bool run = mask[i] && Running[i];
+                burning |= run;
+                d.Running[i] = run;
+                d.ignitionLatch[i] = run;
+                d.Armed[i] = mask[i] && Armed[i] && (!debris || run);
                 d.Attached[i] = mask[i];
                 d.Propellant[i] = Propellant[i];
                 d.IgnitionsLeft[i] = IgnitionsLeft[i];
@@ -764,6 +824,7 @@ namespace Kare.Space.Core
                     Running[i] = false;
                 }
             }
+            if (burning) d.Throttle = Throttle;
             d.NextStage = debris ? Design.Sequence.Count : NextStage;
             if (debris)
             {
@@ -796,6 +857,67 @@ namespace Kare.Space.Core
             if (mv > 0) Velocity -= NoseP * (dv * md / mv);
             SasHoldValid = false;
             return d;
+        }
+
+        /// <summary>
+        /// Толчок радиальных разделителей, м/с, и закрутка блока верхом наружу, рад/с (§5, как сброс ускорителей «Союза»
+        /// и KSP). Пара: низ блока уходит наружу со скоростью Push − Tumble·L/2 — должна остаться > 0 (L = 20 м → 2 − 0,1·10 = 1),
+        /// иначе низ блока качнётся внутрь, на ядро.
+        /// </summary>
+        public const double RadialPush = 2, RadialTumble = 0.1;
+
+        /// <summary>
+        /// Отделить радиальную группу j: каждый из N блоков — свой борт-обломок на своём месте вокруг оси, со скоростью
+        /// точки жёсткого тела (v + ω × r), толчком наружу и закруткой «вершина наружу». Толчки симметричны — суммарный
+        /// импульс сохраняется без отдачи ядру; ядро только встаёт на свой новый ЦМ.
+        /// </summary>
+        List<Vessel> SplitRadial(int j)
+        {
+            var secs = Design.Sections;
+            var s = secs[j];
+            int n = s.RadialCount;
+            MassProperties(out _, out double com0, out _, out _);
+            double mid = layoutBuf[j] + s.Length * 0.5 - com0;
+            var piece = Design.RadialPiece(j);
+            double push = s.DecouplerPush > 0 ? s.DecouplerPush : RadialPush;
+            var w = AngularVelocity;
+            var res = new List<Vessel>();
+            for (int c = 0; c < n; c++)
+            {
+                double ang = 2 * Math.PI * c / n;
+                // Блок c стоит по направлению (cos, 0, sin) в связанных осях — так же его рисует VesselView.
+                var dir = new Vector3d(Math.Cos(ang), 0, Math.Sin(ang));
+                var r = dir * s.RadialOffset + new Vector3d(0, mid, 0);
+                var p = new Vessel(piece, $"{s.Name} №{c + 1} (обломок)")
+                {
+                    IsDebris = true,
+                    Body = Body,
+                    Position = Position + LocalToWorld(r),
+                    Velocity = Velocity + LocalToWorld(Vector3d.Cross(w, r) + dir * push),
+                    Attitude = Attitude,
+                    // ω × (0, h, 0) = dir при ω = up × dir: верх блока уходит наружу.
+                    AngularVelocity = w + Vector3d.Cross(Vector3d.up, dir) * RadialTumble,
+                    Situation = Situation,
+                    AnchorBodyFixed = AnchorBodyFixed + (AttitudeBodyFixed * r).SwapYZ,
+                    AttitudeBodyFixed = AttitudeBodyFixed,
+                    Throttle = Running[j] ? Throttle : 0,
+                    Sas = SasMode.Off,
+                    LaunchTime = LaunchTime,
+                };
+                p.Propellant[0] = Propellant[j] / n;
+                p.IgnitionsLeft[0] = IgnitionsLeft[j];
+                p.Running[0] = p.Armed[0] = p.ignitionLatch[0] = Running[j];
+                res.Add(p);
+            }
+            Attached[j] = false;
+            Running[j] = false;
+            MassProperties(out _, out double com1, out _, out _);
+            var rc = new Vector3d(0, com1 - com0, 0);
+            Position += LocalToWorld(rc);
+            if (IsLanded) AnchorBodyFixed += (AttitudeBodyFixed * rc).SwapYZ;
+            Velocity += LocalToWorld(Vector3d.Cross(w, rc));
+            SasHoldValid = false;
+            return res;
         }
 
         /// <summary>Имя отделившегося управляемого борта: по обитаемому модулю (до двоеточия), с ведущей ступенью снизу.</summary>

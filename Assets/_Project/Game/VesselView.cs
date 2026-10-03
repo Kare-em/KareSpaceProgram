@@ -90,6 +90,10 @@ namespace Kare.Space.Game
         {
             public int Index;
             public Transform Tr;
+            /// <summary>Радиальный блок (§5.4): смещение от оси и поворот копии. Связанные оси борта и локальные оси вида
+            /// совпадают (Attitude уже в U) — копия c стоит там же, где ядро выпустит обломок c (Vessel.SplitRadial).</summary>
+            public Vector3 Radial;
+            public Quaternion Yaw = Quaternion.identity;
             public Transform Plume, Glow;
             public Renderer CoreR, GlowR;
             public Light PlumeLight;
@@ -216,16 +220,20 @@ namespace Kare.Space.Game
             {
                 if (interstageFbx == null || j <= 0 || j >= secs.Count || !Vessel.Attached[j] || Vessel.IsEnclosed(j)) return 0;
                 var sj = secs[j];
-                if (!sj.HasEngine || sj.EngineCount != 1) return 0;
+                if (!sj.HasEngine || sj.EngineCount != 1 || sj.IsRadial) return 0;
                 bool own = (sj.Model == SectionModel.VostokService && serviceFbx != null) || (sj.Model == SectionModel.Luna9 && luna9Fbx != null)
                            || boot != null && boot.CraftMeshFor(sj.Model) != null;
                 return own ? 0 : Mathf.Min((float)sj.Radius * 0.45f, 1.2f) * 1.4f;
             }
+            // Радиальная группа — N одинаковых блоков: каждый строим своим Part, чтобы факел и парашют жили у каждой копии.
+            var slots = new List<(int i, int c)>();
             for (int i = 0; i < secs.Count; i++)
+                for (int c = 0; c < (secs[i].IsRadial ? secs[i].RadialCount : 1); c++) slots.Add((i, c));
+            foreach (var (i, copy) in slots)
             {
                 if (!Vessel.Attached[i] || Vessel.IsEnclosed(i)) continue;
                 var s = secs[i];
-                var go = new GameObject(s.Name);
+                var go = new GameObject(s.IsRadial ? $"{s.Name} №{copy + 1}" : s.Name);
                 go.transform.SetParent(transform, false);
                 float len = (float)s.Length, r = (float)s.Radius;
                 Mesh mesh; Color col;
@@ -240,10 +248,17 @@ namespace Kare.Space.Game
                     default:
                         // Ферма верхней ступени стоит в верхней части этой: корпус короче на её высоту, иначе ферма
                         // целиком внутри обечайки и не видна. Длина в физике та же.
-                        mesh = ProcMesh.Frustum(r, r, Mathf.Max(len - TrussHeight(i + 1), len * 0.5f), 24, true);
+                        mesh = ProcMesh.Frustum(r, r, Mathf.Max(len - (s.IsRadial ? 0 : TrussHeight(Vessel.Design.NextCore(i))), len * 0.5f), 24, true);
                         col = StageColor; break;
                 }
                 var part = new Part { Index = i, Tr = go.transform };
+                if (s.IsRadial)
+                {
+                    float ang = 2 * Mathf.PI * copy / s.RadialCount;
+                    part.Radial = new Vector3(Mathf.Cos(ang), 0, Mathf.Sin(ang)) * (float)s.RadialOffset;
+                    // Поворот вокруг оси: +X блока смотрит наружу (Euler по Y на −угол переводит +X в (cos, 0, sin)).
+                    part.Yaw = Quaternion.Euler(0, -ang * Mathf.Rad2Deg, 0);
+                }
                 // Своя модель аппарата целиком заменяет процедурный корпус; у отсеков с двигателем в ней и сопло.
                 Mesh model = s.Model == SectionModel.Sputnik ? sputnikFbx : s.Model == SectionModel.VostokService ? serviceFbx
                            : s.Model == SectionModel.Luna9 ? luna9Fbx : boot != null ? boot.CraftMeshFor(s.Model) : null;
@@ -364,7 +379,7 @@ namespace Kare.Space.Game
                     nozzle.transform.SetParent(go.transform, false);
                     nozzle.transform.localPosition = new Vector3(0, ownNozzle ? (craft ? ownBottom : 0) : -nr * 1.4f, 0);
                     var bell = ProcMesh.Bell(nr, nr * 0.45f, nr * 1.4f, 16);
-                    if (ring == 0 && !ownNozzle && i > 0 && interstageFbx != null)
+                    if (ring == 0 && !ownNozzle && i > 0 && interstageFbx != null && !s.IsRadial)
                     {
                         // Ферма горячего разделения вокруг двигателя верхней ступени (Блок Е «Востока», II ступень
                         // «Кары»): от днища вниз на высоту колокола, до стыка с нижней ступенью.
@@ -813,8 +828,8 @@ namespace Kare.Space.Game
                 // После перестроения (§6.6) ЛМ стоит на КСМ вверх ногами: низ секции — сверху её места в пакете.
                 bool flip = Vessel.Flipped[p.Index];
                 float lift = flip ? (float)Vessel.Design.Sections[p.Index].Length : 0;
-                p.Tr.localPosition = new Vector3(0, (float)(baseHeight[p.Index] - com) + lift, 0);
-                p.Tr.localRotation = flip ? FlipRotation : Quaternion.identity;
+                p.Tr.localPosition = p.Radial + new Vector3(0, (float)(baseHeight[p.Index] - com) + lift, 0);
+                p.Tr.localRotation = flip ? FlipRotation * p.Yaw : p.Yaw;
                 if (p.Chute != null) UpdateChute(p, airflow);
                 if (p.Plume == null) continue;
                 bool on = Vessel.Running[p.Index];

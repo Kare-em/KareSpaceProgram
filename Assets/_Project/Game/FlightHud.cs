@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using Kare.Space.Core;
 using UnityEngine;
@@ -170,21 +171,31 @@ namespace Kare.Space.Game
         void StageStack(Vessel v, float w, float h)
         {
             var seq = v.Design.Sequence;
-            int from = v.NextStage, count = Mathf.Min(seq.Count - from, 6);
+            // Группы ступеней (§5.4): действия с WithPrevious идут тем же пробелом — одна ячейка, иконки рядом.
+            var groups = new List<(int from, int to)>();
+            for (int i = v.NextStage; i < seq.Count; i++)
+            {
+                if (groups.Count > 0 && seq[i].WithPrevious) groups[groups.Count - 1] = (groups[groups.Count - 1].from, i);
+                else groups.Add((i, i));
+            }
+            int count = Mathf.Min(groups.Count, 6);
             const float cell = 50;
-            float x = w - cell - 12, y = 110;
+            float y = 110;
             if (count <= 0) return;
             // Снизу вверх, как ступени на ракете: ближайшее действие — нижнее.
             for (int k = 0; k < count; k++)
             {
-                var a = seq[from + k];
-                var r = new Rect(x, y + (count - 1 - k) * (cell + 6), cell, cell);
+                var (g0, g1) = groups[k];
+                int n = g1 - g0 + 1;
+                float cw = cell + (n - 1) * (cell - 14);
+                var r = new Rect(w - cw - 12, y + (count - 1 - k) * (cell + 6), cw, cell);
                 bool next = k == 0;
                 Fill(r, next ? new Color(0.10f, 0.30f, 0.40f, 0.85f) : Panel);
                 GUI.color = next ? Accent : Dim;
-                DrawIcon(new Rect(r.x + 8, r.y + 8, cell - 16, cell - 16), StageIcon(a.Type));
+                for (int j = 0; j < n; j++)
+                    DrawIcon(new Rect(r.x + 8 + j * (cell - 14), r.y + 8, cell - 16, cell - 16), StageIcon(seq[g0 + j].Type));
                 GUI.color = Color.white;
-                GUI.Label(new Rect(r.x - 22, r.y, 20, cell), (seq.Count - (from + k)).ToString(), small);
+                GUI.Label(new Rect(r.x - 22, r.y, 20, cell), (groups.Count - k).ToString(), small);
             }
             float by = y + count * (cell + 6);
             var tip = new GUIStyle(small) { alignment = TextAnchor.UpperRight, wordWrap = true };

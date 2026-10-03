@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using Kare.Space.Core;
 
@@ -29,6 +31,9 @@ static class Program
         Run("stats", TestStats, only);
         Run("stability", TestStability, only);
         Run("separation", TestSeparation, only);
+        Run("craft", TestCraft, only);
+        Run("collide", TestCollide, only);
+        Run("craft_fly", TestCraftFly, only);
         Run("karman", TestKarman, only);
         Run("sputnik", TestSputnik, only);
         Run("mechta", () => TestLunar("mechta", 30e6), only);
@@ -364,6 +369,125 @@ static class Program
     /// §5: после разделения каждая часть стоит там, где была в пакете (Position — ЦМ части), импульс сохранён.
     /// До исправления обломок и борт вставали в старый общий ЦМ — I ступень оказывалась внутри II.
     /// </summary>
+    /// <summary>Конструктор (§5.4): JSON туда-обратно, компиляция пресетов, группы ступеней и радиальное отделение.</summary>
+    static void TestCraft()
+    {
+        foreach (var c in CraftPresets.All())
+        {
+            var json = c.ToJson();
+            Check($"Конструктор: JSON туда-обратно «{c.Name}»", Craft.FromJson(json).ToJson() == json);
+            var b = CraftCompiler.Compile(c);
+            foreach (var e in b.Errors) Console.WriteLine($"   ошибка: {e}");
+            foreach (var w in b.Warnings) Console.WriteLine($"   предупреждение: {w}");
+            Console.WriteLine($"   {c.Name}: {b.Mass / 1000:F1} т, высота {b.Height:F1} м, ширина {b.Width:F1} м, ЦМ {b.ComHeight:F1} м");
+            if (b.Design != null)
+            {
+                foreach (var sec in b.Design.Sections)
+                    Console.WriteLine($"      {sec.Name,-28} {sec.Kind,-8} {(sec.IsRadial ? $"×{sec.RadialCount} на {sec.RadialOffset:F2} м" : "")}");
+                foreach (var st in b.Stats)
+                    Console.WriteLine($"      {st.Name,-28} Δv {st.DeltaVVac,6:F0} (у Земли {st.DeltaVSL,6:F0}) TWR {st.TwrSL:F2}/{st.TwrVac:F2}");
+                int i = 0;
+                foreach (var a in b.Design.Sequence)
+                    Console.WriteLine($"      {i++,2}. {a.Type} {b.Design.Sections[a.Section].Name}{(a.IgniteNext ? " +запуск" : "")}{(a.WithPrevious ? " (вместе)" : "")}");
+            }
+            Check($"Конструктор: «{c.Name}» собирается", b.Ok, string.Join("; ", b.Errors));
+        }
+
+        var sb = CraftCompiler.Compile(CraftPresets.Semyorka());
+        if (!sb.Ok) return;
+        var d = sb.Design;
+        Check("Семёрка: TWR на старте 1,15–1,6", sb.Stats[0].TwrSL > 1.15 && sb.Stats[0].TwrSL < 1.6, $"{sb.Stats[0].TwrSL:F2}");
+        var q = d.Sequence;
+        Check("Семёрка: старт — ядро и боковушки одним нажатием",
+            q.Count > 1 && q[0].Type == StageActionType.Ignite && q[1].Type == StageActionType.Ignite && q[1].WithPrevious
+            && d.Sections[q[1].Section].IsRadial);
+
+        // Отделение боковушек на ходу: 4 обломка вокруг оси, импульс сохраняется, уходят наружу и продолжают жечь.
+        var (u, _) = StartMission("sputnik");
+        u.Vessels.Remove(u.Active);
+        var v = u.Launch(d, MissionCatalog.Get("sputnik").SiteId);
+        v.Situation = Situation.Flying;
+        v.Velocity += v.NoseP * 500;
+        v.AngularVelocity = new Vector3d(0.01, 0, 0.005);
+        v.Stage();
+        int rj = Array.FindIndex(d.Sections.ToArray(), x => x.IsRadial);
+        v.Propellant[rj] *= 0.5;
+        v.MassProperties(out double m0, out _, out _, out _);
+        var mom0 = v.Velocity * m0;
+        int sepIdx = q.FindIndex(a => a.Type == StageActionType.Separate && d.Sections[a.Section].IsRadial);
+        while (v.NextApplicable(v.NextStage) < sepIdx) v.NextStage++;
+        var list = v.Stage();
+        var mom = v.Velocity * v.Mass;
+        double minOut = double.MaxValue;
+        int burning = 0;
+        foreach (var w in list)
+        {
+            w.MassProperties(out double m, out _, out _, out _);
+            mom += w.Velocity * m;
+            var radial = w.Position - v.Position;
+            radial -= v.NoseP * Vector3d.Dot(radial, v.NoseP);
+            minOut = Math.Min(minOut, Vector3d.Dot(w.Velocity - v.Velocity, radial.normalized));
+            if (w.Running[0] && w.Throttle > 0) burning++;
+        }
+        Check("Боковушки: 4 обломка", list.Count == 4, $"{list.Count}");
+        Check("Боковушки: импульс сохраняется", (mom - mom0).magnitude / m0 < 1e-6, $"{(mom - mom0).magnitude / m0:E1} м/с");
+        Check("Боковушки: уходят наружу", minOut > 1, $"{minOut:F2} м/с");
+        Check("Боковушки: двигатели работают дальше", burning == 4, $"{burning}");
+    }
+
+    /// <summary>Столкновения бортов: медленный удар — отскок с сохранением импульса, быстрый — гибель обоих.</summary>
+    static void TestCollide()
+    {
+        foreach (double speed in new[] { 1.5, 20.0 })
+        {
+            var (u, _) = StartMission("sputnik");
+            var a = u.Active;
+            a.Situation = Situation.Flying;
+            a.Position += a.NoseP * 5000;
+            var b = new Vessel(VesselPresets.Kara1Heavy(), "Мишень")
+            {
+                Body = a.Body,
+                Attitude = a.Attitude,
+                Situation = Situation.Flying,
+            };
+            // Бок о бок: оси параллельны, между осями 3 м — корпуса перекрываются, сближение по боку.
+            var side = a.LocalToWorld(new Vector3d(1, 0, 0));
+            b.Position = a.Position + side * 3;
+            b.Velocity = a.Velocity - side * speed;
+            u.Add(b);
+            a.MassProperties(out double ma, out _, out _, out _);
+            b.MassProperties(out double mb, out _, out _, out _);
+            var mom0 = a.Velocity * ma + b.Velocity * mb;
+            u.Collide(new List<Vessel> { a, b });
+            if (speed < 5)
+            {
+                var mom = a.Velocity * a.Mass + b.Velocity * b.Mass;
+                double vn = Vector3d.Dot(b.Velocity - a.Velocity, side);
+                Check("Удар 1,5 м/с: оба целы", a.Alive && b.Alive);
+                Check("Удар 1,5 м/с: импульс сохраняется", (mom - mom0).magnitude / (ma + mb) < 1e-6, $"{(mom - mom0).magnitude / (ma + mb):E1} м/с");
+                Check("Удар 1,5 м/с: расходятся", vn > 0, $"{vn:F2} м/с");
+            }
+            else
+                Check("Удар 20 м/с: оба разрушены", !a.Alive && !b.Alive, $"{a.DestroyReason}");
+        }
+    }
+
+    /// <summary>Ракета из конструктора летит: «Семёрка» сама выходит на орбиту 200 км и сбрасывает боковушки.</summary>
+    static void TestCraftFly()
+    {
+        var b = CraftCompiler.Compile(CraftPresets.Semyorka());
+        if (!b.Ok) { Check("Семёрка из конструктора: сборка", false, string.Join("; ", b.Errors)); return; }
+        var (u, tr) = StartMission("sputnik");
+        u.Vessels.Remove(u.Active);
+        u.Launch(b.Design, MissionCatalog.Get("sputnik").SiteId);
+        bool ok = Ascend(u, tr, 200000);
+        var v = u.Active;
+        int debris = u.Vessels.Count(x => x != v);
+        Console.WriteLine($"   {OrbitText(v, u.Time)}, обломков {debris}");
+        Check("Семёрка из конструктора: на орбите", ok && v.Alive, v.DestroyReason ?? "");
+        Check("Семёрка из конструктора: боковушки сброшены", !v.Attached[Array.FindIndex(b.Design.Sections.ToArray(), x => x.IsRadial)]);
+    }
+
     static void TestSeparation()
     {
         var (u, _) = StartMission("vostok");

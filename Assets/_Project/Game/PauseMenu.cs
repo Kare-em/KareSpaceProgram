@@ -35,7 +35,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
 
             int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 2 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + DetailBlock;
+            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + DetailBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -57,6 +57,14 @@ namespace Kare.Space.Game
                 IsOpen = false;
                 Reload();
             }
+            y += Row + 8;
+            // Конструктор (§5.4) — своя сцена; миссия и выбранная ракета запоминаются в статиках.
+            if (GUI.Button(new Rect(x, y, w, Row), GameBootstrap.NextDesign != null ? "В конструктор (своя ракета)" : "В конструктор ракет", button))
+            {
+                IsOpen = false;
+                HangarController.ReturnMissionId = boot.Mission?.Id;
+                SceneManager.LoadScene(HangarController.SceneName);
+            }
             y += Row + 20;
 
             // Выбор миссии: перезапуск сцены с другой миссией (MissionCatalog), например «Луна-9» для посадки.
@@ -71,6 +79,7 @@ namespace Kare.Space.Game
                 if (GUI.Button(br, m.Title, small) && !cur)
                 {
                     GameBootstrap.NextMissionId = m.Id;
+                    GameBootstrap.NextDesign = null; // миссия со своим историческим носителем
                     IsOpen = false;
                     Reload();
                 }
