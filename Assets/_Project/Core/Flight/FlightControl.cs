@@ -691,9 +691,12 @@ namespace Kare.Space.Core
             cNrm = Vector3d.Dot(dv, nrm) / total;
             cRad = Vector3d.Dot(dv, rad) / total;
             double burn = FlightControl.BurnTime(v, total);
+            // Текущая ступень без запусков (блок И «Молнии» перед разгоном блоком Л): время бесконечно, и без
+            // повторного плана после её сброса разгон шёл «коротким» законом — апоцентр 271 тыс. км, Луна мимо.
+            if (double.IsInfinity(burn)) { planned = null; return; }
             double period = orbit.Period;
             bool longBurn = double.IsInfinity(period) ? burn > LongBurnSeconds : burn > LongBurnPeriodShare * period;
-            if (!longBurn || double.IsInfinity(burn) || Math.Abs(cPro) < EnergyCutoffAlong) return;
+            if (!longBurn || Math.Abs(cPro) < EnergyCutoffAlong) return;
             var after = vel + dv;
             targetEnergy = after.sqrMagnitude / 2 - v.Body.Mu / r.magnitude;
             sign = Math.Sign(cPro);

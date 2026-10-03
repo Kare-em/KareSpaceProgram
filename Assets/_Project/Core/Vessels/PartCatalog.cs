@@ -267,7 +267,7 @@ namespace Kare.Space.Core
             Add(new PartDef
             {
                 Id = "legs", Name = "Посадочные опоры", Category = PartCategory.Utility, Diameter = 1, Length = 0, DryMass = 250,
-                LandingLegs = true, Description = "Мягкая посадка на тело без атмосферы (G)",
+                LandingLegs = true, Description = "Мягкая посадка на тело без атмосферы; G — выпуск и уборка",
             });
             Add(new PartDef
             {

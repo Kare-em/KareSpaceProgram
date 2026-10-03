@@ -208,12 +208,30 @@ static class Program
         double end = u.Time + 30 * 86400, maxWarp = 1;
         int frames = 0;
         string phase = null;
+        bool inAir = false, wasHigh = false;
+        double maxG = 0, maxGTimer = 0;
         while (tr.Status == MissionStatus.Active && u.Mission != null && u.Time < end && frames < MaxFrames)
         {
             u.Advance(0.1);
             tr.Update(u);
             frames++;
             maxWarp = Math.Max(maxWarp, u.EffectiveWarp);
+            var av = u.Active;
+            // Замер входа — только при возврате с высокой орбиты (выведение тоже идёт сквозь атмосферу).
+            if (av != null && av.Alive && av.Body.HasAtmosphere && av.Altitude > 1e6) wasHigh = true;
+            if (wasHigh && av.Alive && av.Body.HasAtmosphere && !av.IsLanded && av.Altitude < av.Body.AtmosphereTop)
+            {
+                if (!inAir)
+                {
+                    var o = KeplerOrbit.FromState(av.Position, av.Velocity, av.Body.Mu, u.Time);
+                    double gamma = Math.Asin(Vector3d.Dot(av.Position.normalized, av.Velocity.normalized)) * 180 / Math.PI;
+                    Console.WriteLine($"   вход: {av.Altitude / 1000:F0} км, v {av.Velocity.magnitude:F0} м/с (пов. {av.SurfaceSpeed:F0}), " +
+                                      $"угол {gamma:F2}°, перигей {(o.PeriapsisRadius - av.Body.Radius) / 1000:F1} км, {OrbitText(av, u.Time)}");
+                }
+                inAir = true;
+                maxG = Math.Max(maxG, av.GForce);
+                maxGTimer = Math.Max(maxGTimer, av.HighGTimer);
+            }
             if (u.Mission != null && u.Mission.Phase != phase)
             {
                 phase = u.Mission.Phase;
@@ -230,6 +248,7 @@ static class Program
             frames++;
         }
         var v = u.Active;
+        if (inAir) Console.WriteLine($"   спуск: пик {maxG:F1} g, выше {FlightPhysics.CrewGLimit:F0} g — {maxGTimer:F1} с");
         Console.WriteLine($"   итог: {(v != null ? OrbitText(v, u.Time) : "нет борта")}; статус миссии: {u.Mission?.Status}");
         Check($"auto_{id}: миссия выполнена без рук", tr.Status == MissionStatus.Success,
             $"{tr.Status} {tr.FailReason}; кадров {frames} ({frames * 0.1 / 60:F1} мин реального времени), макс. ×{maxWarp:G}");
@@ -512,8 +531,15 @@ static class Program
             foreach (var w in list)
             {
                 int low = Array.IndexOf(w.Attached, true);
+                // Боковой блок (VesselDesign.RadialPiece) — свой борт из одной секции: низ — по своей группе,
+                // а от оси пакета он отстоит на RadialOffset, поэтому сверяем осевую и боковую части отдельно.
+                int radial = w == v ? -1 : secs.FindIndex(x => x.IsRadial && x.Name == w.Design.Name);
+                if (radial >= 0) low = radial;
                 w.MassProperties(out double m, out double com, out _, out _);
-                double err = (w.Position - nose * com - (bottom0 + nose * h0[low])).magnitude;
+                var diff = w.Position - nose * com - (bottom0 + nose * h0[low]);
+                double axial = Vector3d.Dot(diff, nose);
+                double side = (diff - nose * axial).magnitude;
+                double err = Math.Abs(axial) + Math.Abs(side - (radial >= 0 ? secs[radial].RadialOffset : 0));
                 Console.WriteLine($"   {w.Name}: ЦМ {com:F1} м от своего низа, низ в пакете {h0[low]:F1} м, ошибка {err:F4} м");
                 worstPos = Math.Max(worstPos, err);
                 if (w.FairingHalf != 0)
@@ -805,18 +831,58 @@ static class Program
         Check($"{id}: взлётная ступень причалила к КСМ", docked && v.Attached[4] && v.Attached[7],
               string.Join("", Array.ConvertAll(v.Attached, b => b ? "1" : "0")));
 
-        Fly(u, tr, 5, 4 * 3600, () => tr.Status == MissionStatus.Active && u.Active.Alive);
+        Fly(u, tr, 5, 4 * 3600, () => !tr.Done[1] && tr.Status == MissionStatus.Active && u.Active.Alive);
         Console.WriteLine($"   итог: {(u.Active.Alive ? OrbitText(u.Active, u.Time) : u.Active.DestroyReason)}");
-        Check($"{id}: миссия выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+        Check($"{id}: посадка и орбита ЛМ засчитаны", tr.Done[0] && tr.Done[1] && tr.Status != MissionStatus.Failed, tr.FailReason ?? "");
+
+        // Экипаж — в «Колумбию»: взлётная ступень отбрасывается, SPS остаётся взведённым на разгон к Земле.
+        // Сам возврат проверяет auto_apollo11.
+        for (int k = 0; k < 4 && u.Active.Attached.Where((b, i) => b && u.Active.Flipped[i]).Any(); k++) u.Stage();
+        v = u.Active;
+        Check($"{id}: экипаж в КСМ, SPS взведён", v.Attached[7] && !v.Attached[4] && v.Armed[6] && u.Vessels.Count(o => o.Attached[4]) == 1,
+              string.Join("", Array.ConvertAll(v.Attached, b => b ? "1" : "0")) + $" armed6={v.Armed[6]}");
     }
 
     /// <summary>«Луноход-1»: сброс посадочной ступени (съезд по трапам) и 100 м своим ходом (GDD §6.12).</summary>
     static void DriveLunokhod(Universe u, MissionTracker tr)
     {
-        while (!u.Active.IsRover && u.Active.NextStageLabel != null) u.Stage();
+        // Трапы сложены (§6.12): пробел не сбрасывает ступень, G раскладывает за FlightPhysics.RampDeployTime.
+        var lander = u.Active;
+        u.Stage();
+        Check("luna17: сложенные трапы держат луноход", !u.Active.IsRover && lander.StageBlock != null, lander.StageBlock ?? "сброшено");
+        u.ToggleDeploy();
+        double tr0 = u.Time;
+        Fly(u, tr, 0, 30, () => !lander.RampsDown && lander.Alive);
+        Check("luna17: трапы разложены", lander.RampsDown && lander.StageBlock == null, $"{u.Time - tr0:F1} с");
+        {
+            var up = lander.Position.normalized;
+            double tilt = Math.Acos(Math.Min(1, Vector3d.Dot(lander.NoseP, up))) * 180 / Math.PI;
+            double R = lander.AnchorBodyFixed.magnitude, hb = R - lander.Body.Radius - lander.Body.SurfaceHeight(lander.AnchorBodyFixed / R);
+            lander.MassProperties(out _, out double lc, out _, out _);
+            Console.WriteLine($"   КТ: наклон {tilt:F1}°, низ над грунтом {hb - lc:F2} м, подвеска {lander.Suspension:F3}");
+        }
+        for (int n = 0; n < 8 && !u.Active.IsRover && u.Active.HasNextStage; n++) u.Stage();
         var v = u.Active;
-        Check("luna17: луноход съехал", v.IsRover, v.Situation.ToString());
+        Check("luna17: луноход отделился на настиле", v.IsRover && v.RampDeck > 1, $"{v.Situation} настил {v.RampDeck:F2} м");
+        // Крышка (§6.12): G открывает за FlightPhysics.LidDeployTime, повтор закрывает.
+        int lid = v.Design.Sections.FindIndex(s => s.Deploy == DeployKind.Lid);
+        string said = v.ToggleDeploy();
+        Fly(u, tr, 0, 10, () => lid >= 0 && v.Deployed[lid] < 1 && v.Alive);
+        bool opened = lid >= 0 && v.Deployed[lid] == 1;
+        v.ToggleDeploy();
+        Fly(u, tr, 0, 10, () => lid >= 0 && v.Deployed[lid] > 0 && v.Alive);
+        Check("luna17: крышка открывается и закрывается", opened && v.Deployed[lid] == 0, said ?? "—");
+        // Съезд по трапу: высота спадает плавно, без прыжка на грунт; на рельсах поворот закрыт.
         v.PilotInput = new Vector3d(1, 0.3, 0);
+        double deck = v.RampDeck, maxJump = 0, prevH = double.NaN, t0 = u.Time;
+        Fly(u, tr, 0, 60, () => v.RampDeck > 0 && v.Alive, () =>
+        {
+            double R = v.AnchorBodyFixed.magnitude, h = R - v.Body.Radius - v.Body.SurfaceHeight(v.AnchorBodyFixed / R);
+            if (!double.IsNaN(prevH)) maxJump = Math.Max(maxJump, Math.Abs(h - prevH));
+            prevH = h;
+        });
+        Console.WriteLine($"   съезд с настила {deck:F2} м за {u.Time - t0:F1} с, путь {v.RampTravel:F1} м, макс. шаг высоты {maxJump * 100:F1} см");
+        Check("luna17: съехал по трапу без прыжка", v.RampDeck == 0 && maxJump < 0.05, $"{maxJump:F3} м");
         Fly(u, tr, 0, 600, () => tr.Status == MissionStatus.Active && v.Alive);
         v.PilotInput = Vector3d.zero;
         Console.WriteLine($"   проехал {v.DriveDistance:F0} м, {v.Situation}");
@@ -908,14 +974,21 @@ static class Program
         Check("Фридом-7 выполнен", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
     }
 
-    /// <summary>Чит меню Esc «Над Луной 15 км» + G: полный пакет со стола, падение из покоя, автопилот посадки.</summary>
+    /// <summary>
+    /// Чит меню Esc «Над Луной 15 км» + автопилот посадки: падение из покоя. Пакет Р-7 на Луну не сажается —
+    /// РД-107/108 и РД-0110 не дросселируются и не перезапускаются, тяга в 5–10 лунных весов (на терминальном
+    /// участке глохнут и падают с 400 м). Поэтому всё под станцией Е-6 сбрасывается, как после разгона блоком Л.
+    /// </summary>
     static void TestMoonDrop()
     {
-        foreach (var id in new[] { "luna9", "vostok" })
+        foreach (var id in new[] { "luna9" })
         {
             var (u, tr) = StartMission(id);
             var moon = u.System.Get("moon");
             u.Teleport(moon, 15e3, false);
+            int station = u.Active.Design.Sections.FindIndex(s => s.Name == "Станция Е-6");
+            while (u.Active.BottomSection() < station && u.Active.HasNextStage) u.Stage();
+            FlightControl.Cutoff(u.Active);
             u.Landing = new LandingAutopilot(moon);
             var lp = (LandingAutopilot.PhaseType)(-1);
             double nextLog = 0;

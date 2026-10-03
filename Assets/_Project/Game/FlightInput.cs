@@ -34,8 +34,24 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.Period)) u.WarpUp();
             if (Input.GetKeyDown(KeyCode.Comma)) u.WarpDown();
             // «/» — сброс ускорения сразу в ×1, как в KSP.
-            if (Input.GetKeyDown(KeyCode.Slash) || Input.GetKeyDown(KeyCode.KeypadDivide)) u.SetWarp(0);
+            if (Input.GetKeyDown(KeyCode.Slash) || Input.GetKeyDown(KeyCode.KeypadDivide)) u.WarpReset();
             if (!v.Alive) return;
+            // Y — автопилот всей миссии (§6.11): от стола до последней цели без рук, ускорением правит сам.
+            // Снимается только повторным Y: руль, газ и прочие клавиши на время автопилота закрыты.
+            if (Input.GetKeyDown(KeyCode.Y))
+            {
+                if (u.Mission != null) { DropAutopilots(u); FlightControl.Cutoff(v); u.SetWarp(0); u.Post("Автопилот миссии снят"); return; }
+                var boot = GameBootstrap.Instance;
+                u.Mission = new MissionAutopilot(u, boot.Tracker);
+                u.Post($"Автопилот миссии: «{boot.Mission.Title}» без рук. Снять — Y");
+            }
+            if (u.Mission != null)
+            {
+                if (!u.Mission.OwnsPilotInput) v.PilotInput = default;
+                foreach (var k in LockedKeys)
+                    if (Input.GetKeyDown(k)) { u.Post("Ведёт автопилот миссии — снять: Y"); break; }
+                return;
+            }
             Maneuver(u, v);
 
             // Ось: x тангаж (W = +1), y рыскание (D = +1), z крен (E = +1) — соглашение Core.
@@ -43,8 +59,7 @@ namespace Kare.Space.Game
                 Axis(KeyCode.W, KeyCode.S),
                 Axis(KeyCode.D, KeyCode.A),
                 Axis(KeyCode.E, KeyCode.Q));
-            // Луноход «Лунохода-1» ведёт программа миссии через тот же PilotInput — не затирать его нулём.
-            if (pilot.sqrMagnitude > 0 || u.Mission == null || !u.Mission.OwnsPilotInput) v.PilotInput = pilot;
+            v.PilotInput = pilot;
             if (pilot.sqrMagnitude > 0) DropAutopilots(u);
 
             double thr = v.Throttle;
@@ -68,9 +83,11 @@ namespace Kare.Space.Game
                 v.Sas = (SasMode)((int)v.Sas % (n - 1) + 1);
                 v.SasHoldValid = false;
             }
-            // Предложение §10.1, не зафиксировано: G — автопилот выведения на 200 км; у тела без атмосферы в полёте —
+            // G — раскладное (§6.12, как в KSP): опоры выпустить/убрать, трапы КТ откинуть на грунте.
+            if (Input.GetKeyDown(KeyCode.G)) u.ToggleDeploy();
+            // Предложение §10.1, не зафиксировано: H — автопилот выведения на 200 км; у тела без атмосферы в полёте —
             // автопилот посадки (§6.12): сам сводит с орбиты, тормозит по прогнозу и садит. Повтор — снять.
-            if (Input.GetKeyDown(KeyCode.G))
+            if (Input.GetKeyDown(KeyCode.H))
             {
                 if (!v.Body.HasAtmosphere && !v.IsLanded)
                     u.Landing = u.Landing == null ? new LandingAutopilot(v.Body) : null;
@@ -85,17 +102,6 @@ namespace Kare.Space.Game
                         u.Ascent.AimAtPlane(v, dock, u.Time);
                         u.Ascent.TargetAltitude = LmAscentAltitude;
                     }
-                }
-            }
-            // Y — автопилот всей миссии (§6.11): от стола до последней цели без рук, ускорением правит сам. Повтор — снять.
-            if (Input.GetKeyDown(KeyCode.Y))
-            {
-                if (u.Mission != null) { DropAutopilots(u); FlightControl.Cutoff(v); u.SetWarp(0); u.Post("Автопилот миссии снят"); }
-                else
-                {
-                    var boot = GameBootstrap.Instance;
-                    u.Mission = new MissionAutopilot(u, boot.Tracker);
-                    u.Post($"Автопилот миссии: «{boot.Mission.Title}» без рук. Y — снять, любой руль/газ — тоже");
                 }
             }
             // P — узел манёвра к цели с автоматическим расчётом (§6.11): тело, выбранное на карте (Tab), иначе
@@ -192,6 +198,13 @@ namespace Kare.Space.Game
                 NodePlanner.Shift(v, now, shift * span * NodeTimeRate * step);
             }
         }
+
+        /// <summary>Управление, закрытое при автопилоте миссии: нажатие — подсказка «снять: Y».</summary>
+        static readonly KeyCode[] LockedKeys =
+        {
+            KeyCode.W, KeyCode.S, KeyCode.A, KeyCode.D, KeyCode.Q, KeyCode.E, KeyCode.Z, KeyCode.X, KeyCode.LeftShift,
+            KeyCode.LeftControl, KeyCode.Space, KeyCode.T, KeyCode.F, KeyCode.G, KeyCode.H, KeyCode.R, KeyCode.V, KeyCode.P, KeyCode.B, KeyCode.N,
+        };
 
         static double Axis(KeyCode plus, KeyCode minus) => (Input.GetKey(plus) ? 1 : 0) - (Input.GetKey(minus) ? 1 : 0);
 

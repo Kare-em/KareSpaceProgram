@@ -4,7 +4,8 @@ using UnityEngine;
 namespace Kare.Space.Game
 {
     /// <summary>
-    /// Орбитальная камера вокруг активного борта (GDD §10.3): ПКМ — вращение, колесо — дистанция.
+    /// Орбитальная камера вокруг активного борта (GDD §10.3): ПКМ — вращение, колесо — дистанция,
+    /// зажатое колесо — сдвиг центра (щелчок без сдвига — вернуть на борт).
     /// «Верх» камеры — местная вертикаль тела (в Unity-кадре она произвольна: оси эклиптики, §2.6),
     /// поворачивается вслед за ней без скачков.
     /// </summary>
@@ -29,6 +30,11 @@ namespace Kare.Space.Game
         /// Пара: VesselView.PlumeLengthSL (факел ≈ 12 радиусов сопла ≈ 0,4 длины «Востока») и высота
         /// нижнего ряда FlightHud (≈ 12 % экрана).</summary>
         const float FitBelow = 0.4f;
+        /// <summary>Сдвиг центра СКМ: доля дистанции на единицу оси мыши — точка под курсором идёт вслед за рукой
+        /// примерно при FOV 60°. Предел — PanLimit длин борта: дальше центр теряет борт, и вращение уводит его из кадра.</summary>
+        const float PanSpeed = 0.06f, PanLimit = 3f;
+        /// <summary>Щелчок СКМ без сдвига (сумма осей мыши меньше порога) возвращает центр на борт.</summary>
+        const float PanClick = 0.2f;
 
         Camera cam;
         Quaternion frame = Quaternion.identity;
@@ -36,6 +42,9 @@ namespace Kare.Space.Game
         bool frameValid;
         Vessel fitVessel;
         double fitLength;
+        /// <summary>Сдвиг центра в осях борта: едет и вращается вместе с ним, как деталь корпуса.</summary>
+        Vector3 pan;
+        float panTravel;
 
         void Awake()
         {
@@ -87,6 +96,7 @@ namespace Kare.Space.Game
             v.MassProperties(out _, out double com, out double length, out _);
             // Раскрытый парашют — тоже в кадр (§6.4): цель остаётся на борту, дистанция растёт на высоту купола.
             double fit = length + VesselView.ChuteReach(v);
+            if (v != fitVessel) pan = Vector3.zero;
             if (v != fitVessel || System.Math.Abs(fit - fitLength) > 0.05 * fitLength)
             {
                 fitVessel = v;
@@ -96,8 +106,19 @@ namespace Kare.Space.Game
             }
 
             var rot = frame * Quaternion.Euler(Pitch, Yaw, 0);
+            var att = FloatingOrigin.ToQuaternion(v.Attitude);
+            if (Input.GetMouseButtonDown(2)) panTravel = 0;
+            if (Input.GetMouseButton(2))
+            {
+                float mx = Input.GetAxis("Mouse X"), my = Input.GetAxis("Mouse Y");
+                panTravel += Mathf.Abs(mx) + Mathf.Abs(my);
+                // Тянем картинку за руку: центр уходит против движения мыши в плоскости экрана.
+                var d = rot * new Vector3(-mx, -my, 0) * (Distance * PanSpeed);
+                pan = Vector3.ClampMagnitude(pan + Quaternion.Inverse(att) * d, (float)fit * PanLimit);
+            }
+            if (Input.GetMouseButtonUp(2) && panTravel < PanClick) pan = Vector3.zero;
             var target = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v)) // ≈ 0 — борт и есть ноль
-                       + FloatingOrigin.ToQuaternion(v.Attitude) * new Vector3(0, (float)(length * (1 - FitBelow) * 0.5 - com), 0)
+                       + att * (new Vector3(0, (float)(length * (1 - FitBelow) * 0.5 - com), 0) + pan)
                        // Купол висит над бортом по вертикали: цель на середину связки, иначе купол режется верхним краем
                        // (кадр на 6 км, 01.10.2026). Пара: ChuteReach — та же высота, что и в подгонке дистанции.
                        + up * (float)(VesselView.ChuteReach(v) * 0.5);

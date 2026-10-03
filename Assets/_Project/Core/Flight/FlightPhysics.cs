@@ -100,8 +100,26 @@ namespace Kare.Space.Core
         public static void Step(Vessel v, double t, double dt)
         {
             if (!v.Alive) return;
+            StepDeploy(v, dt);
             if (v.IsLanded) StepLanded(v, t, dt);
             else StepFlying(v, t, dt);
+        }
+
+        static void StepDeploy(Vessel v, double dt)
+        {
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                var k = secs[i].Deploy;
+                double target = v.DeployOn[i] ? 1 : 0, was = v.Deployed[i];
+                if (k == DeployKind.None || was == target) continue;
+                double step = dt / (k == DeployKind.Ramps ? RampDeployTime : k == DeployKind.Lid ? LidDeployTime : LegDeployTime);
+                v.Deployed[i] = target > was ? Math.Min(1, was + step) : Math.Max(0, was - step);
+                if (!v.Attached[i]) continue;
+                if (v.Deployed[i] == 1)
+                    v.Raise(k == DeployKind.Ramps ? "Трапы на грунте" : k == DeployKind.Lid ? "Крышка открыта" : "Опоры выпущены");
+                else if (v.Deployed[i] == 0 && k == DeployKind.Lid) v.Raise("Крышка закрыта");
+            }
         }
 
         /// <summary>Телеметрия без шага физики — для корабля на рельсах.</summary>
@@ -139,8 +157,9 @@ namespace Kare.Space.Core
         public static void UpdateLandedPose(Vessel v, double t)
         {
             var o = v.Body.OrientationAt(t);
-            v.Position = o * v.AnchorBodyFixed;
-            v.Velocity = Vector3d.Cross(SpinAxis(v.Body, t), v.Position);
+            var up = v.AnchorBodyFixed.normalized;
+            v.Position = o * (v.AnchorBodyFixed + up * v.Suspension);
+            v.Velocity = Vector3d.Cross(SpinAxis(v.Body, t), v.Position) + o * up * v.SuspensionRate;
             v.Attitude = o.SwapYZ * v.AttitudeBodyFixed;
             v.AngularVelocity = Vector3d.zero;
         }
@@ -152,6 +171,98 @@ namespace Kare.Space.Core
         public const double RoverSpeed = 0.55, RoverTurnRate = 0.25;
 
         /// <summary>
+        /// Подвеска опор и колёс (§6.3, §6.12) — пружина с демпфером по вертикали: 1,5 Гц, ζ = 0,6 (почти без отскока,
+        /// как сминаемые соты опор LM и торсионы «Лунохода»). Касание на 2 м/с проседает на ≈ 0,1 м, на 6 м/с («Луна-9») —
+        /// на ≈ 0,32 м и успокаивается за ≈ 0,5 с. Пара: ход SuspensionStroke 0,5 м больше просадки при CrashSpeed-касаниях
+        /// посадочных скоростей; шаг физики 0,02 с ≪ 1/ω ≈ 0,1 с — явная схема устойчива (при ω·dt &gt; 0,5 подвеска замирает).
+        /// </summary>
+        const double SuspensionFreq = 1.5, SuspensionDamping = 0.6, SuspensionStroke = 0.5;
+        /// <summary>Шасси «Лунохода-1»: полубаза 1,705/2 м и полуколея 1,60/2 м — точки, по которым берётся наклон грунта.
+        /// Постоянная сглаживания наклона 0,3 с — колёса на балансирах гасят кочки, корпус не дёргается на каждом метре сетки.</summary>
+        const double RoverHalfBase = 0.85, RoverHalfTrack = 0.8, RoverTiltTime = 0.3;
+        /// <summary>Радиус колеса «Лунохода-1» (⌀510 мм), м. Пара: Tools/blender/lunokhod_wheels.py.</summary>
+        public const double RoverWheelRadius = 0.255;
+        /// <summary>
+        /// Трапы «Луны-17» (§6.3): две пары рельсов по колее лунохода 1,60 м — вперёд и назад от настила. Край настила —
+        /// 1,2 м от оси ступени, уклон 30° (tg = 0,577), конец рельса — RampEnd: с настила 1,9 м трап уходит на 3,3 м.
+        /// Пара: модель Luna17_Ramps (Tools/blender/parts.blend, рельсы от |z| = 1,17 до 4,49 м, верх 1,94 → 0,04) —
+        /// меняешь одно, правь второе. Ниже RampMinDeck луноход считается стоящим на грунте (съезжать не с чего).
+        /// </summary>
+        public const double RampDeckEdge = 1.2, RampSlope = 0.577, RampEnd = 4.5, RampMinDeck = 0.3;
+        /// <summary>
+        /// Привод раскладного (§6.12), с: опоры — пружинами после пирозамков, ≈ 2 с; трапы КТ — 4 с (длиннее и тяжелее);
+        /// крышка лунохода — электроприводом, 6 с.
+        /// Сложенные опоры держат касание не быстрее StowedCrashSpeed — борт садится на сопло и баки.
+        /// Пара: время раскладки видно в VesselView (поворот на шарнире идёт по Vessel.Deployed).
+        /// </summary>
+        public const double LegDeployTime = 2, RampDeployTime = 4, LidDeployTime = 6, StowedCrashSpeed = 2;
+
+        /// <summary>
+        /// Высота рельса над грунтом под точкой d (единичный радиус в осях тела), м; 0 — рельса над грунтом нет.
+        /// Настил и трапы — жёсткая геометрия в осях ступени (Vessel.RampOrigin/Axis/Up), а не профиль по грунту:
+        /// колёса идут по тем рельсам, что видны в модели, даже если ступень стоит на склоне (обе пары симметричны).
+        /// </summary>
+        static double RampAbove(Vessel v, Vector3d d)
+        {
+            double ground = v.Body.Radius + v.Body.SurfaceHeight(d);
+            var side = Vector3d.Cross(v.RampUp, v.RampAxis);
+            var rel = d * ground - v.RampOrigin;
+            double z = Vector3d.Dot(rel, v.RampAxis), x = Vector3d.Dot(rel, side), az = Math.Abs(z);
+            if (az > RampEnd) return 0;
+            double y = az <= RampDeckEdge ? 0 : -(az - RampDeckEdge) * RampSlope;
+            var s = v.RampOrigin + v.RampAxis * z + side * x + v.RampUp * y;
+            return Math.Max(0, s.magnitude - ground);
+        }
+
+        /// <summary>
+        /// Посадочная ступень на выпущенных опорах ложится на грунт (§6.12): корпус встаёт нормалью плоскости под
+        /// стопами, днище — на их средней высоте. Без этого борт стоял, как коснулся: КТ «Луны-17» — с креном 16° на
+        /// кромке одной опоры, днище в 0,49 м над грунтом, трапы висели и луноход съезжал по воздуху (03.10.2026).
+        /// Пара: LegSettleTime — порядка RoverTiltTime; перепад высоты уходит в подвеску (ход SuspensionStroke).
+        /// </summary>
+        const double LegSettleTime = 0.3;
+
+        static void SettleOnLegs(Vessel v, double dt)
+        {
+            int b = v.BottomSection();
+            if (b < 0 || v.Situation != Situation.Landed || !v.Design.Sections[b].LandingLegs || !v.LegsDown) return;
+            var body = v.Body;
+            v.MassProperties(out _, out double com, out _, out _);
+            double R = v.AnchorBodyFixed.magnitude, foot = v.Design.Sections[b].Radius;
+            var u = v.AnchorBodyFixed / R;
+            var e1 = Vector3d.AnyPerpendicular(u).normalized;
+            var e2 = Vector3d.Cross(u, e1);
+            double h1 = body.SurfaceHeight((u + e1 * (foot / R)).normalized), h1n = body.SurfaceHeight((u - e1 * (foot / R)).normalized);
+            double h2 = body.SurfaceHeight((u + e2 * (foot / R)).normalized), h2n = body.SurfaceHeight((u - e2 * (foot / R)).normalized);
+            var n = (u - e1 * ((h1 - h1n) / (2 * foot)) - e2 * ((h2 - h2n) / (2 * foot))).normalized;
+            var nose = (v.AttitudeBodyFixed * Vector3d.up).SwapYZ.normalized;
+            var step = (nose + (n - nose) * Math.Min(1, dt / LegSettleTime)).normalized;
+            if (Vector3d.Dot(step, nose) < 1 - 1e-12)
+                v.AttitudeBodyFixed = QuaternionD.FromToRotation(nose, step).SwapYZ * v.AttitudeBodyFixed;
+            double newR = body.Radius + (h1 + h1n + h2 + h2n) * 0.25 + com;
+            if (Math.Abs(R - newR) < 1e-4) return;
+            v.Suspension = MathD.Clamp(v.Suspension + R - newR, -SuspensionStroke, SuspensionStroke);
+            v.AnchorBodyFixed = u * newR;
+        }
+
+        /// <summary>Шаг пружины-демпфера подвески: корпус догоняет точку AnchorBodyFixed без рывка.</summary>
+        static void StepSuspension(Vessel v, double dt)
+        {
+            if (v.Suspension == 0 && v.SuspensionRate == 0) return;
+            double w = 2 * Math.PI * SuspensionFreq;
+            if (w * dt > 0.5) { v.Suspension = v.SuspensionRate = 0; return; }
+            v.SuspensionRate += (-w * w * v.Suspension - 2 * SuspensionDamping * w * v.SuspensionRate) * dt;
+            v.Suspension += v.SuspensionRate * dt;
+            if (Math.Abs(v.Suspension) > SuspensionStroke)
+            {
+                // Упор хода: дальше корпус идёт жёстко вместе с грунтом.
+                v.Suspension = Math.Sign(v.Suspension) * SuspensionStroke;
+                if (v.SuspensionRate * v.Suspension > 0) v.SuspensionRate = 0;
+            }
+            if (Math.Abs(v.Suspension) < 1e-4 && Math.Abs(v.SuspensionRate) < 1e-3) v.Suspension = v.SuspensionRate = 0;
+        }
+
+        /// <summary>
         /// Езда самоходного шасси (GDD §6.3): W/S — вперёд/назад вдоль связанной оси Z, A/D — разворот вокруг местной
         /// вертикали. Шасси всегда стоит по радиусу на высоте рельефа: так же встаёт борт на столе (PlaceOnSurface).
         /// </summary>
@@ -161,25 +272,65 @@ namespace Kare.Space.Core
             v.MassProperties(out _, out double com, out _, out _);
             double R = v.AnchorBodyFixed.magnitude;
             var u = v.AnchorBodyFixed / R;
-            var f = Vector3d.ProjectOnPlane((v.AttitudeBodyFixed * Vector3d.forward).SwapYZ, u);
+            // Курс — нос корпуса, возвращённый с наклона (GroundUp) на местную вертикаль тем же поворотом, каким его
+            // наклонили. Простая проекция наклонённого носа при крене и тангаже сразу даёт рыскание ~sin·sin за шаг,
+            // и на трапе (30° + крен) луноход разворачивало поперёк рельсов за 0,5 с (03.10.2026).
+            if (v.GroundUp.sqrMagnitude < 0.5) v.GroundUp = u;
+            var f = Vector3d.ProjectOnPlane(QuaternionD.FromToRotation(v.GroundUp, u) * (v.AttitudeBodyFixed * Vector3d.forward).SwapYZ, u);
             if (f.sqrMagnitude < 1e-12) f = Vector3d.ProjectOnPlane(Vector3d.forward, u);
             if (f.sqrMagnitude < 1e-12) f = Vector3d.ProjectOnPlane(Vector3d.right, u);
             f = f.normalized;
-            double turn = MathD.Clamp(v.PilotInput.y, -1, 1) * RoverTurnRate * dt;
+            // На трапах колёса идут по рельсам: поворот закрыт до съезда обеих осей на грунт.
+            bool onRamp = v.RampDeck > 0;
+            double turn = onRamp ? 0 : MathD.Clamp(v.PilotInput.y, -1, 1) * RoverTurnRate * dt;
             // D (y > 0) — направо, то есть по часовой при взгляде сверху: отрицательный угол вокруг зенита.
             if (turn != 0) f = (QuaternionD.AngleAxis(-turn, u) * f).normalized;
             double ds = MathD.Clamp(v.PilotInput.x, -1, 1) * RoverSpeed * dt;
             var dir = (u + f * (ds / R)).normalized;
             f = Vector3d.ProjectOnPlane(f, dir).normalized;
-            v.AnchorBodyFixed = dir * (body.Radius + body.SurfaceHeight(dir) + com);
-            v.AttitudeBodyFixed = QuaternionD.FromBasis(Vector3d.Cross(f, dir).SwapYZ, dir.SwapYZ, f.SwapYZ);
+            // Точки колёс: передняя и задняя оси, левый и правый борт.
+            var side = Vector3d.Cross(dir, f);
+            var pF = (dir + f * (RoverHalfBase / R)).normalized;
+            var pB = (dir - f * (RoverHalfBase / R)).normalized;
+            var pS = (dir + side * (RoverHalfTrack / R)).normalized;
+            var pN = (dir - side * (RoverHalfTrack / R)).normalized;
+            // Съезд: колёса стоят на рельсах ступени, ЦМ — на средней высоте осей, наклон — по разнице высот (нос вниз).
+            double rampF = 0, rampB = 0, rampS = 0, rampN = 0;
+            if (onRamp)
+            {
+                rampF = RampAbove(v, pF);
+                rampB = RampAbove(v, pB);
+                rampS = RampAbove(v, pS);
+                rampN = RampAbove(v, pN);
+                v.RampTravel = Vector3d.Dot(dir * R - v.RampOrigin, v.RampAxis);
+                if (rampF <= 0 && rampB <= 0) v.RampDeck = 0;
+            }
+            double hF = body.SurfaceHeight(pF) + rampF, hB = body.SurfaceHeight(pB) + rampB;
+            double hS = body.SurfaceHeight(pS) + rampS, hN = body.SurfaceHeight(pN) + rampN;
+            double newR = body.Radius + (onRamp ? (hF + hB) * 0.5 : body.SurfaceHeight(dir)) + com;
+            // Перепад рельефа уходит в подвеску, а не в корпус: точка опоры прыгает, корпус догоняет её демпфером.
+            // На трапе профиль гладкий — подвеска не нужна.
+            if (ds != 0 && !onRamp) v.Suspension = MathD.Clamp(v.Suspension + R - newR, -SuspensionStroke, SuspensionStroke);
+            v.AnchorBodyFixed = dir * newR;
+            // Наклон корпуса — по четырём точкам колёс, сглаженный: на склоне кратера луноход стоит вдоль грунта.
+            var n = (dir - f * ((hF - hB) / (2 * RoverHalfBase)) - side * ((hS - hN) / (2 * RoverHalfTrack))).normalized;
+            // Сначала перенос за точкой опоры по сфере (иначе на пробеге копится крен к старому радиусу), потом сглаживание.
+            var carried = QuaternionD.FromToRotation(u, dir) * v.GroundUp;
+            var tilt = v.GroundUp = (carried + (n - carried) * Math.Min(1, dt / RoverTiltTime)).normalized;
+            var ft = (QuaternionD.FromToRotation(dir, tilt) * f).normalized;
+            v.AttitudeBodyFixed = QuaternionD.FromBasis(Vector3d.Cross(ft, tilt).SwapYZ, tilt.SwapYZ, ft.SwapYZ);
             v.DriveDistance += Math.Abs(ds);
+            // Разворот на месте: D (turn > 0) — направо, левый борт катится вперёд, правый назад.
+            v.WheelPathLeft += ds + turn * RoverHalfTrack;
+            v.WheelPathRight += ds - turn * RoverHalfTrack;
         }
 
         static void StepLanded(Vessel v, double t, double dt)
         {
             var body = v.Body;
             if (v.IsRover && v.Situation == Situation.Landed) DriveRover(v, dt);
+            else SettleOnLegs(v, dt);
+            StepSuspension(v, dt);
             UpdateLandedPose(v, t + dt);
             v.UpdateEngines();
             UpdateAir(v, body, v.Position, v.Velocity, SpinAxis(body, t + dt));
@@ -191,6 +342,9 @@ namespace Kare.Space.Core
             {
                 bool fromWater = v.Situation == Situation.Splashed;
                 v.Situation = Situation.Flying;
+                v.Suspension = v.SuspensionRate = 0;
+                v.GroundUp = Vector3d.zero;
+                v.RampDeck = 0;
                 if (double.IsNaN(v.LaunchTime)) v.LaunchTime = t;
                 v.Raise(fromWater ? "Взлёт с воды" : "Есть отрыв!");
             }
@@ -205,6 +359,12 @@ namespace Kare.Space.Core
         struct Geometry
         {
             public double Mass, Com, Length, Radius, DragScale, FrontRadius;
+            /// <summary>
+            /// Корпус без боковых блоков (Vessel.HullRadius) и площади обтекания: лобовая и поперечная. Radius (maxR)
+            /// с боковыми блоками — только для касания грунта и осадки; в аэродинамике пакет Р-7 цилиндром Ø8,6 м
+            /// давал вдвое лишнее сопротивление и нос-плечо 4,3 м — «Молния» ломалась на T+61 (q 30 кПа, α 8°).
+            /// </summary>
+            public double Hull, FrontArea, SideArea;
             public double ChuteCdA;
         }
 
@@ -222,6 +382,7 @@ namespace Kare.Space.Core
             v.CurrentThrust = thrust;
 
             var g = new Geometry { Mass = mass, Com = com, Length = len, Radius = maxR };
+            AeroAreas(v, ref g);
             var vAir0 = v.Velocity - Vector3d.Cross(spin, v.Position);
             bool noseFirst = Vector3d.Dot(nose, vAir0) >= 0;
             int lead = noseFirst ? v.TopSection() : v.BottomSection();
@@ -312,9 +473,7 @@ namespace Kare.Space.Core
             double cosA = Vector3d.Dot(nose, vAir) / sp;
             sinA = Math.Sqrt(Math.Max(0, 1 - cosA * cosA));
             double cd = MathD.Interp(CdMach, CdValue, mach) * g.DragScale;
-            double front = Math.PI * g.Radius * g.Radius;
-            double side = g.Length * 2 * g.Radius * 0.8;
-            double cdA = cd * front * cosA * cosA + 1.2 * side * sinA * sinA + g.ChuteCdA;
+            double cdA = cd * g.FrontArea * cosA * cosA + 1.2 * g.SideArea * sinA * sinA + g.ChuteCdA;
             return vAir * (-q * cdA / sp);
         }
 
@@ -392,10 +551,11 @@ namespace Kare.Space.Core
             var dir = flow / sp;
             var cross = new Vector3d(dir.x, 0, dir.z);
             double sinA = cross.magnitude, cosA = dir.y;
-            double front = Math.PI * g.Radius * g.Radius;
-            double side = g.Length * 2 * g.Radius * 0.8;
+            // Подъёмная сила носа — по корпусу ядра; конусы боковых блоков ниже и ближе к ЦМ, их вклад — в поперечном.
+            double front = Math.PI * g.Hull * g.Hull;
+            double side = g.SideArea;
             // Ведущий торец: носом вперёд — верх, хвостом — низ (ступень после отделения летит как попало).
-            double cp = Math.Min(NoseCpRadii * g.Radius, g.Length * 0.5);
+            double cp = Math.Min(NoseCpRadii * g.Hull, g.Length * 0.5);
             double leadY = cosA >= 0 ? g.Length - cp : cp;
             var fNose = cross * (-q * front * StackNormalSlope * Math.Abs(cosA));
             var fCross = cross * (-q * StackCrossflowCd * side * sinA);
@@ -428,13 +588,32 @@ namespace Kare.Space.Core
             }
         }
 
+        /// <summary>
+        /// Площади обтекания: корпус — цилиндр радиуса ядра, каждый боковой блок — свой торец; сбоку видны
+        /// не больше двух блоков группы (остальные заслонены ядром). Без радиальных групп — как прежде (π·R², L·2R·0,8).
+        /// </summary>
+        static void AeroAreas(Vessel v, ref Geometry g)
+        {
+            g.Hull = v.HullRadius();
+            g.FrontArea = Math.PI * g.Hull * g.Hull;
+            g.SideArea = g.Length * 2 * g.Hull * 0.8;
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                var s = secs[i];
+                if (!v.Attached[i] || !s.IsRadial) continue;
+                g.FrontArea += s.RadialCount * Math.PI * s.Radius * s.Radius;
+                g.SideArea += Math.Min(s.RadialCount, 2) * s.Length * 2 * s.Radius * 0.8;
+            }
+        }
+
         static void CheckStructure(Vessel v, Geometry g, double sinA, SectionDef lead, double dt)
         {
             double q = v.DynamicPressure;
             if (q <= 0) return;
 
             // Поперечная нагрузка ломает только длинный пакет; шар капсулы ей не подвержен.
-            if (AeroBreakup && QAlphaExceeded(q, sinA, g.Length, g.Radius))
+            if (AeroBreakup && QAlphaExceeded(q, sinA, g.Length, g.Hull))
             {
                 v.Destroy($"Разрушение от аэродинамической нагрузки: q = {q / 1000:F1} кПа, α = {v.AngleOfAttack:F0}°");
                 return;
@@ -514,9 +693,17 @@ namespace Kare.Space.Core
                 v.Destroy($"Удар о поверхность: {body.Name}, {speed:F0} м/с");
                 return;
             }
+            if (!water && speed > StowedCrashSpeed && !v.LegsDown)
+            {
+                v.Destroy($"Посадка на сложенные опоры: {body.Name}, {speed:F1} м/с");
+                return;
+            }
             var snapped = up * (body.Radius + h + offset);
             v.Situation = water ? Situation.Splashed : Situation.Landed;
             v.AnchorBodyFixed = o.Inverse * snapped;
+            // Удар принимает подвеска: корпус проседает со скоростью касания и выходит на опоры демпфером.
+            v.Suspension = 0;
+            v.SuspensionRate = Math.Min(0, Vector3d.Dot(vSurf, up));
             v.AttitudeBodyFixed = o.SwapYZ.Inverse * v.Attitude;
             v.TerrainAltitude = 0;
             UpdateLandedPose(v, t);

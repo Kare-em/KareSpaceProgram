@@ -54,7 +54,7 @@ namespace Kare.Space.Core
                 else
                 {
                     step = "Взлёт";
-                    hint = "G — автопилот взлёта (на стыковку — в плоскость корабля). Вручную: Z, Пробел, нос на восток после 1 км.";
+                    hint = "H — автопилот взлёта (на стыковку — в плоскость корабля). Вручную: Z, Пробел, нос на восток после 1 км.";
                 }
                 return true;
             }
@@ -118,7 +118,7 @@ namespace Kare.Space.Core
                     case ObjectiveType.Impact:
                         step = obj.Type == ObjectiveType.Landing ? "Посадка" : "Попадание";
                         hint = obj.Type == ObjectiveType.Landing
-                            ? "G — автопилот посадки: сам сведёт с орбиты и затормозит. Вручную: F → ретроград, газ так, чтобы у поверхности было < 5 м/с."
+                            ? "H — автопилот посадки: сам сведёт с орбиты, выпустит опоры и затормозит. Вручную: F → ретроград, газ так, чтобы у поверхности было < 5 м/с."
                             : "Траектория уже ведёт в поверхность — . (точка) ускорить время.";
                         return true;
                 }
@@ -130,7 +130,7 @@ namespace Kare.Space.Core
                 if (!inOrbit)
                 {
                     step = "Опорная орбита";
-                    hint = "Сначала орбита: G — автопилот выведения, или по подсказке угла. Потом — к Луне.";
+                    hint = "Сначала орбита: H — автопилот выведения, или по подсказке угла. Потом — к Луне.";
                     return true;
                 }
                 var enc = u.PredictActive(4).Find(p => p.Body == goal);
@@ -144,7 +144,7 @@ namespace Kare.Space.Core
                 bool hit = obj.Type == ObjectiveType.Impact || obj.Type == ObjectiveType.Landing;
                 step = "Перелёт";
                 hint = $"Встреча через {GameCalendar.FormatDuration(enc.StartTime - t)}, перицентр {pe / 1000:F0} км. . — ускорить время" +
-                       (hit && pe > 0 ? "; для посадки G уже у Луны." : ".");
+                       (hit && pe > 0 ? "; для посадки H уже у Луны." : ".");
                 return true;
             }
 

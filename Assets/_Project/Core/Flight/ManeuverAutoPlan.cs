@@ -43,7 +43,7 @@ namespace Kare.Space.Core
             var v = u.Active;
             if (v == null || !v.Alive) return "Нет корабля";
             if (target == null) return "Цель не выбрана: на карте Tab — выбор тела";
-            if (v.IsLanded) return "Сначала выйдите на орбиту (G)";
+            if (v.IsLanded) return "Сначала выйдите на орбиту (H)";
             if (target == v.Body) return $"Корабль уже у тела {target.Name}";
             var body = v.Body;
             var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, body.Mu, u.Time);

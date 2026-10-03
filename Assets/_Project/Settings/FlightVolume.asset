@@ -294,7 +294,7 @@ MonoBehaviour:
     m_Value: 1
   atmosphericScattering:
     m_OverrideState: 1
-    m_Value: 1
+    m_Value: 0
   renderingMode:
     m_OverrideState: 0
     m_Value: 0
@@ -339,7 +339,7 @@ MonoBehaviour:
     m_Value: 20000
   groundTint:
     m_OverrideState: 1
-    m_Value: {r: 0.12, g: 0.15, b: 0.2, a: 1}
+    m_Value: {r: 0.3, g: 0.3, b: 0.3, a: 1}
   groundColorTexture:
     m_OverrideState: 0
     m_Value: {fileID: 0}
@@ -403,13 +403,13 @@ MonoBehaviour:
     m_Value: 1
   fixedExposure:
     m_OverrideState: 1
-    m_Value: 13
+    m_Value: 11
   compensation:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 2
   limitMin:
     m_OverrideState: 1
-    m_Value: -7
+    m_Value: -6
   limitMax:
     m_OverrideState: 1
     m_Value: 16
@@ -726,7 +726,7 @@ MonoBehaviour:
     m_Value: 1
   planetCenter:
     m_OverrideState: 1
-    m_Value: {x: 5117.0195, y: -1081.5988, z: 3977.976}
+    m_Value: {x: 1654.7814, y: -1.2068458, z: 526.5971}
   windOrientation:
     m_OverrideState: 0
     m_Value: 0

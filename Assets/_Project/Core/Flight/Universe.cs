@@ -63,10 +63,15 @@ namespace Kare.Space.Core
         public MissionAutopilot Mission;
 
         /// <summary>Автопилот сам ведёт ускорение времени (настройка игрока; в тестах ядра по умолчанию выключено —
-        /// там ускорение задаёт сценарий). Ручные «,» и «/» ставят его на паузу до конца работы автопилотов.</summary>
+        /// там ускорение задаёт сценарий). Ручные «.» и «,» ставят его на паузу до конца работы автопилотов, «/» на ×1 — снимает паузу.</summary>
         public bool AutoWarp;
         public bool AutoWarpPaused;
         bool autoDriving;
+        /// <summary>Ступень выбрал игрок клавишами (WarpUp/WarpDown), а не сценарий/сброс через SetWarp. Только такая
+        /// ×5…×10 у манёвра остаётся физикой, а не сбрасывается в ×1: тесты ядра задают ускорение SetWarp и ждут сброса.</summary>
+        bool playerWarp;
+        /// <summary>Ускорением правит игрок поверх работающего автопилота (автоускорение на паузе) — для HUD.</summary>
+        public bool AutoWarpManual => AutoWarp && AutoWarpPaused && AutopilotActive;
         /// <summary>Автоускорение выбрало физическую ступень (≤ MaxPhysicsWarp) при свободных рельсах: окно перед прожигом.</summary>
         bool autoPhysics;
         public bool AutopilotActive => Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null || Mission != null;
@@ -132,10 +137,21 @@ namespace Kare.Space.Core
             else if (!v.IsDebris && !v.Alive) Post($"{v.Name}: {msg}");
         }
 
+        /// <summary>G (§6.12): опоры и трапы активного корабля. Привод крутится в физике — с рельсов снимаем.</summary>
+        public void ToggleDeploy()
+        {
+            if (Active == null || !Active.Alive) return;
+            if (Active.OnRails) LeaveRails(Active);
+            var msg = Active.ToggleDeploy();
+            if (msg != null) Post(msg);
+        }
+
         /// <summary>Следующая ступень активного корабля (пробел).</summary>
         public void Stage()
         {
             if (Active == null || !Active.Alive) return;
+            var block = Active.StageBlock;
+            if (block != null) { Post(block); return; }
             if (Active.OnRails) LeaveRails(Active);
             var parts = Active.Stage();
             if (parts.Count > 0) Active.NoCollideUntil = Time + CollisionGrace;
@@ -162,19 +178,57 @@ namespace Kare.Space.Core
         /// а время шло бы ×10.</summary>
         public void WarpUp()
         {
+            TakeManualWarp();
             int next = WarpIndex + 1;
-            if (Active != null && RailsBlocker(Active) != null && next < Warps.Length && Warps[next] > MaxPhysicsWarp)
+            if (Active != null && next < Warps.Length && Warps[next] > MaxPhysicsWarp)
             {
-                Post("Больше ×" + MaxPhysicsWarp + " нельзя: " + RailsBlocker(Active));
-                return;
+                // Манёвр (§6.11): рельсы закрыты и на прожиге, и в окне перед ним — иначе ускорение проскочило бы
+                // старт и автопилот начал бы прожиг с опозданием. Физика до ×MaxPhysicsWarp остаётся.
+                string why = RailsBlocker(Active) ?? (WarpLimitTime() <= Time + 1 ? "подходит манёвр" : null);
+                if (why != null)
+                {
+                    Post("Больше ×" + MaxPhysicsWarp + " нельзя: " + why);
+                    return;
+                }
             }
             SetWarp(next);
+            playerWarp = true;
         }
-        public void WarpDown() => SetWarp(WarpIndex - 1);
+        public void WarpDown()
+        {
+            TakeManualWarp();
+            SetWarp(WarpIndex - 1);
+            playerWarp = true;
+        }
+
+        /// <summary>«/»: ×1. Если ускорением уже правил игрок поверх автопилота и время идёт ×1 — вернуть его автопилоту.</summary>
+        public void WarpReset()
+        {
+            if (AutoWarpManual && WarpIndex == 0)
+            {
+                AutoWarpPaused = false;
+                Post("Ускорением снова правит автопилот");
+                return;
+            }
+            TakeManualWarp();
+            SetWarp(0);
+        }
+
+        /// <summary>Клавиша ускорения при работающем автоускорении: управление переходит игроку до конца автопилотов,
+        /// иначе DriveWarp перезаписывал бы ступень каждый кадр и «.» не действовала.</summary>
+        void TakeManualWarp()
+        {
+            if (!autoDriving) return;
+            autoDriving = false;
+            autoPhysics = false;
+            AutoWarpPaused = true;
+            Post("Ускорение вручную до конца автопилота (/ на ×1 — вернуть автопилоту)");
+        }
 
         public void SetWarp(int index)
         {
             WarpIndex = Math.Max(0, Math.Min(Warps.Length - 1, index));
+            playerWarp = false;
         }
 
         /// <summary>Почему нельзя на рельсы; null — можно.</summary>
@@ -216,14 +270,19 @@ namespace Kare.Space.Core
             bool rails = WarpIndex > 0 && Active != null && RailsBlocker(Active) == null && !(autoDriving && autoPhysics);
             if (rails && WarpLimitTime() <= Time + 1)
             {
-                SetWarp(0);
-                warp = 1;
                 rails = false;
-                if (!autoDriving) Post("Ускорение сброшено: подходит время манёвра");
+                // У манёвра рельсы закрыты, но ×5…×10, выбранные игроком, — это физика: автопилоты в ней работают.
+                if (!(playerWarp && warp <= MaxPhysicsWarp))
+                {
+                    SetWarp(0);
+                    warp = 1;
+                    if (!autoDriving) Post("Ускорение сброшено: подходит время манёвра");
+                }
             }
 
-            // Ввод лунохода, который задаёт сам автопилот миссии, ручным управлением не считается.
-            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && AutopilotActive && !(Mission != null && Mission.OwnsPilotInput))
+            // Автопилот миссии ручной ввод не снимает — только Y (игрок задевал руль и терял многочасовой полёт).
+            // Ввод лунохода задаёт сам автопилот миссии, так что при Mission сюда не попадаем вовсе.
+            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && AutopilotActive && Mission == null)
             {
                 Ascent = null;
                 NodePilot = null;

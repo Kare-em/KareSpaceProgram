@@ -35,6 +35,38 @@ namespace Kare.Space.Game
         public Texture2D EarthGround, EarthMacro, MoonGround, MarsGround;
         [Tooltip("Нормали грунта Земли и ряби воды (из Car_Train), тайл в метрах — только в патче вблизи")]
         public Texture2D EarthGroundNormal, WaterNormal;
+        /// <summary>
+        /// Настоящая карта тела (§9.4) вместо процедурной: Луна — LRO (NASA SVS CGI Moon Kit), остальные — Solar System
+        /// Scope (CC BY 4.0, атрибуция в меню Esc). Яркость приведена к геометрическому альбедо (Tools/textures/sss_convert.py).
+        /// Small — читаемая копия для цвета патча вблизи, Night и Clouds — только у Земли (огни, слой облаков).
+        /// </summary>
+        [System.Serializable]
+        public struct BodyMapSet
+        {
+            public string Id;
+            public Texture2D Map, Small, Night, Clouds;
+        }
+
+        public BodyMapSet[] Maps;
+        [Tooltip("Кольца Сатурна (Solar System Scope): полоса, x — радиус от RingInner до RingOuter, альфа — плотность")]
+        public Texture2D SaturnRing;
+
+        /// <summary>Пиксели Small для SurfaceColor: тот вызывается из Parallel.For, Texture2D там трогать нельзя.</summary>
+        static readonly Dictionary<string, (Color32[] Px, int W, int H)> smallPx = new Dictionary<string, (Color32[], int, int)>();
+
+        /// <summary>
+        /// Кольца Сатурна по полосе SSS, м от центра: край C на ≈ 290-м столбце из 8192, щель Кассини
+        /// (117 580–122 170 км) — на 5450–5850, внешний край A (136 775 км) — на 7650, щель Энке — на 7296.
+        /// Линейная подгонка по этим трём меткам даёт 8,44 км на столбец. Пара: SaturnRing.png — меняешь одно, правь второе.
+        /// </summary>
+        const double RingInner = 72.2e6, RingOuter = 141.35e6;
+        const int RingSegments = 256;
+
+        BodyMapSet MapFor(string id)
+        {
+            if (Maps != null) foreach (var m in Maps) if (m.Id == id) return m;
+            return default;
+        }
         /// <summary>Тайл ряби, м, и скорость её сноса, м/с. Пара: UV0 патча — в тайлах GroundTile, поэтому
         /// масштаб воды задаётся через _BaseColorMap_ST = GroundTile / WaterTile.</summary>
         const double WaterTile = 40, WaterDrift = 0.7;
@@ -107,6 +139,11 @@ namespace Kare.Space.Game
             var u = GameBootstrap.U;
             if (u == null) { enabled = false; return; }
             if (BaseMaterial == null) BaseMaterial = new Material(Shader.Find("HDRP/Lit"));
+            smallPx.Clear();
+            if (Maps != null)
+                foreach (var m in Maps)
+                    if (m.Map != null && m.Small != null && m.Small.isReadable)
+                        smallPx[m.Id] = (m.Small.GetPixels32(), m.Small.width, m.Small.height);
 
             foreach (var b in u.System.Bodies)
             {
@@ -135,6 +172,7 @@ namespace Kare.Space.Game
                 }
                 BuildLod(e);
                 SetupGround(e);
+                if (b.Id == "saturn" && SaturnRing != null) AddRing(e);
                 mr.sharedMaterial = e.Mat;
                 // Тени от планеты на планету рисовать бессмысленно (каскады 2 км), затмения — SunLight.
                 mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -172,6 +210,18 @@ namespace Kare.Space.Game
             Free(e.Mf.sharedMesh);
             e.Mf.sharedMesh = Own(BuildSphere(b, seg, e.SphereRadius));
 
+            // Настоящая карта (§9.4): процедурная Луна не совпадала с морями и была вдвое светлее, у планет — полосы
+            // вместо облачных поясов. Ассет, не своё — Own/Free не трогают его; уровень детали на него не влияет
+            // (8k DXT1 ≈ 21 МБ с мипами). Земле процедурный проход всё равно нужен — маска блика океана.
+            var set = MapFor(b.Id);
+            if (set.Map != null && !earth)
+            {
+                Free(e.Mat.GetTexture("_BaseColorMap"));
+                e.Mat.SetTexture("_BaseColorMap", set.Map);
+                if (!e.Ground) e.PatchMat.SetTexture("_BaseColorMap", set.Map);
+                return;
+            }
+
             // Текстуры — из дискового кеша (TextureCache), генерация только при первом запуске уровня.
             int w = earth ? DetailSettings.TextureEarth : e.Detailed ? DetailSettings.TextureDetailed : DetailSettings.TexturePlain;
             string colorKey = $"{b.Id}_color_{w}", maskKey = $"{b.Id}_mask_{w}";
@@ -185,7 +235,13 @@ namespace Kare.Space.Game
                 if (mask != null) mask = TextureCache.Store(maskKey, mask);
             }
             Free(e.Mat.GetTexture("_BaseColorMap"));
-            e.Mat.SetTexture("_BaseColorMap", Own(tex));
+            if (set.Map != null)
+            {
+                Destroy(tex);
+                tex = set.Map;
+            }
+            else Own(tex);
+            e.Mat.SetTexture("_BaseColorMap", tex);
             if (!e.Ground) e.PatchMat.SetTexture("_BaseColorMap", tex);
             if (!earth) return;
 
@@ -193,10 +249,12 @@ namespace Kare.Space.Game
             e.Mat.SetTexture("_MaskMap", Own(mask));
             int lw = DetailSettings.TextureDetailed;
             string lightsKey = $"{b.Id}_lights_{lw}";
-            var lights = TextureCache.Load(lightsKey, false) ?? TextureCache.Store(lightsKey, BuildNightLights(b, lw));
+            // Огни: карта Black Marble уже в цвете натрия — тон не накладываем, только яркость пика.
+            var lights = set.Night != null ? set.Night
+                : Own(TextureCache.Load(lightsKey, false) ?? TextureCache.Store(lightsKey, BuildNightLights(b, lw)));
             Free(e.Mat.GetTexture("_EmissiveColorMap"));
-            e.Mat.SetTexture("_EmissiveColorMap", Own(lights));
-            e.Mat.SetColor("_EmissiveColor", NightLightsColor * NightLightsNits);
+            e.Mat.SetTexture("_EmissiveColorMap", lights);
+            e.Mat.SetColor("_EmissiveColor", (set.Night != null ? Color.white : NightLightsColor) * NightLightsNits);
             // Текстуры лежат на материале — Validate ставит _MASKMAP и _EMISSIVE_COLOR_MAP сам.
             HDMaterial.ValidateMaterial(e.Mat);
 
@@ -206,8 +264,10 @@ namespace Kare.Space.Game
             Free(e.CloudMat.GetTexture("_BaseColorMap"));
             int cw = DetailSettings.TextureClouds;
             string cloudKey = $"clouds_{cw}";
-            var clouds = TextureCache.Load(cloudKey, false, CloudAniso) ?? TextureCache.Store(cloudKey, BuildClouds(cw), CloudAniso);
-            e.CloudMat.SetTexture("_BaseColorMap", Own(clouds));
+            // Облака SSS — серые, альфа из яркости (импорт FlightSceneBuilder.BodyMap, alphaSource = FromGrayScale).
+            var clouds = set.Clouds != null ? set.Clouds
+                : Own(TextureCache.Load(cloudKey, false, CloudAniso) ?? TextureCache.Store(cloudKey, BuildClouds(cw), CloudAniso));
+            e.CloudMat.SetTexture("_BaseColorMap", clouds);
         }
 
         /// <summary>Созданное BuildLod. Освобождаем только своё: на материалах бывают и ассеты (BaseMaterial, заглушки),
@@ -218,6 +278,52 @@ namespace Kare.Space.Game
         {
             lod.Add(o);
             return o;
+        }
+
+        /// <summary>
+        /// Кольца Сатурна (§9.4): плоское кольцо в экваторе — ребёнок сферы, поворот и сжатие оболочки берёт от неё
+        /// (единица сетки — SphereRadius). Lit, двусторонний: с теневой стороны колец свет проходит слабее — темнее.
+        /// Тень планеты на кольцах не рисуется (тела теней не отбрасывают, см. Start).
+        /// </summary>
+        void AddRing(Entry e)
+        {
+            var go = new GameObject("Rings");
+            go.transform.SetParent(e.Tr, false);
+            float r0 = (float)(RingInner / e.SphereRadius), r1 = (float)(RingOuter / e.SphereRadius);
+            int n = RingSegments;
+            var verts = new Vector3[(n + 1) * 2];
+            var uvs = new Vector2[verts.Length];
+            var tris = new int[n * 6];
+            for (int i = 0; i <= n; i++)
+            {
+                float a = 2 * Mathf.PI * i / n, c = Mathf.Cos(a), s = Mathf.Sin(a);
+                verts[i * 2] = new Vector3(c * r0, 0, s * r0);
+                verts[i * 2 + 1] = new Vector3(c * r1, 0, s * r1);
+                uvs[i * 2] = new Vector2(0, (float)i / n);
+                uvs[i * 2 + 1] = new Vector2(1, (float)i / n);
+                if (i == n) continue;
+                int k = i * 6, v = i * 2;
+                tris[k] = v; tris[k + 1] = v + 1; tris[k + 2] = v + 2;
+                tris[k + 3] = v + 2; tris[k + 4] = v + 1; tris[k + 5] = v + 3;
+            }
+            var mesh = new Mesh { name = "Rings" };
+            mesh.vertices = verts;
+            mesh.uv = uvs;
+            mesh.triangles = tris;
+            mesh.normals = System.Array.ConvertAll(verts, _ => Vector3.up);
+            mesh.RecalculateBounds();
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            var m = new Material(BaseMaterial) { name = "Rings" };
+            m.SetColor("_BaseColor", Color.white);
+            m.SetFloat("_Smoothness", 0);
+            m.SetFloat("_Metallic", 0);
+            m.SetFloat("_EnableFogOnTransparent", 0);
+            m.SetFloat("_DoubleSidedEnable", 1);
+            m.SetTexture("_BaseColorMap", SaturnRing);
+            HDMaterial.SetSurfaceType(m, true); // внутри — ValidateMaterial (ставит и двусторонность)
+            mr.sharedMaterial = m;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
         }
 
         /// <summary>Анизотропия облаков: слой с орбиты виден под скользящим углом у горизонта.</summary>
@@ -443,8 +549,11 @@ namespace Kare.Space.Game
                 Classify(land, water, wet, wb, a, c, a + 1);
                 Classify(land, water, wet, wb, a + 1, c, c + 1);
             }
-            var mesh = patchMf.sharedMesh;
-            mesh.Clear();
+            // Новый меш, а не Clear() старого: RTAS держит BLAS по объекту Mesh и правку вершин на месте не видит —
+            // RT-тени падали от рельефа прежнего места патча (замер 03.10.2026, Луна: чёрные зоны с прямыми краями
+            // при честном горизонте 1,5° против Солнца 8,2°; с DynamicGeometry — чисто). Перестройка редкая, так дешевле.
+            var oldMesh = patchMf.sharedMesh;
+            var mesh = new Mesh { name = "Patch", indexFormat = IndexFormat.UInt32 };
             mesh.vertices = verts;
             mesh.uv = uvs;
             if (macro != null) mesh.uv2 = macro;
@@ -455,6 +564,8 @@ namespace Kare.Space.Game
             mesh.RecalculateNormals();
             mesh.RecalculateTangents(); // нормал-карты грунта и ряби
             mesh.RecalculateBounds();
+            patchMf.sharedMesh = mesh;
+            if (oldMesh != null) Destroy(oldMesh);
             patchMr.sharedMaterials = ocean ? new[] { e.PatchMat, waterMat } : new[] { e.PatchMat };
             patchTr.gameObject.SetActive(true);
         }
@@ -736,10 +847,28 @@ namespace Kare.Space.Game
             return tex;
         }
 
+        /// <summary>Билинейная выборка равнопромежуточной карты: строка 0 — юг, столбец 0 — долгота −180°, как в BuildTexture.</summary>
+        static Color SampleMap(Color32[] px, int w, int h, double lat, double lon)
+        {
+            double fx = (lon + 180) / 360 * w - 0.5, fy = (lat + 90) / 180 * h - 0.5;
+            int x0 = (int)System.Math.Floor(fx), y0 = (int)System.Math.Floor(fy);
+            float tx = (float)(fx - x0), ty = (float)(fy - y0);
+            Color P(int x, int y) => px[Mathf.Clamp(y, 0, h - 1) * w + ((x % w) + w) % w];
+            return Color.Lerp(Color.Lerp(P(x0, y0), P(x0 + 1, y0), tx), Color.Lerp(P(x0, y0 + 1), P(x0 + 1, y0 + 1), tx), ty);
+        }
+
         /// <summary>Цвет тела в точке — им же рисуется сфера (BuildTexture) и тонируется грунт патча.</summary>
         static Color SurfaceColor(CelestialBody b, BodyLook look, double lat, double lon)
         {
-            if (b.Id == "earth") return EarthSurface.Sample(b, lat, lon, out _);
+            bool map = smallPx.TryGetValue(b.Id, out var sm);
+            if (b.Id == "earth")
+            {
+                // Суша — по снимку (его же видно на сфере), вода — своя: патч красит океан по глубине (OceanColor).
+                var c0 = EarthSurface.Sample(b, lat, lon, out _);
+                if (!map || b.SurfaceHeight(CelestialBody.LatLonToBodyFixed(lat, lon)) <= 0) return c0;
+                return SampleMap(sm.Px, sm.W, sm.H, lat, lon);
+            }
+            if (map) return SampleMap(sm.Px, sm.W, sm.H, lat, lon);
             if (look.Bands > 0)
             {
                 float band = Mathf.Sin((float)(lat * Constants.Deg2Rad) * look.Bands * 1.7f + Mathf.Sin((float)(lon * Constants.Deg2Rad) * 3) * 0.15f);

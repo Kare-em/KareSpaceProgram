@@ -109,3 +109,48 @@
   `BodyRenderer.Own/Free` с HashSet, плейсхолдер `Texture2D.whiteTexture` и ассеты не трогать.
 - **Долгий `execute_code` (генерация уровня «Ультра» ~70 с) отваливается по таймауту MCP**, а Unity доделывает работу.
   Результат — `Debug.Log` и потом `read_console`, а не return.
+
+- **Перекомпиляция во время Play → NRE каждый кадр** (`GameBootstrap.Update`): перезагрузка домена обнуляет несериализуемые
+  поля, `Awake` не повторяется. В `Update` стоит проверка с предупреждением; в EditorPrefs `ScriptCompilationDuringPlay` = 1
+  («перекомпилировать после выхода из Play», было −1). Перед правкой кода — `manage_editor stop`.
+- **Bash `cat > файл` без heredoc/ввода висит вечно**, ожидая stdin (повис запуск редактора). Всем командам MCP/Blender —
+  `< /dev/null` и `timeout`.
+- **Blender без MCP-аддона**: `"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" -b Tools/blender/parts.blend
+  --python скрипт.py < /dev/null`; экспорт — `hulls_lib.export(name)` (sys.path на `Tools/blender`), перед сохранением
+  `preferences.filepaths.save_version = 0`, иначе рядом появляется `parts.blend1`.
+
+## Blender без MCP-вывода (03.10.2026)
+- **`execute_blender_code` выполняет, но `print` не возвращает** — проверять геометрию нечем. Рабочий путь — headless:
+  `"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" -b Tools/blender/parts.blend --python script.py < /dev/null`
+  и grep по префиксу в print. Экспорт — `hulls_lib.export(name)` (добавить `Tools/blender` в `sys.path`), перед сохранением
+  `preferences.filepaths.save_version = 0` (иначе плодится `.blend1`), после — удалить `Tools/blender/__pycache__`.
+- **`o.dimensions` после `bm.to_mesh` в фоне не обновляется** — габарит проверять по вершинам или реимпортом FBX.
+
+## Раскладное: опоры и трапы отдельными FBX (03.10.2026)
+- **Опоры «Сервейора»/LM и трапы КТ вынесены из корпусов** скриптом `Tools/blender/split_deploy.py` (разовый: повторно
+  на уже разрезанном parts.blend деталей не найдёт). Острова меша → группа по ближайшему азимуту опоры → объект
+  `<Корпус>_Leg_<k>` / `Luna17_Ramp_<k>` в координатах корпуса; FBX `Surveyor_Legs`, `LM_Legs`, `Luna17_Ramps` — по
+  объекту на опору. Итог разреза: Surveyor 3×124 верш., LM 4 опоры (az 90 — 570 верш. с лестницей, прочие 314), КТ 2×72.
+- **У LM площадка у люка (z > 3,05) — тоже остров с r > 2,4**: без отсечки по высоте уезжает в опору. Лестница — на
+  передней опоре (az 90), поэтому опоры не клонировать с одной, а резать каждую.
+- **Трапы КТ резали колёса лунохода**: в модели «Лунохода» база была 2,2 м (колёса до ±1,36), а сложенный трап
+  стоит на r 1,17–1,2. Колёса пересажены на реальную базу 1,7 м (оси ±0,2833/±0,85, край ±1,105 — пара
+  `FlightPhysics.RoverHalfBase` 0,85), трап сложен на 116° вместо 120° (верх на 4° наружу, r ≈ 1,4 < обтекатель 2,05).
+- **Крышка лунохода — отдельный FBX** `Lunokhod_Lid` (`Tools/blender/lunokhod_lid.py`, разовый: на уже разрезанном
+  parts.blend крышку не найдёт): острова z ≥ 1,33 / уходящие вперёд y < −0,85. Модель — в открытом положении,
+  шарнир r 0,8 h 1,4, закрыта при 162° (`VesselView.DeployHinge`). Антенны, торчавшие над крышкой, сдвинуты к
+  переду (y > 0,64), иначе закрытая крышка шла сквозь них.
+- **Направление шарнира — по стопе, не по центру детали**: подкосы «Сервейора» уводят центр bounds на ~10° от оси опоры.
+  FlightSceneBuilder берёт центр вершин в полосе 0,3 м над низом детали (`DeployFootBand`).
+- **Шарниры (`VesselView.DeployHinge`) — пара с parts.blend**: радиус/высота оси = верх стойки (Surveyor 0,6/0,9, LM
+  2,15/3,0, кромка настила КТ 1,2/1,9; меши: Surveyor y≤0,93, LM r≥2,07 y≤3,04, трап z≥1,17 y≤1,94). Правишь модель —
+  сверяй. Слоты материалов детали ищутся по имени материала в корпусе.
+- **`execute_code` через mcp.py: экранированный перевод строки (обратный слэш + n) в C#-строке приходит настоящим
+  переводом** → «Newline in constant». Разделители в выводе — `" ### "`.
+
+## Колёса лунохода и Play (03.10.2026)
+- **Колёса — `Tools/blender/lunokhod_wheels.py`** (разовый, после `lunokhod_lid.py`): острова меша в габарите колеса
+  (|x| 0,70–0,90, z 0–0,51, оси y ±0,283/±0,845) → `Lunokhod_Wheel_0..7`. Пивот — центр bounds меша
+  (`FlightSceneBuilder.DeployParts(wheels: true)`), вид крутит узел вокруг X модели.
+- **Пока пользователь в Play, компиляция отложена**: `Kare/Build Flight Scene` падает «cannot be used during play mode», а
+  `execute_code` не видит новых членов (`WheelsFor`). Play не останавливать — дождаться выхода, потом собрать сцену.

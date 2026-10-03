@@ -67,6 +67,9 @@ namespace Kare.Space.Core
         public double StartTime;
         /// <summary>Условия по порядку; иначе — в любом порядке (пролёт и съёмка у Луны-3).</summary>
         public bool Sequential = true;
+        /// <summary>Посадка на Луну с окололунной орбиты (м над средним радиусом), 0 — прямой спуск с трассы перелёта,
+        /// как у «Луны-9» и «Сервейера-1». LunarPerilune — перицентр, из которого начинается торможение.</summary>
+        public double LunarOrbit, LunarPerilune;
         public readonly List<Objective> Objectives = new List<Objective>();
     }
 
@@ -330,6 +333,9 @@ namespace Kare.Space.Core
                 Brief = "«Протон-К» с блоком Д: посадить ступень КТ на Луну, съехать по трапам и проехать 100 м.",
                 StartTime = GameCalendar.ToGameTime(1970, 11, 10, 14, 44, 1),
                 Rival = "17 ноя 1970",
+                // Не прямой спуск: 15.11 круговая ~85 км, 16–17.11 КТДУ-417 опустила перицентр до 19 км, оттуда посадка
+                // в Море Дождей 17.11 03:46:50 UTC (ru/en-wiki «Луна-17», orbitalfocus.uk).
+                LunarOrbit = 85e3, LunarPerilune = 19e3,
             };
             luna17.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Body = "moon" });
             luna17.Objectives.Add(new Objective { Type = ObjectiveType.Drive, Body = "moon", Min = 100 });
@@ -413,12 +419,13 @@ namespace Kare.Space.Core
             var apollo11 = new MissionDef
             {
                 Id = "apollo11", Title = "Аполлон-11", DesignId = "apollo11", SiteId = "canaveral",
-                Brief = "Посадка «Игла» в Море Спокойствия и взлёт взлётной ступени на окололунную орбиту.",
+                Brief = "Посадка «Игла» в Море Спокойствия, взлёт и стыковка с «Колумбией», возвращение на Землю.",
                 StartTime = GameCalendar.ToGameTime(1969, 7, 16, 13, 32, 0),
                 Rival = "20 июл 1969",
             };
             apollo11.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Body = "moon" });
             apollo11.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Body = "moon", Min = 15000, HoldSeconds = 60 });
+            apollo11.Objectives.Add(new Objective { Type = ObjectiveType.Return });
             list.Add(apollo11);
 
             return list;

@@ -14,7 +14,7 @@ namespace Kare.Space.Core
     /// </summary>
     public sealed class MissionAutopilot
     {
-        /// <summary>Опорная орбита, м. Пара: LunarAutopilot.ParkingAltitude и клавиша G — то же выведение на 200 км.</summary>
+        /// <summary>Опорная орбита, м. Пара: LunarAutopilot.ParkingAltitude и клавиша H — то же выведение на 200 км.</summary>
         const double ParkingAltitude = 200e3;
         /// <summary>Сколько от старта до разгона к Луне закладывать в окно старта, с (выведение + полвитка; TestLunar).</summary>
         const double AscentToTransfer = 3300;
@@ -51,7 +51,7 @@ namespace Kare.Space.Core
         const double UndockCoast = 30;
         /// <summary>Пауза на поверхности перед взлётом, с.</summary>
         const double SurfaceStay = 10;
-        /// <summary>Орбита взлётной ступени, м. Пара: FlightInput.LmAscentAltitude (G на Луне у ЛМ).</summary>
+        /// <summary>Орбита взлётной ступени, м. Пара: FlightInput.LmAscentAltitude (H на Луне у ЛМ).</summary>
         const double LmAscentAltitude = 30e3;
         /// <summary>Езда лунохода: ход и руль (как DriveLunokhod), и предел времени, с.</summary>
         const double RoverThrottle = 1, RoverSteer = 0.3, RoverTime = 600;
@@ -61,8 +61,15 @@ namespace Kare.Space.Core
         /// </summary>
         public const double ReturnPerigee = 45e3;
         /// <summary>Допуск перигея на трассе возврата, м; коррекций не больше MaxReturnFixes.</summary>
-        const double ReturnTolerance = 5e3;
+        /// Коридор узкий: замер auto — перигей 45,9 км → вход −6,85°, пик 8,0 g; 41,1 км → −7,02°, 9,2 g дольше 10 с,
+        /// экипаж погиб. Допуск 5 км пропускал второй случай без коррекции.
+        const double ReturnTolerance = 1.5e3;
         const int MaxReturnFixes = 3;
+        /// <summary>Поздняя коррекция возврата — за столько секунд до перигея. Пара: больше EntryPrep + 3·TurnMargin,
+        /// иначе FixPerigee откажется; на ~3 ч до перигея борт в ~80 тыс. км, 1 км перигея — ~0,1–0,3 м/с.</summary>
+        const double LateFixLead = 3 * 3600;
+        /// <summary>Меньше — NodeAutopilot закрывает манёвр сразу (порог остатка 0,1 м/с в FlightControl).</summary>
+        const double MinFixDv = 0.1;
         /// <summary>Запас на разворот перед коррекцией, с.</summary>
         const double TurnMargin = 120;
         /// <summary>За сколько до перигея сбросить служебный модуль и взвести парашют, с: вход в атмосферу ≈ за 5–10 мин.</summary>
@@ -293,8 +300,9 @@ namespace Kare.Space.Core
             bool land = IndexOf(ObjectiveType.Landing) >= 0, impact = IndexOf(ObjectiveType.Impact) >= 0;
             double miss = land || impact ? ImpactMiss : IndexOf(ObjectiveType.Flyby) >= 0 ? FarSideMiss : SoiMiss;
             double maxTransfer = IndexOf(ObjectiveType.Flyby) >= 0 ? FarSideTransfer : double.PositiveInfinity;
+            bool viaOrbit = land && def.LunarOrbit > 0;
 
-            if (V.Body != moon && !Encounters(V))
+            if (!viaOrbit && V.Body != moon && !Encounters(V))
             {
                 foreach (var x in WaitWindow(maxTransfer)) yield return x;
                 foreach (var x in Ascend(ParkingAltitude, null)) yield return x;
@@ -306,7 +314,7 @@ namespace Kare.Space.Core
                 u.Post($"К Луне: разгон через {Clock(plan.Time - T)}, Δv {plan.DeltaV:F0} м/с, перелёт {Clock(plan.TransferTime)}");
                 foreach (var x in Burn("Разгон к Луне")) yield return x;
             }
-            if (V.Body != moon)
+            if (!viaOrbit && V.Body != moon)
             {
                 // Коррекция на трассе (как у настоящих станций): промах разгона добирается малым импульсом.
                 var lunar = PatchedConics.Predict(V.Body, V.Position, V.Velocity, T, null, 4).Find(p => p.Body == moon);
@@ -329,6 +337,7 @@ namespace Kare.Space.Core
                     }
                 }
             }
+            if (viaOrbit && !(V.IsLanded && V.Body == moon)) foreach (var x in LunarOrbitFirst(def)) yield return x;
             if (land && !V.IsLanded) u.Landing = new LandingAutopilot(moon);
             Phase = land ? "Перелёт и посадка" : "Перелёт";
             foreach (var x in Await(() => land && V.IsLanded && V.Body == moon || land && u.Landing == null && !V.IsLanded, () =>
@@ -339,7 +348,16 @@ namespace Kare.Space.Core
 
             // «Луноход-1»: съезд по трапам (сброс посадочной ступени) и езда своим ходом (GDD §6.12).
             Phase = "Луноход";
-            while (!V.IsRover && V.NextStageLabel != null) u.Stage();
+            // Трапы откидываются только на грунте, и пока они не легли, пробел не сбросит ступень (Vessel.StageBlock).
+            if (!V.RampsDown)
+            {
+                NeedsPhysics = true;
+                u.ToggleDeploy();
+                var lander = V;
+                foreach (var x in Await(() => lander.RampsDown || !lander.Alive, "Трапы: раскладка")) yield return x;
+                NeedsPhysics = false;
+            }
+            for (int n = 0; n < 8 && !V.IsRover && V.HasNextStage; n++) u.Stage();
             if (!V.IsRover) throw new Abort("луноход не съехал");
             OwnsPilotInput = NeedsPhysics = true;
             double until = T + RoverTime;
@@ -351,6 +369,40 @@ namespace Kare.Space.Core
                      })) yield return x;
             rover.PilotInput = Vector3d.zero;
             OwnsPilotInput = NeedsPhysics = false;
+        }
+
+        /// <summary>
+        /// «Луна-17» (как «Луна-16»): не прямой спуск «Луны-9» и «Сервейера», а сначала круговая окололунная орбита
+        /// def.LunarOrbit, затем перицентр def.LunarPerilune торможением в апоцентре — и посадка из него.
+        /// Пара: LandingAutopilot.LowEnough (DeorbitPeriapsis 15 км + 5 км) — 19 км уже низко, второго схода нет.
+        /// </summary>
+        IEnumerable<object> LunarOrbitFirst(MissionDef def)
+        {
+            var u = universe;
+            if (V.Body != moon || !OnOrbit(V))
+            {
+                if (V.Body != moon && !Encounters(V))
+                {
+                    if (V.IsLanded) foreach (var x in WaitWindow(double.PositiveInfinity)) yield return x;
+                    foreach (var x in Ascend(ParkingAltitude, null)) yield return x;
+                }
+                u.Lunar = new LunarAutopilot(u, moon, def.LunarOrbit);
+                Phase = "Полёт к Луне";
+                foreach (var x in Await(() => u.Lunar == null, () => u.Lunar?.Status ?? "")) yield return x;
+            }
+            if (V.Body != moon || !OnOrbit(V)) throw new Abort("окололунная орбита не получена");
+
+            var v = V;
+            var o = KeplerOrbit.FromState(v.Position, v.Velocity, moon.Mu, T);
+            double rp = moon.Radius + def.LunarPerilune;
+            if (o.PeriapsisRadius < rp + 2000) yield break;
+            double ra = o.ApoapsisRadius, t = T + o.TimeToApoapsis(T);
+            if (t - T < TurnMargin) t += o.Period;
+            double va = Math.Sqrt(moon.Mu * (2 / ra - 1 / o.A)), vn = Math.Sqrt(moon.Mu * (2 / ra - 2 / (ra + rp)));
+            Phase = "Снижение орбиты";
+            u.SetNode(t, vn - va, 0, 0);
+            u.Post($"Снижение перицентра до {def.LunarPerilune / 1000:F0} км: через {Clock(t - T)}, Δv {va - vn:F0} м/с");
+            foreach (var x in Burn("Снижение перицентра")) yield return x;
         }
 
         /// <summary>«Аполлон»: окно, опорная орбита, LunarAutopilot до окололунной; дальше посадка ЛМ или виток и возврат.</summary>
@@ -377,9 +429,8 @@ namespace Kare.Space.Core
                 if (IndexOf(ObjectiveType.Landing) >= 0)
                 {
                     foreach (var x in LunarLanding()) yield return x;
-                    yield break;
                 }
-                foreach (var x in HoldOrbit(orbitIdx)) yield return x;
+                else foreach (var x in HoldOrbit(orbitIdx)) yield return x;
                 if (IndexOf(ObjectiveType.Return) < 0) yield break;
                 foreach (var x in TransEarth()) yield return x;
             }
@@ -396,7 +447,9 @@ namespace Kare.Space.Core
             while (u.Active == csm && csm.NextStageLabel != null) u.Stage();
             if (u.Active == csm) throw new Abort("ЛМ не отделился");
             double end = T + UndockCoast;
-            foreach (var x in Await(() => T >= end, () => $"Отход от КСМ: {end - T:F0} с")) yield return x;
+            // WaitUntil, а не Await: без события впереди (круговая орбита, грунт) автоускорение уходило на ×1e7
+            // и проскакивало ~11,6 сут за кадр — замер auto_apollo11: отстыковка 4,87 сут, сход 16,45 сут.
+            foreach (var x in WaitUntil(end, () => $"Отход от КСМ: {end - T:F0} с")) yield return x;
 
             Phase = "Посадка ЛМ";
             u.Landing = new LandingAutopilot(moon);
@@ -404,13 +457,22 @@ namespace Kare.Space.Core
             if (!V.IsLanded) throw new Abort("посадка не удалась");
             end = T + SurfaceStay;
             Phase = "На Луне";
-            foreach (var x in Await(() => T >= end, () => $"На поверхности, взлёт через {end - T:F0} с")) yield return x;
+            foreach (var x in WaitUntil(end, () => $"На поверхности, взлёт через {end - T:F0} с")) yield return x;
 
             u.Stage(); // отделение взлётной ступени с зажиганием
             foreach (var x in Ascend(LmAscentAltitude, csm)) yield return x;
             Phase = "Стыковка";
+            var lm = V;
             u.Docking = new DockingAutopilot(u, csm);
             foreach (var x in Await(() => u.Docking == null, () => u.Docking?.Status ?? "")) yield return x;
+            // Связку забирает КСМ (ЛМ в ней перевёрнут), активным становится он — пропал один из двух бортов.
+            if (u.Vessels.Contains(csm) && u.Vessels.Contains(lm)) throw new Abort("стыковка с КСМ не удалась");
+
+            // Экипаж переходит в «Колумбию», взлётная ступень остаётся на орбите, SPS взводится на разгон к Земле.
+            Phase = "Переход в КСМ";
+            StageUntil(StageActionType.Separate);
+            for (int i = 0; i < V.Attached.Length; i++)
+                if (V.Attached[i] && V.Flipped[i]) throw new Abort("КСМ не отделился от взлётной ступени");
         }
 
         /// <summary>Разгон к Земле с окололунной орбиты (TEI): узел по TransferPlanner.PlanReturn.</summary>
@@ -434,18 +496,20 @@ namespace Kare.Space.Core
             Phase = "Возврат";
             foreach (var x in Await(() => V.Body == earth, CoastText)) yield return x;
             double target = earth.Radius + ReturnPerigee;
-            for (int k = 0; k < MaxReturnFixes; k++)
+            foreach (var x in FixPerigee(earth, target)) yield return x;
             {
+                // Вторая коррекция ближе к Земле, как MCC-7 «Аполлонов» (§9): у границы сферы Луны 2 км перигея
+                // стоят сотые доли м/с — меньше порога NodeAutopilot (0,1 м/с), манёвр закрывается не начавшись,
+                // а к входу перигей уплывает. Замер auto_apollo11: 43 км на выходе из сферы → 41,1 км на входе, 9,2 g.
                 var v = V;
-                if (Math.Abs(Perigee(v) - target) <= ReturnTolerance) break;
                 var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, earth.Mu, T);
-                if (orbit.TimeToPeriapsis(T) < EntryPrep + 3 * TurnMargin) break;
-                var fix = TransferPlanner.PlanPerigee(earth, v.Position, v.Velocity, T, target, T + TurnMargin);
-                if (fix == null) break;
-                Phase = "Коррекция возврата";
-                u.SetNode(fix.Time, fix.Prograde, fix.Normal, fix.Radial);
-                u.Post($"Коррекция перигея: {(Perigee(v) - earth.Radius) / 1000:F0} → {ReturnPerigee / 1000:F0} км, {fix.DeltaV:F1} м/с");
-                foreach (var x in Burn("Коррекция возврата")) yield return x;
+                double late = T + orbit.TimeToPeriapsis(T) - LateFixLead;
+                if (late > T + TurnMargin)
+                {
+                    Phase = "Возврат";
+                    foreach (var x in WaitUntil(late, CoastText)) yield return x;
+                    foreach (var x in FixPerigee(earth, target)) yield return x;
+                }
             }
             {
                 var v = V;
@@ -453,6 +517,26 @@ namespace Kare.Space.Core
                 double prep = T + orbit.TimeToPeriapsis(T) - EntryPrep;
                 Phase = "Возврат";
                 foreach (var x in WaitUntil(prep, () => $"До входа в атмосферу {Clock(prep + EntryPrep - T)}, перигей {(Perigee(V) - earth.Radius) / 1000:F0} км")) yield return x;
+            }
+        }
+
+        /// <summary>Коррекции перигея возврата в коридор входа, не больше MaxReturnFixes.</summary>
+        IEnumerable<object> FixPerigee(CelestialBody earth, double target)
+        {
+            var u = universe;
+            for (int k = 0; k < MaxReturnFixes; k++)
+            {
+                var v = V;
+                if (Math.Abs(Perigee(v) - target) <= ReturnTolerance) break;
+                var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, earth.Mu, T);
+                if (orbit.TimeToPeriapsis(T) < EntryPrep + 3 * TurnMargin) break;
+                var fix = TransferPlanner.PlanPerigee(earth, v.Position, v.Velocity, T, target, T + TurnMargin);
+                // Импульс меньше порога NodeAutopilot всё равно не исполнится — ждать поздней коррекции.
+                if (fix == null || fix.DeltaV < MinFixDv) break;
+                Phase = "Коррекция возврата";
+                u.SetNode(fix.Time, fix.Prograde, fix.Normal, fix.Radial);
+                u.Post($"Коррекция перигея: {(Perigee(v) - earth.Radius) / 1000:F0} → {ReturnPerigee / 1000:F0} км, {fix.DeltaV:F1} м/с");
+                foreach (var x in Burn("Коррекция возврата")) yield return x;
             }
         }
 

@@ -106,7 +106,11 @@ namespace Kare.Space.EditorTools
             foreach (var (model, file) in CraftFiles)
             {
                 var mesh = ModelMesh(file);
-                if (mesh != null) crafts.Add(new GameBootstrap.CraftMesh { Model = model, Mesh = mesh });
+                if (mesh != null) crafts.Add(new GameBootstrap.CraftMesh
+                {
+                    Model = model, Mesh = mesh, Deploy = DeployParts(model, file, DeployFiles, false),
+                    Wheels = DeployParts(model, file, WheelFiles, true),
+                });
             }
             boot.CraftMeshes = crafts.ToArray();
             // Стартовые комплексы: Р-7, мачта, Протон, Редстоун, Атлас, Титан, Сатурн (ML + LUT), стрелы башен.
@@ -132,6 +136,24 @@ namespace Kare.Space.EditorTools
             bodyRenderer.EarthGround = PackTexture(Ground12 + "_Diffuse.tga", true, false) ?? GroundTexture("SteppeDetail", true);
             bodyRenderer.EarthMacro = GroundTexture("SteppeMacro", true);
             bodyRenderer.MoonGround = GroundTexture("Regolith", true);
+            // Карты тел (§9.4): Луна — LRO, остальное — Solar System Scope (CC BY 4.0), Tools/textures/sss_convert.py.
+            bodyRenderer.Maps = new[]
+            {
+                new BodyRenderer.BodyMapSet { Id = "moon", Map = BodyMap("MoonLroc8k.png", 8192, false), Small = BodyMap("MoonLrocSmall.png", 1024, true) },
+                new BodyRenderer.BodyMapSet
+                {
+                    Id = "earth", Map = BodyMap("EarthDay.jpg", 8192, false), Small = BodyMap("EarthSmall.png", 2048, true),
+                    Night = BodyMap("EarthNight.jpg", 8192, false), Clouds = BodyMap("EarthClouds.jpg", 8192, false, true),
+                },
+                new BodyRenderer.BodyMapSet { Id = "mercury", Map = BodyMap("MercuryMap.jpg", 8192, false) },
+                new BodyRenderer.BodyMapSet { Id = "venus", Map = BodyMap("VenusMap.jpg", 4096, false) },
+                new BodyRenderer.BodyMapSet { Id = "mars", Map = BodyMap("MarsMap.jpg", 8192, false), Small = BodyMap("MarsSmall.png", 1024, true) },
+                new BodyRenderer.BodyMapSet { Id = "jupiter", Map = BodyMap("JupiterMap.jpg", 4096, false) },
+                new BodyRenderer.BodyMapSet { Id = "saturn", Map = BodyMap("SaturnMap.jpg", 4096, false) },
+                new BodyRenderer.BodyMapSet { Id = "uranus", Map = BodyMap("UranusMap.jpg", 2048, false) },
+                new BodyRenderer.BodyMapSet { Id = "neptune", Map = BodyMap("NeptuneMap.jpg", 2048, false) },
+            };
+            bodyRenderer.SaturnRing = RingMap("SaturnRing.png");
             bodyRenderer.MarsGround = PackTexture(Ground13 + "_Diffuse.tga", true, false) ?? GroundTexture("MarsSoil", true);
             bodyRenderer.EarthGroundNormal = PackTexture(Ground12 + "_Normal.tga", false, true) ?? NormalTexture("GroundNormal");
             bodyRenderer.WaterNormal = NormalTexture("WaterNormal");
@@ -312,6 +334,55 @@ namespace Kare.Space.EditorTools
             (SectionModel.ProtonStage3, "Proton_Stage3"), (SectionModel.BlokD, "BlokD"),
         };
 
+        /// <summary>Раскладное (§6.12): опоры и трапы — отдельные FBX, по объекту на опору (Tools/blender, split_deploy).</summary>
+        static readonly (SectionModel, string)[] DeployFiles =
+        {
+            (SectionModel.Surveyor, "Surveyor_Legs"), (SectionModel.LMDescent, "LM_Legs"), (SectionModel.Luna17KT, "Luna17_Ramps"),
+            (SectionModel.Lunokhod, "Lunokhod_Lid"),
+        };
+
+        /// <summary>Колёса — отдельный FBX, по объекту на колесо (Tools/blender/lunokhod_wheels.py), вид крутит их по пути.</summary>
+        static readonly (SectionModel, string)[] WheelFiles = { (SectionModel.Lunokhod, "Lunokhod_Wheels") };
+
+        /// <summary>
+        /// Детали раскладного модели: меш, направление наружу (центр нижних вершин — стопа опоры, конец трапа: по
+        /// центру масс детали азимут уводят подкосы) и слоты материалов в палитре корпуса — по именам материалов FBX,
+        /// у детали слотов меньше, чем у корпуса.
+        /// </summary>
+        static GameBootstrap.DeployPart[] DeployParts(SectionModel model, string bodyFile, (SectionModel, string)[] files, bool wheels)
+        {
+            string file = null;
+            foreach (var (m, f) in files) if (m == model) file = f;
+            if (file == null) return null;
+            var body = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/_Project/Models/" + bodyFile + ".fbx");
+            var root = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/_Project/Models/" + file + ".fbx");
+            if (body == null || root == null) return null;
+            var bodyMats = new List<string>();
+            foreach (var mat in body.GetComponentInChildren<MeshRenderer>().sharedMaterials) bodyMats.Add(mat != null ? mat.name : "");
+            var list = new List<GameBootstrap.DeployPart>();
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
+            {
+                var mesh = mf.sharedMesh;
+                var mats = mf.GetComponent<MeshRenderer>().sharedMaterials;
+                var slots = new int[mats.Length];
+                for (int i = 0; i < mats.Length; i++) slots[i] = Mathf.Max(0, bodyMats.IndexOf(mats[i] != null ? mats[i].name : ""));
+                if (wheels)
+                {
+                    list.Add(new GameBootstrap.DeployPart { Mesh = mesh, Dir = mesh.bounds.center, Slots = slots });
+                    continue;
+                }
+                float low = mesh.bounds.min.y + DeployFootBand;
+                Vector3 c = Vector3.zero;
+                foreach (var p in mesh.vertices) if (p.y < low) c += new Vector3(p.x, 0, p.z);
+                if (c.sqrMagnitude < 1e-6f) c = new Vector3(mesh.bounds.center.x, 0, mesh.bounds.center.z);
+                list.Add(new GameBootstrap.DeployPart { Mesh = mesh, Dir = c.normalized, Slots = slots });
+            }
+            return list.ToArray();
+        }
+
+        /// <summary>Полоса «стопы» над низом детали, м: тоньше лап опор (0,2 у LM) и толще рельса трапа (0,07).</summary>
+        const float DeployFootBand = 0.3f;
+
         /// <summary>Первый меш FBX из Models; null — файла нет (детали не обязательны).</summary>
         static Mesh ModelMesh(string name)
         {
@@ -376,6 +447,52 @@ namespace Kare.Space.EditorTools
                 ti.maxTextureSize = 1024;
                 ti.isReadable = readable;
                 ti.textureCompression = readable ? TextureImporterCompression.Uncompressed : TextureImporterCompression.CompressedHQ;
+                ti.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        /// <summary>Карты тел (Tools/textures: NASA SVS CGI Moon Kit, Solar System Scope): равнопромежуточные, повтор
+        /// по долготе, у полюсов — край. grayAlpha — облака: альфа из яркости, иначе слой был бы сплошным.</summary>
+        static Texture2D BodyMap(string name, int size, bool readable, bool grayAlpha = false)
+        {
+            string path = $"Assets/_Project/Textures/Bodies/{name}";
+            if (AssetImporter.GetAtPath(path) is TextureImporter ti)
+            {
+                ti.textureType = TextureImporterType.Default;
+                ti.sRGBTexture = true;
+                ti.alphaSource = grayAlpha ? TextureImporterAlphaSource.FromGrayScale : TextureImporterAlphaSource.None;
+                ti.alphaIsTransparency = grayAlpha;
+                ti.mipmapEnabled = true;
+                ti.wrapModeU = TextureWrapMode.Repeat;
+                ti.wrapModeV = TextureWrapMode.Clamp;
+                ti.anisoLevel = 4;
+                ti.maxTextureSize = size;
+                ti.isReadable = readable;
+                // DXT1, не BC7: 8k в BC7 — 85 МБ видеопамяти против 21 МБ, а разница на сером реголите не видна.
+                // Облака с альфой — DXT5 (Compressed сам выбирает его при alphaSource).
+                ti.textureCompression = readable ? TextureImporterCompression.Uncompressed : TextureImporterCompression.Compressed;
+                ti.SaveAndReimport();
+            }
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        /// <summary>Полоса колец: x — радиус, края не повторяются (иначе внутренний край C подхватил бы внешний A).</summary>
+        static Texture2D RingMap(string name)
+        {
+            string path = $"Assets/_Project/Textures/Bodies/{name}";
+            if (AssetImporter.GetAtPath(path) is TextureImporter ti)
+            {
+                ti.textureType = TextureImporterType.Default;
+                ti.sRGBTexture = true;
+                ti.alphaSource = TextureImporterAlphaSource.FromInput;
+                ti.alphaIsTransparency = true;
+                ti.mipmapEnabled = true;
+                ti.wrapMode = TextureWrapMode.Clamp;
+                ti.npotScale = TextureImporterNPOTScale.None;
+                ti.anisoLevel = 8;
+                ti.maxTextureSize = 8192;
+                ti.textureCompression = TextureImporterCompression.CompressedHQ;
                 ti.SaveAndReimport();
             }
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);

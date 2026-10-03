@@ -14,13 +14,18 @@ namespace Kare.Space.Game
     {
         /// <summary>Дальше этого от активного борта обломки не рисуем — на таком расстоянии они меньше пикселя.</summary>
         const float DrawDistance = 50000;
-        /// <summary>Длина факела в калибрах сопла у земли и рост в вакууме (§9.5: расширение струи).</summary>
-        const float PlumeLengthSL = 12, PlumeVacuumGrowth = 3;
+        /// <summary>
+        /// Длина факела в радиусах сопла и рост ширины в вакууме (§9.5: расширение струи). Было ×4 и в длину, и в
+        /// ширину: свечение у среза 4,4 радиуса сопла, длина ~105 — у верхней ступени факел втрое шире её самой.
+        /// Видимая часть вакуумной струи — ядро у среза, раструб размыт и тускл, поэтому растёт только ширина хвоста.
+        /// Пара: GlowLength и меш свечения (основание 1,0 — ровно срез сопла).
+        /// </summary>
+        const float PlumeLengthSL = 12, PlumeVacuumWidth = 0.4f;
         /// <summary>Связка сопел: кольцо на этой доле радиуса днища, сопло — доля шага кольца (зазор между
         /// раструбами). Пара: PlumeClusterFill — общий факел накрывает кольцо целиком (у земли струи сливаются).</summary>
         const float NozzleRing = 0.62f, NozzleGap = 0.85f, PlumeClusterFill = 0.85f;
         /// <summary>Свечение длиннее ядра во столько раз; ядро в вакууме почти не раздувается.</summary>
-        const float GlowLength = 2.2f, CoreSpread = 0.25f;
+        const float GlowLength = 1.8f, CoreSpread = 0.25f;
         /// <summary>Яркость ядра и свечения у среза, нит. Пара: дневная экспозиция EV 14 (§9.3) — серое 18 %
         /// ≈ 2000 нит. Физичные 2·10⁵ не годятся: аддитив складывает 4 стенки, bloom размазывает перебор
         /// на весь экран — кадр белый (замер 01.10.2026). 3·10³ при EV 14 — белое ядро с ореолом.</summary>
@@ -67,6 +72,9 @@ namespace Kare.Space.Game
         /// вынос стопы опоры наружу и вниз от шарнира. Пара: границы мешей в Models/*.fbx — меняешь модель, сверяй.</summary>
         const float CapsuleModelDiameter = 2.3f, EngineModelWidth = 1.96f, EngineModelHeight = 1.6f;
         const float LegModelReach = 1.09f, LegModelDrop = 1.37f;
+        /// <summary>Сложенная процедурная опора (§6.12, как в KSP): поворот на шарнире вверх, стопа у борта выше шарнира.
+        /// Пара: LegModelReach/Drop — стопа под 231° от +X, после поворота — 107°, на 0,5 м снаружи корпуса.</summary>
+        const float GenericLegStow = 124f;
         /// <summary>Габариты деталей реальных аппаратов, м: шар ПС-1; приборный отсек «Востока» (Ø, высота до
         /// среза ТДУ); станция Е-6; РД-0110 (Ø, высота); ферма горячего разделения (наружный радиус, высота);
         /// створка обтекателя (радиус, высота); корпус хвостового отсека Г-1 под стабилизаторами (радиус).
@@ -108,6 +116,26 @@ namespace Kare.Space.Game
         }
 
         readonly List<Part> parts = new List<Part>();
+        /// <summary>
+        /// Опоры и трапы на шарнирах (§6.12): Rest/Base — место и поворот в осях родителя в рабочем положении, Pivot —
+        /// ось шарнира, Axis — вокруг чего складывается (Cross(наружу, вверх): плюс поднимает деталь), Stow — угол
+        /// сложенной. Раскрытие — Vessel.Deployed секции. Squeeze — опора: при просадке подвески стопа стоит на грунте.
+        /// </summary>
+        struct Hinge
+        {
+            public Transform T;
+            public Vector3 Rest, Pivot, Axis;
+            public Quaternion Base;
+            public float Stow;
+            public int Section;
+            public bool Squeeze;
+        }
+
+        readonly List<Hinge> legs = new List<Hinge>();
+
+        /// <summary>Колесо лунохода: узел в центре колеса, крутится вокруг оси X модели на путь своего борта.</summary>
+        struct Wheel { public Transform T; public bool Left; }
+        readonly List<Wheel> wheels = new List<Wheel>();
         Material bodyMat, plumeMat;
         Transform plasma, plasmaHalo;
         Renderer plasmaHaloR;
@@ -205,6 +233,8 @@ namespace Kare.Space.Game
         {
             foreach (Transform ch in transform) Destroy(ch.gameObject);
             parts.Clear();
+            legs.Clear();
+            wheels.Clear();
             builtSignature = Signature();
             var secs = Vessel.Design.Sections;
             var boot = GameBootstrap.Instance;
@@ -312,6 +342,8 @@ namespace Kare.Space.Game
                             break;
                     }
                     part.AddBody(AddRenderer(m.gameObject, model, palette), palette);
+                    if (craft) AddDeployParts(m, i, s, boot.DeployFor(s.Model), palette);
+                    if (craft) AddWheels(m, boot.WheelsFor(s.Model), palette);
                 }
                 else if (s.Kind == SectionKind.Capsule && s.Sphere && capsuleFbx != null)
                 {
@@ -359,9 +391,14 @@ namespace Kare.Space.Game
                         leg.transform.SetParent(go.transform, false);
                         // −X модели — наружу: поворот на 90·k + 45° ставит опоры между связями.
                         var yaw = Quaternion.Euler(0, 90 * k + 45, 0);
-                        leg.transform.localRotation = yaw;
-                        leg.transform.localPosition = yaw * new Vector3(-r, Mathf.Min(LegModelDrop, len), 0);
+                        var hinge = yaw * new Vector3(-r, Mathf.Min(LegModelDrop, len), 0);
                         AddRenderer(leg, legFbx, NozzleColor);
+                        var outward = yaw * Vector3.left;
+                        legs.Add(new Hinge
+                        {
+                            T = leg.transform, Rest = hinge, Pivot = hinge, Base = yaw, Section = i, Squeeze = true,
+                            Axis = Vector3.Cross(outward, Vector3.up), Stow = s.Deploy == DeployKind.None ? 0 : GenericLegStow,
+                        });
                     }
                 }
 
@@ -428,7 +465,7 @@ namespace Kare.Space.Game
                     part.CoreR = AddPlume(plume, ProcMesh.Plume(1, -0.55f, 1, 16, 12));
                     var glow = new GameObject("Glow");
                     glow.transform.SetParent(nozzle.transform, false);
-                    part.GlowR = AddPlume(glow, ProcMesh.Plume(1.1f, 1.6f, 0.6f, 16, 12));
+                    part.GlowR = AddPlume(glow, ProcMesh.Plume(1f, 2f, 0.6f, 16, 12));
                     var lgo = new GameObject("Plume Light");
                     lgo.transform.SetParent(nozzle.transform, false);
                     lgo.transform.localPosition = new Vector3(0, -nr * 3, 0);
@@ -607,7 +644,65 @@ namespace Kare.Space.Game
             plasmaLight.range = r * PlasmaLightRange;
         }
 
-        /// <summary>Купол и стропы: корень в точке крепления (верх секции), +Y — против набегающего потока.</summary>
+        /// <summary>
+        /// Шарнир раскладного по модели (§6.12), в осях модели: радиус и высота оси, угол сложенной детали.
+        /// Пара: Tools/blender/parts.blend (Surveyor_Leg_*, LM_Leg_*, Luna17_Ramp_*) — верх основной стойки опоры и
+        /// кромка настила КТ (FlightPhysics.RampDeckEdge = 1,2 м, настил 1,9 м); меняешь модель — сверяй.
+        /// «Сервейор» складывает опоры под обтекатель Ø3 м: 107° — стопа на r 1,0 м; LM — к взлётной ступени, 133°;
+        /// трапы КТ сложены почти вертикально над кромкой настила (уклон 30° + 86°): верх отклонён на 4° наружу, чтобы
+        /// не задевать колёса лунохода — база 1,7 м, колёса до ±1,105 м (пара: FlightPhysics.RoverHalfBase).
+        /// Крышка лунохода (Lunokhod_Lid, Tools/blender/lunokhod_lid.py) в модели открыта вперёд, шарнир на передней
+        /// кромке корпуса r 0,8 м, h 1,4 м; 162° — закрытая лежит на приборном отсеке.
+        /// </summary>
+        static bool DeployHinge(SectionModel model, out float radius, out float height, out float stow)
+        {
+            switch (model)
+            {
+                case SectionModel.Surveyor: radius = 0.6f; height = 0.9f; stow = 107; return true;
+                case SectionModel.LMDescent: radius = 2.15f; height = 3.0f; stow = 133; return true;
+                case SectionModel.Luna17KT: radius = 1.2f; height = 1.9f; stow = 116; return true;
+                case SectionModel.Lunokhod: radius = 0.8f; height = 1.4f; stow = 162; return true;
+            }
+            radius = height = stow = 0;
+            return false;
+        }
+
+        void AddDeployParts(Transform model, int section, SectionDef s, GameBootstrap.DeployPart[] deploy, Color[] palette)
+        {
+            if (deploy == null || !DeployHinge(s.Model, out float hr, out float hh, out float stow)) return;
+            foreach (var d in deploy)
+            {
+                if (d.Mesh == null) continue;
+                var t = AddChild(model.gameObject, d.Mesh.name);
+                var pal = new Color[d.Slots != null && d.Slots.Length > 0 ? d.Slots.Length : 1];
+                for (int k = 0; k < pal.Length; k++) pal[k] = palette[d.Slots != null && d.Slots.Length > 0 ? Mathf.Min(d.Slots[k], palette.Length - 1) : 0];
+                AddRenderer(t.gameObject, d.Mesh, pal);
+                legs.Add(new Hinge
+                {
+                    T = t, Rest = Vector3.zero, Pivot = d.Dir * hr + Vector3.up * hh, Base = Quaternion.identity,
+                    Axis = Vector3.Cross(d.Dir, Vector3.up), Section = section,
+                    Stow = s.Deploy == DeployKind.None ? 0 : stow, Squeeze = s.Deploy == DeployKind.Legs || s.Deploy == DeployKind.PyroLegs,
+                });
+            }
+        }
+
+        void AddWheels(Transform model, GameBootstrap.DeployPart[] list, Color[] palette)
+        {
+            if (list == null) return;
+            foreach (var d in list)
+            {
+                if (d.Mesh == null) continue;
+                var hub = AddChild(model.gameObject, d.Mesh.name);
+                hub.localPosition = d.Dir;
+                var t = AddChild(hub.gameObject, "Mesh");
+                t.localPosition = -d.Dir;
+                var pal = new Color[d.Slots != null && d.Slots.Length > 0 ? d.Slots.Length : 1];
+                for (int k = 0; k < pal.Length; k++) pal[k] = palette[d.Slots != null && d.Slots.Length > 0 ? Mathf.Min(d.Slots[k], palette.Length - 1) : 0];
+                AddRenderer(t.gameObject, d.Mesh, pal);
+                wheels.Add(new Wheel { T = hub, Left = d.Dir.x < 0 });
+            }
+        }
+
         static Transform AddChild(GameObject parent, string name)
         {
             var t = new GameObject(name).transform;
@@ -615,6 +710,7 @@ namespace Kare.Space.Game
             return t;
         }
 
+        /// <summary>Купол и стропы: корень в точке крепления (верх секции), +Y — против набегающего потока.</summary>
         void AddChute(Part part)
         {
             var root = new GameObject("Parachute");
@@ -816,6 +912,24 @@ namespace Kare.Space.Game
             Vessel.MassProperties(out _, out double com, out double vesselLen, out double vesselR);
             Vessel.Layout(baseHeight);
             transform.SetPositionAndRotation(pos, FloatingOrigin.ToQuaternion(Vessel.Attitude));
+            // Корпус проседает вместе с подвеской, стопы опор остаются на месте касания: опора «сжимается».
+            var squeeze = transform.up * (float)-Vessel.Suspension;
+            foreach (var h in legs)
+            {
+                if (h.T == null) continue;
+                var q = Quaternion.AngleAxis(h.Stow * (1 - (float)Vessel.Deployed[h.Section]), h.Axis);
+                h.T.localRotation = q * h.Base;
+                h.T.localPosition = h.Pivot + q * (h.Rest - h.Pivot) + (h.Squeeze ? h.T.parent.InverseTransformVector(squeeze) : Vector3.zero);
+            }
+
+            // Колёса: путь борта / радиус. Плюс вокруг +X в осях Unity гонит верх колеса к носу (+Z) — качение вперёд.
+            foreach (var w in wheels)
+            {
+                if (w.T == null) continue;
+                double path = w.Left ? Vessel.WheelPathLeft : Vessel.WheelPathRight;
+                float deg = (float)(path / FlightPhysics.RoverWheelRadius * Mathf.Rad2Deg % 360);
+                w.T.localRotation = Quaternion.Euler(deg, 0, 0);
+            }
 
             float pressure = (float)(Vessel.StaticPressure / SeaLevelPressure);
             // Набегающий поток — скорость относительно вращающейся атмосферы; у стоящего борта — местная вертикаль.
@@ -843,10 +957,10 @@ namespace Kare.Space.Game
                 if (!burning) continue;
                 // В вакууме струя раздувается и удлиняется; яркость/длина — от дросселя (§9.5).
                 float vac = 1 - Mathf.Clamp01(pressure);
-                float spread = 1 + vac * PlumeVacuumGrowth;
-                float len = p.PlumeRadius * PlumeLengthSL * (0.4f + 0.6f * thr) * spread;
+                float spread = 1 + vac * PlumeVacuumWidth;
+                float len = p.PlumeRadius * PlumeLengthSL * (0.4f + 0.6f * thr);
                 float flicker = Flicker(PlumeFlicker, p.Index);
-                float coreR = p.PlumeRadius * (1 + vac * PlumeVacuumGrowth * CoreSpread);
+                float coreR = p.PlumeRadius * (1 + vac * PlumeVacuumWidth * CoreSpread);
                 p.Plume.localScale = new Vector3(coreR, len * flicker, coreR);
                 p.Glow.localScale = new Vector3(p.PlumeRadius * spread, len * GlowLength * flicker, p.PlumeRadius * spread);
                 // Яркость на единицу площади: раздувшаяся струя тусклее (§9.5).

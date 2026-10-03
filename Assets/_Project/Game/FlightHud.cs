@@ -21,7 +21,7 @@ namespace Kare.Space.Game
         const double HeatWarnFlux = 1e5, GWarn = 5;
         /// <summary>Жёлтое «угол атаки» — с этой доли предела FlightPhysics.QAlphaLimit, красное — с предела.</summary>
         const double QAlphaWarnShare = 0.6;
-        /// <summary>Подсказка по углу (§10.2): цель по апоцентру, м. Пара: FlightInput, G — автопилот на 200 км.
+        /// <summary>Подсказка по углу (§10.2): цель по апоцентру, м. Пара: FlightInput, H — автопилот на 200 км.
         /// Запас перицентра над атмосферой — как у довыведения AscentAutopilot (верх атмосферы + 10 км и выше).</summary>
         const double TutorApoapsis = 200000, TutorPeriapsisMargin = 40000;
         /// <summary>Масштаб программы тангажа подсказки, м. Пара: AscentAutopilot.TurnAltitude.</summary>
@@ -54,7 +54,7 @@ namespace Kare.Space.Game
 
         void Update()
         {
-            if (Input.GetKeyDown(KeyCode.H)) details = !details;
+            if (Input.GetKeyDown(KeyCode.F1)) details = !details;
         }
 
         void Styles()
@@ -84,7 +84,7 @@ namespace Kare.Space.Game
             Warnings(u, v, w);
             StageStack(v, w, h);
             Bottom(u, v, w, h);
-            if (!MapView.IsOpen) NavBall(u, v, w, h - 138); // 138 — верх средней панели Bottom (ph + 32 + 14)
+            if (!MapView.IsOpen) NavBall(u, v, w, h - 24); // 24 — строка подсказки клавиш внизу
             Messages(boot, w, h);
             NodePanel(u, v, h);
             if (details) Details(u, v, boot);
@@ -92,7 +92,7 @@ namespace Kare.Space.Game
 
             GUI.color = Dim;
             GUI.Label(new Rect(10, h - 24, 1100, 22),
-                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · G взлёт/посадка · R к Луне · N/B манёвр · ,/. время · M карта · H детали · Esc", small);
+                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · H взлёт/посадка · G опоры/трапы · R к Луне · N/B манёвр · ,/. время · M карта · F1 детали · Esc", small);
             GUI.color = Color.white;
         }
 
@@ -110,12 +110,14 @@ namespace Kare.Space.Game
                         : "Миссия выполнена";
             var c = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             GUI.Label(new Rect(r.x + 8, r.y + 40, pw - 16, 26), task, c);
-            if (u.WarpIndex > 0)
+            if (u.WarpIndex > 0 || u.AutoWarpManual)
             {
                 // Фактический множитель, а не выбранный: в физике выше MaxPhysicsWarp время не идёт.
-                string warp = "×" + u.EffectiveWarp.ToString("0") + (u.RailsActive ? " рельсы" : "");
+                // «авто»/«вручную» — кто правит ускорением при работающем автопилоте («.» перехватывает, «/» на ×1 отдаёт).
+                string warp = "×" + u.EffectiveWarp.ToString("0") + (u.RailsActive ? " рельсы" : "")
+                            + (u.AutoWarpDriving ? " авто" : u.AutoWarpManual ? " вручную" : "");
                 GUI.color = Accent;
-                GUI.Label(new Rect(r.xMax + 10, r.y + 6, 160, 30), warp, mid);
+                GUI.Label(new Rect(r.xMax + 10, r.y + 6, 300, 30), warp, mid);
                 GUI.color = Color.white;
             }
         }
@@ -200,6 +202,43 @@ namespace Kare.Space.Game
             float by = y + count * (cell + 6);
             var tip = new GUIStyle(small) { alignment = TextAnchor.UpperRight, wordWrap = true };
             GUI.Label(new Rect(w - 230, by, 218, 40), "Пробел: " + v.NextStageLabel, tip);
+            DeltaVList(v, w, by + 44);
+        }
+
+        /// <summary>Строк Δv в списке под стеком — пакет «Сатурна-5» с LM даёт 6 прожигов, больше не влезает над навболом.</summary>
+        const int DvRows = 7;
+
+        /// <summary>
+        /// Δv по оставшимся прожигам (§5.4), как в KSP: вакуум и у земли (у безатмосферного тела — одно число),
+        /// время работы. Тот же расчёт, что у конструктора и автопилотов, — RemainingStats с учётом остатка топлива.
+        /// </summary>
+        void DeltaVList(Vessel v, float w, float y)
+        {
+            var stats = v.RemainingStats();
+            if (stats.Count == 0) return;
+            const float pw = 300, row = 20;
+            int rows = Mathf.Min(stats.Count, DvRows);
+            var r = new Rect(w - pw - 12, y, pw, 28 + (rows + 1) * row);
+            Fill(r, Panel);
+            bool air = v.Body.HasAtmosphere && v.Altitude < v.Body.Atmosphere.Top;
+            double total = 0;
+            foreach (var s in stats) total += s.DeltaVVac;
+            GUI.color = Dim;
+            GUI.Label(new Rect(r.x + 10, r.y + 4, pw - 20, row), air ? "Δv ВАК. (У ЗЕМЛИ) · РАБОТА" : "Δv · РАБОТА", small);
+            GUI.color = Color.white;
+            for (int i = 0; i < rows; i++)
+            {
+                var s = stats[i];
+                float ry = r.y + 26 + i * row;
+                GUI.color = i == 0 ? Accent : Color.white;
+                string name = s.Name.Length > 16 ? s.Name.Substring(0, 15) + "…" : s.Name;
+                GUI.Label(new Rect(r.x + 10, ry, 120, row), name, small);
+                string dv = air ? $"{s.DeltaVVac:0} ({s.DeltaVSL:0})" : s.DeltaVVac.ToString("0");
+                GUI.Label(new Rect(r.x + 128, ry, 112, row), dv + " м/с", small);
+                GUI.Label(new Rect(r.x + 244, ry, 50, row), s.BurnTime.ToString("0") + " с", small);
+            }
+            GUI.color = Color.white;
+            GUI.Label(new Rect(r.x + 10, r.y + 26 + rows * row, pw - 20, row), $"<b>Всего {total:0} м/с</b>", small);
         }
 
         static Icon StageIcon(StageActionType t)
@@ -215,38 +254,67 @@ namespace Kare.Space.Game
 
         // ---------------------------------------------------------------- низ: высота, скорость, режим
 
+        /// <summary>
+        /// Система отсчёта скорости (§10.2, как переключатель над навболом в KSP): орбитальная — в невращающихся осях
+        /// тела, поверхностная — относительно вращающегося грунта. С ней меняется и высота: у поверхностной — над
+        /// грунтом под бортом (радиовысотомер), у орбитальной — над уровнем моря. Авто — поверхностная ниже
+        /// AutoSurfaceBelow. Щелчок по строке «СКОРОСТЬ» перебирает режимы, выбор живёт в PlayerPrefs.
+        /// </summary>
+        enum SpeedFrame { Auto, Orbit, Surface }
+        const string SpeedFrameKey = "hud.speedFrame";
+        /// <summary>Граница авто-режима, м — та же, что была у HUD до переключателя: ниже неё важны воздух и грунт.</summary>
+        const double AutoSurfaceBelow = 30000;
+        SpeedFrame speedFrame = (SpeedFrame)(-1);
+
+        /// <summary>Левая колонка снизу вверх: газ и топливо (ThrustFuel), полётная панель, узел манёвра (NodePanel).
+        /// Пара: меняешь высоту одной — колонка сдвигается через FlightPanelTop.</summary>
+        const float FlightPanelHeight = 150, ThrustFuelTop = 138, NodePanelHeight = 166;
+        static float FlightPanelTop(float h) => h - ThrustFuelTop - 6 - FlightPanelHeight;
+
         void Bottom(Universe u, Vessel v, float w, float h)
         {
-            const float side = 230, centre = 240, ph = 92;
-            float x0 = (w - centre) / 2 - side, y = h - ph - 32;
+            if ((int)speedFrame < 0) speedFrame = (SpeedFrame)Mathf.Clamp(PlayerPrefs.GetInt(SpeedFrameKey, 0), 0, 2);
+            bool surface = speedFrame == SpeedFrame.Surface || speedFrame == SpeedFrame.Auto && v.Altitude < AutoSurfaceBelow;
 
-            var left = new Rect(x0, y, side, ph);
-            Fill(left, Panel);
-            GUI.color = Dim; GUI.Label(new Rect(left.x + 14, y + 6, side, 22), "ВЫСОТА", small); GUI.color = Color.white;
-            GUI.Label(new Rect(left.x + 14, y + 26, side, 34), Km(v.Altitude), mid);
-            if (v.Situation == Situation.Flying && v.Altitude > 20000)
+            const float pw = 250;
+            var r = new Rect(12, FlightPanelTop(h), pw, FlightPanelHeight);
+            Fill(r, Panel);
+            float x = r.x + 12, y = r.y;
+            GUI.color = Dim; GUI.Label(new Rect(x, y + 4, pw - 24, 22), surface ? "ВЫСОТА НАД ГРУНТОМ" : "ВЫСОТА (ур. моря)", small); GUI.color = Color.white;
+            GUI.Label(new Rect(x, y + 22, pw - 24, 34), Km(surface ? v.TerrainAltitude : v.Altitude), mid);
+            GUI.color = Dim;
+            if (surface) GUI.Label(new Rect(x, y + 54, pw - 24, 20), "над ур. моря " + Km(v.Altitude), small);
+            else if (v.Situation == Situation.Flying)
             {
                 var o = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, u.Time);
                 string ap = o.IsElliptic ? Km(o.ApoapsisRadius - v.Body.Radius) : "∞";
-                GUI.color = Dim;
-                GUI.Label(new Rect(left.x + 14, y + 62, side, 22), $"Ap {ap}  ·  Pe {Km(o.PeriapsisRadius - v.Body.Radius)}", small);
-                GUI.color = Color.white;
+                GUI.Label(new Rect(x, y + 54, pw - 24, 20), $"Ap {ap}  ·  Pe {Km(o.PeriapsisRadius - v.Body.Radius)}", small);
             }
+            GUI.color = Color.white;
 
-            var mid0 = new Rect(x0 + side, y - 14, centre, ph + 14);
-            Fill(mid0, new Color(0.05f, 0.12f, 0.18f, 0.82f));
-            Mode(u, v, mid0);
-
-            var right = new Rect(x0 + side + centre, y, side, ph);
-            Fill(right, Panel);
-            GUI.color = Dim; GUI.Label(new Rect(right.x + 14, y + 6, side, 22), v.Altitude < 30000 ? "СКОРОСТЬ (пов.)" : "СКОРОСТЬ (орб.)", small); GUI.color = Color.white;
-            double sp = v.Altitude < 30000 ? v.SurfaceSpeed : v.Velocity.magnitude;
-            GUI.Label(new Rect(right.x + 14, y + 26, side, 34), sp.ToString("0") + " м/с", mid);
+            // Переключатель — кнопкой на всю строку подписи: так его видно и в него легко попасть.
+            string frame = speedFrame == SpeedFrame.Auto ? (surface ? "АВТО: ПОВ." : "АВТО: ОРБ.")
+                         : speedFrame == SpeedFrame.Orbit ? "ОРБИТАЛЬНАЯ" : "ОТН. ПОВЕРХНОСТИ";
+            var bs = new GUIStyle(small) { alignment = TextAnchor.MiddleLeft };
+            var btn = new Rect(x - 6, y + 78, pw - 12, 22);
+            Fill(btn, new Color(0.10f, 0.30f, 0.40f, btn.Contains(Event.current.mousePosition) ? 0.9f : 0.5f));
+            if (GUI.Button(btn, "  СКОРОСТЬ · " + frame + "  ›", bs))
+            {
+                speedFrame = (SpeedFrame)(((int)speedFrame + 1) % 3);
+                PlayerPrefs.SetInt(SpeedFrameKey, (int)speedFrame);
+            }
+            double sp = surface ? v.SurfaceSpeed : v.Velocity.magnitude;
+            GUI.Label(new Rect(x, y + 100, pw - 24, 34), sp.ToString("0") + " м/с", mid);
             GUI.color = Dim;
-            GUI.Label(new Rect(right.x + 14, y + 62, side, 22), $"верт. {v.VerticalSpeed:0} м/с", small);
+            GUI.Label(new Rect(x, y + 128, pw - 24, 20),
+                surface ? $"верт. {v.VerticalSpeed:0} · гор. {v.HorizontalSpeed:0} м/с" : $"верт. {v.VerticalSpeed:0} м/с", small);
             GUI.color = Color.white;
 
             ThrustFuel(v, h);
+            // Режим — справа внизу, под стеком ступеней и списком Δv (они кончаются выше 700 px из 1080).
+            var mode = new Rect(w - 262, h - 150, 250, 116);
+            Fill(mode, new Color(0.05f, 0.12f, 0.18f, 0.82f));
+            Mode(u, v, mode);
         }
 
         /// <summary>Что сейчас ведёт ракету — главный вопрос игрока: автопилот, SAS или руки.</summary>
@@ -261,7 +329,7 @@ namespace Kare.Space.Game
             else if (u.Docking != null) { icon = Icon.Maneuver; title = "СТЫКОВКА"; status = u.Docking.Status; col = Accent; }
             else if (u.Lunar != null) { icon = Icon.Autopilot; title = "К ЛУНЕ"; status = u.Lunar.Status; col = Accent; }
             else if (v.Sas != SasMode.Off) { icon = SasIcon(v.Sas); title = "SAS"; status = SasName(v.Sas); col = Color.white; }
-            else { icon = Icon.Stability; title = "РУЧНОЕ"; status = "Y — вся миссия, G — взлёт, T — SAS"; col = Warn; }
+            else { icon = Icon.Stability; title = "РУЧНОЕ"; status = "Y — вся миссия, H — взлёт, T — SAS"; col = Warn; }
             GUI.color = col;
             DrawIcon(new Rect(r.center.x - 22, r.y + 8, 44, 44), icon);
             var c = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
@@ -317,7 +385,7 @@ namespace Kare.Space.Game
                 nodePredictAt = Time.unscaledTime + NodePredictPeriod;
                 nodePatches = u.PredictActive();
             }
-            var r = new Rect(12, h - 138 - 172, 250, 166);
+            var r = new Rect(12, FlightPanelTop(h) - NodePanelHeight - 6, 250, NodePanelHeight);
             Fill(r, Panel);
             float y = r.y + 6, x = r.x + 12;
             GUI.color = Accent;
@@ -365,7 +433,7 @@ namespace Kare.Space.Game
 
         void ThrustFuel(Vessel v, float h)
         {
-            var r = new Rect(12, h - 138, 250, 104);
+            var r = new Rect(12, h - ThrustFuelTop, 250, 104);
             Fill(r, Panel);
             Bar(new Rect(r.x + 12, r.y + 12, 226, 22), "Газ", (float)v.Throttle, Accent);
             // Топливо ближайшей работающей (или первой с двигателем) ступени — ему и кончаться первым.

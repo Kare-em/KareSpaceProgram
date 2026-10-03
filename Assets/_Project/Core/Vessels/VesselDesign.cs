@@ -33,6 +33,15 @@ namespace Kare.Space.Core
         public double IspSL => Isp(101325);
     }
 
+    /// <summary>
+    /// Раскладное на секции (§6.12), клавиша G — Vessel.ToggleDeploy. Legs — опоры на приводе, убираются обратно
+    /// (деталь конструктора, как в KSP); PyroLegs — опоры на пирозамках, только выпуск: LM выпускал их на окололунной
+    /// орбите, «Сервейор» — после отделения от «Центавра» (под обтекателем сложены); Ramps — трапы схода лунохода
+    /// с КТ «Луны-17», откидываются только на грунте; Lid — крышка лунохода с солнечной батареей: на грунте
+    /// открывается и закрывается (луноход закрывал её на лунную ночь). Опоры КТ и Е-6 неподвижные — None.
+    /// </summary>
+    public enum DeployKind { None, Legs, PyroLegs, Ramps, Lid }
+
     /// <summary>Деталь вида секции из Tools/blender. Физики не касается: ядро о мешах не знает, только об имени детали.</summary>
     public enum SectionModel
     {
@@ -85,6 +94,9 @@ namespace Kare.Space.Core
         public bool Sphere;
         /// <summary>Только вид: четыре посадочные опоры по кромке днища (станция Е-6К). Физику не меняет.</summary>
         public bool LandingLegs;
+        /// <summary>Что раскладывает G (DeployKind). Сложенные опоры (Vessel.LegsDown) ломаются при касании быстрее
+        /// FlightPhysics.StowedCrashSpeed; сложенные трапы не дают отделить ступень с луноходом (Vessel.StageBlock).</summary>
+        public DeployKind Deploy;
         /// <summary>Только вид: деталь из Models/*.fbx вместо процедурного корпуса (VesselView.ModelFor).</summary>
         public SectionModel Model;
         /// <summary>Мест экипажа: перегрузка (§4.7) убивает только живых, приборные капсулы её терпят.</summary>
@@ -472,52 +484,6 @@ namespace Kare.Space.Core
             Name = "Макет ПН 10 т", Kind = SectionKind.Payload, DryMass = 10000, Length = 6, Diameter = 3.7, RcsTorque = 2e3,
         });
 
-        public static VesselDesign Kara1Sputnik() => Kara1("Кара-1 «Спутник»", new SectionDef
-        {
-            Name = "ПС-1", Kind = SectionKind.Payload, DryMass = 83.6, Length = 0.58, Diameter = 0.58, RcsTorque = 5,
-            Model = SectionModel.Sputnik,
-        });
-
-        /// <summary>Пилотируемый «Восток»: приборный отсек с ТДУ + шар спускаемого аппарата.</summary>
-        public static VesselDesign Kara1Vostok()
-        {
-            var d = Kara1("Кара-1 «Восток»",
-                new SectionDef
-                {
-                    Name = "Приборный отсек", Kind = SectionKind.Stage, DryMass = 2000, Propellant = 275,
-                    Engine = new EngineDef { Name = "ТДУ-1", ThrustVac = 15.8e3, ThrustSL = 12e3, IspVac = 266, Ignitions = 1 },
-                    EngineCount = 1, Length = 2.3, Diameter = 2.4, RcsTorque = 1.5e3, Model = SectionModel.VostokService,
-                },
-                new SectionDef
-                {
-                    Name = "СА «Восток»", Kind = SectionKind.Capsule, DryMass = 2460, Length = 2.3, Diameter = 2.3,
-                    RcsTorque = 300, ParachuteArea = 600, DragScale = 2.6, MaxHeatFlux = 3e6, Sphere = true, Crew = 1,
-                });
-            // ТДУ — на тормозной импульс, затем отстрел приборного отсека и парашют.
-            d.Sequence.Add(new StageAction(StageActionType.Ignite, 2));
-            d.Sequence.Add(new StageAction(StageActionType.Separate, 2));
-            d.Sequence.Add(new StageAction(StageActionType.DeployParachute, 3));
-            return d;
-        }
-
-        /// <summary>Лунная станция класса Е-6: 1,5 т, своя посадочная ДУ (Δv ≈ 3 км/с).</summary>
-        public static VesselDesign Kara1Luna()
-        {
-            var d = Kara1("Кара-1 «Луна»", new SectionDef
-            {
-                Name = "Станция Е-6К", Kind = SectionKind.Stage, DryMass = 500, Propellant = 1000,
-                Engine = new EngineDef
-                {
-                    Name = "КТДУ-5К", ThrustVac = 16e3, ThrustSL = 12e3, IspVac = 277, MinThrottle = 0.25, Ignitions = 4,
-                },
-                EngineCount = 1, Length = 2.7, Diameter = 2.0, RcsTorque = 800, MaxHeatFlux = 2e5, LandingLegs = true,
-                Model = SectionModel.Luna9,
-            });
-            // КТДУ взводится отделением II ступени: на торможении у Луны ступень сменяется без лишнего шага (GDD §6.11).
-            d.Sequence[d.Sequence.Count - 1] = new StageAction(StageActionType.Separate, 1, igniteNext: true);
-            return d;
-        }
-
         /// <summary>Геофизическая ракета для первого прыжка за линию Кармана (класс Р-1/В-2).</summary>
         public static VesselDesign SoundingRocket()
         {
@@ -544,9 +510,9 @@ namespace Kare.Space.Core
             switch (id)
             {
                 case "sounding": return SoundingRocket();
-                case "sputnik": return Kara1Sputnik();
-                case "vostok": return Kara1Vostok();
-                case "luna": return Kara1Luna();
+                case "sputnik": return R7Sputnik();
+                case "vostok": return R7Vostok();
+                case "luna": return R7Luna();
                 case "luna17": return ProtonLuna17();
                 case "juno1": return JunoExplorer1();
                 case "mercury_redstone": return MercuryRedstone();

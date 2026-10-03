@@ -89,3 +89,6 @@ Crazy_Car_BackUpThisFolder_ButDontShipItWithYourGame\il2cppOutput
 
 # Скриншоты прогонов (MCP manage_camera)
 /Captures/
+
+# Исходники текстур NASA (десятки МБ), в проект идут PNG
+/Tools/textures/*.tif

@@ -105,6 +105,8 @@ namespace Kare.Space.Core
                 Status = $"Ждём сферу влияния: {Target.Name}";
                 return AutopilotRequest.None;
             }
+            // Опоры — заранее, ещё на орбите (§6.12: LM выпускал их до расстыковки): сложенные ломаются при касании.
+            v.ExtendLegs();
 
             var r = v.Position;
             var spin = FlightPhysics.SpinAxis(Target, t);

@@ -353,6 +353,7 @@ namespace Kare.Space.Core
                 s.ParachuteArea += p.ParachuteArea;
                 s.Crew += p.Crew;
                 s.LandingLegs |= p.LandingLegs;
+                if (p.LandingLegs) s.Deploy = DeployKind.Legs;
                 s.DockingPort |= p.DockingPort;
                 s.UllageMotors |= p.UllageMotors;
                 if (p.MaxHeatFlux > 0)

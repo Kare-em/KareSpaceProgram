@@ -194,8 +194,11 @@ namespace Kare.Space.Game
             pit.Box(new Vector3(-T, -1, -S), new Vector3(T, 0.05f, -H));
             Fixed("Pad_R7", Vector3.zero);
 
-            // Фермы: шарнир на кромке проёма, верх упирается в корпус на ArmReach над столом.
+            // Фермы: шарнир на кромке проёма, верх упирается в корпус на ArmReach над столом. Боковые блоки Р-7 стоят
+            // на тех же азимутах (0°, 90°…, VesselView), и пакет висит на фермах за них — упор по их внешней стенке.
             float hull = (float)v.Design.Sections[0].Radius;
+            foreach (var s in v.Design.Sections)
+                if (s.IsRadial && s.RadialParent == 0) hull = Mathf.Max(hull, (float)(s.RadialOffset + s.Radius));
             float tilt0 = Mathf.Atan2(H - hull, ArmReach) * Mathf.Rad2Deg;
             float len = Mathf.Sqrt(ArmReach * ArmReach + (H - hull) * (H - hull));
             var steelMat = steel[0];

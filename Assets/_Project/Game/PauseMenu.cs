@@ -14,7 +14,7 @@ namespace Kare.Space.Game
         public static bool IsOpen { get; private set; }
 
         const float Width = 420, Row = 34;
-        GUIStyle title, label, toggle, button, small, small2;
+        GUIStyle title, label, toggle, button, small, small2, credit;
 
         void OnDestroy() => IsOpen = false; // статик переживает перезагрузку сцены
 
@@ -35,7 +35,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
 
             int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + DetailBlock;
+            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + DetailBlock + CreditsBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -131,9 +131,16 @@ namespace Kare.Space.Game
             if (GUI.Button(new Rect(x, y, hw, Row), "Орбита Земли 200 км", small)) Jump(u, earth, 200e3, true);
             if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Луны 100 км", small)) Jump(u, moon, 100e3, true);
             y += Row + 4;
-            if (GUI.Button(new Rect(x, y, hw, Row), "Над Луной 15 км (G — посадка)", small)) Jump(u, moon, 15e3, false);
+            if (GUI.Button(new Rect(x, y, hw, Row), "Над Луной 15 км (H — посадка)", small)) Jump(u, moon, 15e3, false);
             if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Марса 300 км", small)) Jump(u, mars, 300e3, true);
+            y += Row + 10;
+            // Атрибуция карт тел — условие лицензии CC BY 4.0 (BodyRenderer.Maps).
+            GUI.Label(new Rect(x, y, w, CreditsBlock), Credits, credit);
         }
+
+        /// <summary>Строка атрибуции карт тел и её высота. Пара: код строки в OnGUI.</summary>
+        const string Credits = "Карты планет: Solar System Scope (solarsystemscope.com), CC BY 4.0. Луна: NASA SVS / LRO.";
+        const float CreditsBlock = 22;
 
         /// <summary>Высота блока «Яркость»: заголовок, два ползунка, отступ. Пара: код блока в OnGUI.</summary>
         const float BrightnessBlock = 30 + 2 * (Row + 6) + 20;
@@ -182,6 +189,8 @@ namespace Kare.Space.Game
             small = new GUIStyle(GUI.skin.button) { fontSize = 13, wordWrap = true };
             small2 = new GUIStyle(GUI.skin.label) { fontSize = 15, alignment = TextAnchor.MiddleRight };
             small2.normal.textColor = Color.white;
+            credit = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
+            credit.normal.textColor = new Color(0.6f, 0.65f, 0.75f);
         }
     }
 }

@@ -81,6 +81,10 @@ namespace Kare.Space.Core
         public int[] Order;
         /// <summary>Секция перевёрнута: пристыкована носом к носу. Двигатель её не взводится, рендер разворачивает её на 180°.</summary>
         public bool[] Flipped;
+        /// <summary>Раскладное секции (SectionDef.Deploy, §6.12): сколько раскрыто, 0…1 (вид поворачивает опоры и трапы
+        /// на шарнирах), и куда идёт привод — FlightPhysics.StepDeploy.</summary>
+        public double[] Deployed;
+        public bool[] DeployOn;
 
         // Состояние.
         public CelestialBody Body;
@@ -92,6 +96,17 @@ namespace Kare.Space.Core
         /// <summary>Космодром старта (для стола и креплений в рендере); null — борт создан не на старте.</summary>
         public LaunchSite Site;
         public QuaternionD AttitudeBodyFixed = QuaternionD.identity;
+        /// <summary>Подвеска опор и колёс (FlightPhysics.StepSuspension): сдвиг корпуса по местной вертикали от точки
+        /// AnchorBodyFixed, м (минус — просел), и его скорость, м/с. В полёте — нули.</summary>
+        public double Suspension, SuspensionRate;
+        /// <summary>Сглаженная нормаль грунта под колёсами лунохода в осях тела; ноль — ещё не задана (берётся радиус).</summary>
+        public Vector3d GroundUp;
+        /// <summary>Съезд с посадочной ступени по трапам (FlightPhysics.RampAbove): высота настила над грунтом, м
+        /// (0 — уже на грунте), и пройденный путь по оси трапов от центра ступени, м (знак — в какую пару трапов).</summary>
+        public double RampDeck, RampTravel;
+        /// <summary>Настил ступени в осях тела: центр (низ лунохода при отделении), ось трапов и вертикаль ступени.
+        /// Трапы — жёсткая деталь ступени: стоит она с креном — с тем же креном лежат и рельсы.</summary>
+        public Vector3d RampOrigin, RampAxis, RampUp;
         public KeplerOrbit Orbit;
         public bool OnRails;
         public string DestroyReason;
@@ -148,6 +163,8 @@ namespace Kare.Space.Core
             ignitionLatch = new bool[n];
             Order = new int[n];
             Flipped = new bool[n];
+            Deployed = new double[n];
+            DeployOn = new bool[n];
             for (int i = 0; i < n; i++)
             {
                 var s = design.Sections[i];
@@ -161,6 +178,9 @@ namespace Kare.Space.Core
         public bool Alive => Situation != Situation.Destroyed;
         /// <summary>Пройдено самоходным шасси по грунту, м (цель миссии «Проехать», ObjectiveType.Drive).</summary>
         public double DriveDistance;
+        /// <summary>Путь колёс левого и правого борта со знаком, м (FlightPhysics.DriveRover): на развороте борта
+        /// катятся навстречу друг другу. Вид крутит по нему колёса (VesselView, угол = путь / RoverWheelRadius).</summary>
+        public double WheelPathLeft, WheelPathRight;
 
         /// <summary>Самоходное шасси стало нижней секцией: съехало с посадочной ступени и ездит (FlightPhysics.StepLanded).</summary>
         public bool IsRover
@@ -553,6 +573,94 @@ namespace Kare.Space.Core
             return Design.ComputeStats(Attached, Propellant, NextStage, ready);
         }
 
+        // ---------------------------------------------------------------- опоры и трапы (§6.12)
+
+        bool DeployDone(Func<DeployKind, bool> kind)
+        {
+            for (int i = 0; i < Attached.Length; i++)
+                if (Attached[i] && kind(Design.Sections[i].Deploy) && Deployed[i] < 1) return false;
+            return true;
+        }
+
+        static bool IsLegs(DeployKind k) => k == DeployKind.Legs || k == DeployKind.PyroLegs;
+        /// <summary>Раскладных опор нет или все выпущены до конца: касание не ломает борт (FlightPhysics.CheckContact).</summary>
+        public bool LegsDown => DeployDone(IsLegs);
+        /// <summary>Трапов нет или они легли на грунт: луноход может съезжать.</summary>
+        public bool RampsDown => DeployDone(k => k == DeployKind.Ramps);
+
+        /// <summary>
+        /// Выпустить раскладные опоры (автопилот посадки, §6.12: LM и «Сервейор» садились только на выпущенных).
+        /// true — привод запущен сейчас, false — уже выпущены или выпускаются, либо опор нет.
+        /// </summary>
+        public bool ExtendLegs()
+        {
+            bool started = false;
+            for (int i = 0; i < Attached.Length; i++)
+            {
+                if (!Attached[i] || !IsLegs(Design.Sections[i].Deploy) || DeployOn[i]) continue;
+                DeployOn[i] = started = true;
+            }
+            if (started) Raise("Опоры: выпуск");
+            return started;
+        }
+
+        /// <summary>
+        /// Клавиша G (§6.12): трапы на грунте откидываются (обратно не складываются — механика «Луны-17» одноразовая),
+        /// опоры выпускаются; повтор убирает только опоры на приводе (Legs) и только в полёте — на грунте борт стоит на них.
+        /// Опоры на пирозамках (LM, «Сервейор») не убираются. После трапов G открывает и закрывает крышку лунохода —
+        /// только на грунте. Возвращает строку для ленты или null.
+        /// </summary>
+        public string ToggleDeploy()
+        {
+            bool legs = false, legsOut = true, pyro = false, ramps = false, rampsOn = true, lid = false, lidOpen = true;
+            for (int i = 0; i < Attached.Length; i++)
+            {
+                if (!Attached[i]) continue;
+                switch (Design.Sections[i].Deploy)
+                {
+                    case DeployKind.Legs: legs = true; legsOut &= DeployOn[i]; break;
+                    case DeployKind.PyroLegs: legs = pyro = true; legsOut &= DeployOn[i]; break;
+                    case DeployKind.Ramps: ramps = true; rampsOn &= DeployOn[i]; break;
+                    case DeployKind.Lid: lid = true; lidOpen &= DeployOn[i]; break;
+                }
+            }
+            if (ramps && !rampsOn)
+            {
+                if (!IsLanded) return "Трапы откидываются только на грунте";
+                for (int i = 0; i < Attached.Length; i++)
+                    if (Attached[i] && Design.Sections[i].Deploy == DeployKind.Ramps) DeployOn[i] = true;
+                return "Трапы: раскладка";
+            }
+            if (lid)
+            {
+                if (!IsLanded) return "Крышку открывают только на грунте";
+                for (int i = 0; i < Attached.Length; i++)
+                    if (Attached[i] && Design.Sections[i].Deploy == DeployKind.Lid) DeployOn[i] = !lidOpen;
+                return lidOpen ? "Крышка: закрытие" : "Крышка: открытие";
+            }
+            if (!legs) return ramps ? "Трапы уже разложены" : "Раскладывать нечего";
+            if (!legsOut) { ExtendLegs(); return null; }
+            if (pyro) return "Опоры на пирозамках — не убираются";
+            if (IsLanded) return "На грунте опоры не убрать";
+            for (int i = 0; i < Attached.Length; i++)
+                if (Attached[i] && Design.Sections[i].Deploy == DeployKind.Legs) DeployOn[i] = false;
+            return "Опоры: уборка";
+        }
+
+        /// <summary>Почему пробел сейчас не сработает: сброс посадочной ступени с луноходом при сложенных трапах —
+        /// луноход встал бы на настил без съезда. null — можно.</summary>
+        public string StageBlock
+        {
+            get
+            {
+                int k = NextApplicable(NextStage);
+                if (k >= Design.Sequence.Count || !IsLanded) return null;
+                var a = Design.Sequence[k];
+                if (a.Type != StageActionType.Separate || Design.Sections[a.Section].Deploy != DeployKind.Ramps) return null;
+                return Deployed[a.Section] < 1 ? "Сначала трапы: G" : null;
+            }
+        }
+
         public string NextStageLabel
         {
             get
@@ -760,6 +868,8 @@ namespace Kare.Space.Core
             Array.Copy(Propellant, t.Propellant, Propellant.Length);
             Array.Copy(Order, t.Order, Order.Length);
             Array.Copy(Flipped, t.Flipped, Flipped.Length);
+            Array.Copy(Deployed, t.Deployed, Deployed.Length);
+            Array.Copy(DeployOn, t.DeployOn, DeployOn.Length);
             FairingHalf = 1;
             t.FairingHalf = -1;
             Name = t.Name = "Створка обтекателя";
@@ -801,6 +911,8 @@ namespace Kare.Space.Core
             };
             Array.Copy(Order, d.Order, Order.Length);
             Array.Copy(Flipped, d.Flipped, Flipped.Length);
+            Array.Copy(Deployed, d.Deployed, Deployed.Length);
+            Array.Copy(DeployOn, d.DeployOn, DeployOn.Length);
             bool burning = false;
             for (int i = 0; i < mask.Length; i++)
             {
@@ -845,6 +957,19 @@ namespace Kare.Space.Core
                 // На грунте положение задаёт якорь в осях тела: без сдвига якоря часть, оставшаяся стоять
                 // (луноход, съехавший с посадочной ступени), прыгнула бы обратно на старый общий ЦМ.
                 if (p.IsLanded) p.AnchorBodyFixed += (p.AttitudeBodyFixed * r).SwapYZ;
+                // Луноход стоит на настиле ступени: дальше он не прыгает на грунт, а съезжает по трапам.
+                if (p.IsLanded && p.IsRover)
+                {
+                    double R = p.AnchorBodyFixed.magnitude;
+                    p.MassProperties(out _, out double pc, out _, out _);
+                    double h = R - (p.Body.Radius + p.Body.SurfaceHeight(p.AnchorBodyFixed / R) + pc);
+                    p.RampDeck = h > FlightPhysics.RampMinDeck ? h : 0;
+                    p.RampTravel = 0;
+                    p.RampUp = (p.AttitudeBodyFixed * Vector3d.up).SwapYZ.normalized;
+                    p.RampAxis = (p.AttitudeBodyFixed * Vector3d.forward).SwapYZ.normalized;
+                    p.RampOrigin = p.AnchorBodyFixed - p.RampUp * pc;
+                    p.GroundUp = p.RampUp;
+                }
                 // Точка жёсткого тела на плече r летит со скоростью v + ω × r.
                 p.Velocity += LocalToWorld(Vector3d.Cross(w, r));
                 return r.y;
@@ -994,6 +1119,8 @@ namespace Kare.Space.Core
                 ChuteFailed[i] = t.ChuteFailed[i];
                 ChuteArmed[i] = t.ChuteArmed[i];
                 ChuteOpenTime[i] = t.ChuteOpenTime[i];
+                Deployed[i] = t.Deployed[i];
+                DeployOn[i] = t.DeployOn[i];
             }
             foreach (int i in Order)
                 if (!order.Contains(i)) order.Add(i);

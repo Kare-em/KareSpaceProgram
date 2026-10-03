@@ -65,7 +65,15 @@ namespace Kare.Space.Game
 
         /// <summary>Модель аппарата для детали секции; null — нет (вид берёт процедурный меш).</summary>
         [System.Serializable]
-        public struct CraftMesh { public SectionModel Model; public Mesh Mesh; }
+        public struct CraftMesh { public SectionModel Model; public Mesh Mesh; public DeployPart[] Deploy; public DeployPart[] Wheels; }
+
+        /// <summary>
+        /// Раскладная деталь аппарата (§6.12): опора или трап в осях модели корпуса. Dir — наружу от оси к стопе
+        /// (по нижним вершинам), Slots — слоты материалов детали в палитре корпуса. Считает FlightSceneBuilder.
+        /// У колеса (CraftMesh.Wheels) Dir — центр колеса в осях модели, вокруг него и оси X оно крутится.
+        /// </summary>
+        [System.Serializable]
+        public struct DeployPart { public Mesh Mesh; public Vector3 Dir; public int[] Slots; }
 
         [Header("Стартовые комплексы (Tools/blender/launch_pads.py), GDD §7")]
         [Tooltip("Стальные модели столов и башен Pad_*; бетон строит LaunchPadView.")]
@@ -79,6 +87,20 @@ namespace Kare.Space.Game
         {
             if (PadMeshes == null) return null;
             foreach (var p in PadMeshes) if (p.Name == name) return p.Mesh;
+            return null;
+        }
+
+        public DeployPart[] DeployFor(SectionModel model)
+        {
+            if (CraftMeshes == null || model == SectionModel.None) return null;
+            foreach (var c in CraftMeshes) if (c.Model == model) return c.Deploy;
+            return null;
+        }
+
+        public DeployPart[] WheelsFor(SectionModel model)
+        {
+            if (CraftMeshes == null || model == SectionModel.None) return null;
+            foreach (var c in CraftMeshes) if (c.Model == model) return c.Wheels;
             return null;
         }
 
@@ -151,6 +173,14 @@ namespace Kare.Space.Game
 
         void Update()
         {
+            // Перекомпиляция в Play перезагружает домен: Awake не повторяется, а несериализуемый universe
+            // обнуляется — без проверки NRE каждый кадр. Полёт после этого не восстановить, только перезапуск Play.
+            if (universe == null)
+            {
+                Debug.LogWarning("[Kare] Скрипты перекомпилированы во время Play — перезапустите Play.");
+                enabled = false;
+                return;
+            }
             FlightPhysics.AeroBreakup = AeroBreakup;
             FlightPhysics.HeatDamage = HeatDamage;
             FlightPhysics.GLoadLimit = GLoadLimit;

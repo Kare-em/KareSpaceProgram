@@ -30,11 +30,64 @@ namespace Kare.Space.Game
         static readonly SasMode[] SasLeft = { SasMode.Prograde, SasMode.Retrograde, SasMode.Normal, SasMode.AntiNormal };
         static readonly SasMode[] SasRight = { SasMode.RadialOut, SasMode.RadialIn, SasMode.Stability, SasMode.Maneuver };
 
+        /// <summary>
+        /// Навбол перетаскивается левой кнопкой (её камера не занимает — FlightCamera крутит правой и средней),
+        /// двойной щелчок по шару — на место по умолчанию (по центру внизу). Сдвиг от места по умолчанию, в
+        /// единицах HUD (BaseHeight), хранится в PlayerPrefs. Пара: NavBallReach — шар с кнопками SAS по бокам
+        /// не уходит за край экрана.
+        /// </summary>
+        const string NavOffsetX = "hud.navball.x", NavOffsetY = "hud.navball.y";
+        /// <summary>Полуширина шара с колонками SAS: NavBallSize/2 + 14 + 2 кнопки, px.</summary>
+        const float NavBallReach = NavBallSize / 2 + 14 + 2 * (SasButton + SasGap);
+        Vector2 navOffset = new Vector2(float.NaN, 0), navGrab;
+        bool navDrag;
+
+        Rect NavBallRect(float w, float bottomTop)
+        {
+            float size = NavBallSize;
+            if (float.IsNaN(navOffset.x)) navOffset = new Vector2(PlayerPrefs.GetFloat(NavOffsetX, 0), PlayerPrefs.GetFloat(NavOffsetY, 0));
+            var ball = new Rect((w - size) / 2 + navOffset.x, bottomTop - size - 26 + navOffset.y, size, size);
+            var e = Event.current;
+            if (navDrag && !Input.GetMouseButton(0)) EndNavDrag();
+            if (e.type == EventType.MouseDown && e.button == 0 && (e.mousePosition - ball.center).sqrMagnitude < size * size / 4)
+            {
+                if (e.clickCount == 2) { navOffset = Vector2.zero; SaveNavOffset(); }
+                else { navDrag = true; navGrab = e.mousePosition - ball.position; }
+                e.Use();
+            }
+            else if (navDrag && e.type == EventType.MouseDrag)
+            {
+                var p = e.mousePosition - navGrab;
+                navOffset += p - ball.position;
+                ball.position = p;
+                e.Use();
+            }
+            else if (navDrag && e.type == EventType.MouseUp && e.button == 0) { EndNavDrag(); e.Use(); }
+            // Не за край: шар с кнопками целиком на экране, подпись курса — над строкой клавиш.
+            float cx = Mathf.Clamp(ball.center.x, NavBallReach, Mathf.Max(NavBallReach, w - NavBallReach));
+            float cy = Mathf.Clamp(ball.center.y, size / 2 + 4, Mathf.Max(size / 2 + 4, bottomTop - size / 2 - 26));
+            navOffset += new Vector2(cx, cy) - ball.center;
+            ball.center = new Vector2(cx, cy);
+            return ball;
+        }
+
+        void EndNavDrag()
+        {
+            navDrag = false;
+            SaveNavOffset();
+        }
+
+        void SaveNavOffset()
+        {
+            PlayerPrefs.SetFloat(NavOffsetX, navOffset.x);
+            PlayerPrefs.SetFloat(NavOffsetY, navOffset.y);
+        }
+
         void NavBall(Universe u, Vessel v, float w, float bottomTop)
         {
             if (!v.Alive) return;
             float size = NavBallSize;
-            var ball = new Rect((w - size) / 2, bottomTop - size - 26, size, size);
+            var ball = NavBallRect(w, bottomTop);
 
             // Местные оси на борту и связанные оси в P.
             var up = v.Position.normalized;

@@ -3,14 +3,156 @@ using System;
 namespace Kare.Space.Core
 {
     /// <summary>
-    /// Исторические ракеты для миссий (GDD §5.3): «Протон-К» с «Луной-17» и американские носители до «Аполлона».
-    /// Тяга — на один двигатель (умножается на EngineCount), массы и УИ — по открытым данным, округлённо.
-    /// Допущения модели, общие для всех: со стола запускается одна секция, поэтому стартовые ускорители,
-    /// работающие вместе с центральным блоком (Atlas), сведены в отдельную нижнюю секцию — центральный
-    /// блок «поджигается» при её сбросе (docs/pitfalls-core.md).
+    /// Исторические ракеты для миссий (GDD §5.3): семейство Р-7, «Протон-К» с «Луной-17» и американские носители
+    /// до «Аполлона». Тяга — на один двигатель (умножается на EngineCount), массы и УИ — по открытым данным, округлённо.
+    /// Боковые блоки Р-7 — радиальная группа (SectionDef.RadialCount), работают вместе с блоком А со стола.
+    /// Ускорители Atlas сведены в отдельную нижнюю секцию — маршевый блок «поджигается» при её сбросе
+    /// (docs/pitfalls-core.md).
     /// </summary>
     public static partial class VesselPresets
     {
+        // ------------------------------------------------------------------ Р-7: «Спутник», «Восток», «Молния-М»
+
+        /// <summary>РД-107: четырёхкамерный двигатель бокового блока (рулевые камеры учтены в тяге).</summary>
+        static EngineDef RD107() => new EngineDef { Name = "РД-107", ThrustVac = 1000e3, ThrustSL = 813e3, IspVac = 314, GimbalDeg = 4 };
+
+        /// <summary>РД-108: центральный блок А; у земли слабее РД-107, зато работает ~300 с — до конца II ступени.</summary>
+        static EngineDef RD108() => new EngineDef { Name = "РД-108", ThrustVac = 941e3, ThrustSL = 745e3, IspVac = 315, GimbalDeg = 4 };
+
+        /// <summary>
+        /// Блок А (центральный): Ø2,95 × 28 м. Топливо — на ~300 с РД-108 (941 кН / 315 с → 305 кг/с).
+        /// У «Спутника» блок А сам вышел на орбиту (сухой 7,5 т), у «Востока» и «Молнии» над ним третья ступень.
+        /// </summary>
+        static SectionDef R7BlockA(double dry, double propellant) => new SectionDef
+        {
+            Name = "Р-7 / блок А", Kind = SectionKind.Stage, DryMass = dry, Propellant = propellant,
+            Engine = RD108(), EngineCount = 1, Length = 28, Diameter = 2.95, RcsTorque = 2e4, MaxHeatFlux = 2e5,
+        };
+
+        /// <summary>
+        /// Боковые блоки Б, В, Г, Д — радиальная группа ×4 у блока А (секция 0): по 3,45 т сухих и 39,6 т топлива,
+        /// РД-107 работает ~120 с (1000 кН / 314 с → 325 кг/с). Ø2,68 × 19,8 м, низ вровень с блоком А.
+        /// RadialOffset — касание корпусов (2,95 / 2 + 2,68 / 2) плюс зазор, как Craft.RadialGap = 0,15.
+        /// </summary>
+        static SectionDef R7Boosters() => new SectionDef
+        {
+            Name = "Р-7 / блоки Б, В, Г, Д", Kind = SectionKind.Stage, DryMass = 4 * 3450, Propellant = 4 * 39600,
+            Engine = RD107(), EngineCount = 4, Length = 19.8, Diameter = 2.68, MaxHeatFlux = 2e5,
+            RadialCount = 4, RadialParent = 0, RadialOffset = 2.95 / 2 + 2.68 / 2 + 0.15,
+        };
+
+        /// <summary>Пакет Р-7: блок А (0), боковые (1), выше — верхние ступени и ПН. Пуск — все пять блоков разом.</summary>
+        static VesselDesign R7(string name, SectionDef blockA, params SectionDef[] upper)
+        {
+            var d = new VesselDesign { Name = name };
+            d.Sections.Add(blockA);
+            d.Sections.Add(R7Boosters());
+            d.Sections.AddRange(upper);
+            d.Sequence.Add(new StageAction(StageActionType.Ignite, 1));
+            d.Sequence.Add(new StageAction(StageActionType.Ignite, 0, withPrevious: true));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 1));
+            return d;
+        }
+
+        /// <summary>
+        /// «Спутник» (8К71ПС, 04.10.1957): Р-7 без третьей ступени — блок А довёл ПС-1 до орбиты и сам остался
+        /// на ней. Старт ~267 т.
+        /// </summary>
+        public static VesselDesign R7Sputnik()
+        {
+            var d = R7("Р-7 «Спутник»", R7BlockA(7500, 86500),
+                new SectionDef
+                {
+                    Name = "ПС-1", Kind = SectionKind.Payload, DryMass = 83.6, Length = 0.58, Diameter = 0.58, RcsTorque = 5,
+                    Model = SectionModel.Sputnik,
+                },
+                Fairing(1, 2.2, 1.2, 150));
+            d.Sequence.Add(new StageAction(StageActionType.JettisonFairing, 3));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 0));
+            return d;
+        }
+
+        /// <summary>
+        /// «Восток» (8К72К, 12.04.1961): блок А + боковые + блок Е (РД-0109) + корабль 4,73 т, старт ~287 т.
+        /// ТДУ — на тормозной импульс, затем отстрел приборного отсека и парашют.
+        /// </summary>
+        public static VesselDesign R7Vostok()
+        {
+            var d = R7("Р-7 «Восток»", R7BlockA(6500, 94000),
+                new SectionDef
+                {
+                    Name = "Блок Е", Kind = SectionKind.Stage, DryMass = 1440, Propellant = 6400,
+                    Engine = new EngineDef { Name = "РД-0109", ThrustVac = 54.5e3, ThrustSL = 40e3, IspVac = 323.5, GimbalDeg = 3 },
+                    EngineCount = 1, Length = 3.1, Diameter = 2.56, RcsTorque = 3e3, MaxHeatFlux = 2e5,
+                },
+                new SectionDef
+                {
+                    Name = "Приборный отсек", Kind = SectionKind.Stage, DryMass = 2000, Propellant = 275,
+                    Engine = new EngineDef { Name = "ТДУ-1", ThrustVac = 15.8e3, ThrustSL = 12e3, IspVac = 266, Ignitions = 1 },
+                    EngineCount = 1, Length = 2.3, Diameter = 2.4, RcsTorque = 1.5e3, Model = SectionModel.VostokService,
+                },
+                new SectionDef
+                {
+                    Name = "СА «Восток»", Kind = SectionKind.Capsule, DryMass = 2460, Length = 2.3, Diameter = 2.3,
+                    RcsTorque = 300, ParachuteArea = 600, DragScale = 2.6, MaxHeatFlux = 3e6, Sphere = true, Crew = 1,
+                },
+                Fairing(2, 5.6, 2.7, 800));
+            // Блок Е запускается на разделении (у настоящей — «горячее», ещё до сброса блока А).
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 0, igniteNext: true));
+            d.Sequence.Add(new StageAction(StageActionType.JettisonFairing, 5));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 2));
+            d.Sequence.Add(new StageAction(StageActionType.Ignite, 3));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 3));
+            d.Sequence.Add(new StageAction(StageActionType.DeployParachute, 4));
+            return d;
+        }
+
+        /// <summary>
+        /// «Молния-М» (8К78М) со станцией Е-6 («Луна-9», 1966): блок И (РД-0110) выводит на опорную орбиту,
+        /// блок Л разгоняет к Луне, станция КТДУ-5 корректирует и садится (Δv станции ≈ 3 км/с, GDD §6.11).
+        /// Блоку Л даны 2 запуска: если блоку И не хватило, Л довыводит на опорную и потом разгоняет.
+        /// </summary>
+        public static VesselDesign R7Luna()
+        {
+            var d = R7("Р-7 «Молния-М»", R7BlockA(6500, 94000),
+                new SectionDef
+                {
+                    Name = "Блок И", Kind = SectionKind.Stage, DryMass = 2400, Propellant = 22500,
+                    Engine = new EngineDef
+                    {
+                        Name = "РД-0110", ThrustVac = 298e3, ThrustSL = 230e3, IspVac = 326, GimbalDeg = 3, NeedsUllage = true,
+                    },
+                    EngineCount = 1, Length = 6.7, Diameter = 2.66, RcsTorque = 8e3, MaxHeatFlux = 2e5,
+                },
+                new SectionDef
+                {
+                    Name = "Блок Л", Kind = SectionKind.Stage, DryMass = 1100, Propellant = 5400,
+                    Engine = new EngineDef
+                    {
+                        Name = "С1.5400", ThrustVac = 66.7e3, ThrustSL = 40e3, IspVac = 340, GimbalDeg = 3, Ignitions = 2,
+                    },
+                    EngineCount = 1, UllageMotors = true, Length = 2.6, Diameter = 2.6, RcsTorque = 3e3, MaxHeatFlux = 2e5,
+                },
+                new SectionDef
+                {
+                    Name = "Станция Е-6", Kind = SectionKind.Stage, DryMass = 500, Propellant = 1000,
+                    Engine = new EngineDef
+                    {
+                        Name = "КТДУ-5", ThrustVac = 16e3, ThrustSL = 12e3, IspVac = 277, MinThrottle = 0.25, Ignitions = 4,
+                    },
+                    EngineCount = 1, Length = 2.7, Diameter = 2.0, RcsTorque = 800, MaxHeatFlux = 2e5, LandingLegs = true,
+                    Deploy = DeployKind.Legs,
+                    Model = SectionModel.Luna9,
+                },
+                Fairing(2, 6.6, 2.7, 700));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 0, igniteNext: true));
+            d.Sequence.Add(new StageAction(StageActionType.JettisonFairing, 5));
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 2, igniteNext: true));
+            // КТДУ взводится отделением блока Л: на торможении у Луны ступень сменяется без лишнего шага (GDD §6.11).
+            d.Sequence.Add(new StageAction(StageActionType.Separate, 3, igniteNext: true));
+            return d;
+        }
+
         // ------------------------------------------------------------------ «Протон-К» / «Луна-17»
 
         /// <summary>
@@ -56,12 +198,13 @@ namespace Kare.Space.Core
                     Name = "КТДУ-417", ThrustVac = 18.8e3, ThrustSL = 14e3, IspVac = 313, MinThrottle = 0.25, Ignitions = 6,
                 },
                 EngineCount = 1, Length = 1.9, Diameter = 4.0, RcsTorque = 1500, MaxHeatFlux = 2e5, LandingLegs = true,
+                Deploy = DeployKind.Ramps,
                 Model = SectionModel.Luna17KT,
             });
             d.Sections.Add(new SectionDef
             {
                 Name = "Луноход-1", Kind = SectionKind.Payload, DryMass = 756, Length = 1.9, Diameter = 2.2, RcsTorque = 50,
-                Rover = true, Model = SectionModel.Lunokhod,
+                Rover = true, Model = SectionModel.Lunokhod, Deploy = DeployKind.Lid,
             });
             int fairing = d.Sections.Count;
             d.Sections.Add(Fairing(3, 12, 4.1, 2000));
@@ -289,6 +432,7 @@ namespace Kare.Space.Core
                     Name = "Посадочная ДУ", ThrustVac = 12e3, ThrustSL = 9e3, IspVac = 289, MinThrottle = 0.1, Ignitions = 4,
                 },
                 EngineCount = 1, Length = 3.0, Diameter = 2.0, RcsTorque = 300, MaxHeatFlux = 2e5, LandingLegs = true,
+                Deploy = DeployKind.PyroLegs,
                 Model = SectionModel.Surveyor,
             });
             int fairing = d.Sections.Count;
@@ -416,6 +560,7 @@ namespace Kare.Space.Core
                     Ignitions = 3,
                 },
                 EngineCount = 1, Length = 3.2, Diameter = 4.2, RcsTorque = 2e3, MaxHeatFlux = 2e5, LandingLegs = true,
+                Deploy = DeployKind.PyroLegs,
                 Model = SectionModel.LMDescent,
             });
             d.Sections.Add(new SectionDef
