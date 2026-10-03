@@ -35,6 +35,8 @@ namespace Kare.Space.Game
         public Material PlumeMaterial;
         [Tooltip("Дым шлейфа и облака у стола: HDRP/Lit прозрачный (§9.5).")]
         public Material SmokeMaterial;
+        [Tooltip("Огонь на месте падения и на обломках (Vefects Free Fire HDRP); пусто — без горения.")]
+        public GameObject WreckFirePrefab, DebrisFirePrefab;
         /// <summary>Взрывы и хлопки отделения (§9.5); материалы те же, что у факела, дыма и корпуса.</summary>
         BlastEffects blasts;
         [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
@@ -160,6 +162,7 @@ namespace Kare.Space.Game
             {
                 blasts = new GameObject("Blast Effects").AddComponent<BlastEffects>();
                 blasts.Init(PlumeMaterial, SmokeMaterial, VesselMaterial);
+                blasts.SetFirePrefabs(WreckFirePrefab, DebrisFirePrefab);
             }
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)

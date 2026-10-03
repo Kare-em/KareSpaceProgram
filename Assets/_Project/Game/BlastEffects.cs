@@ -52,6 +52,20 @@ namespace Kare.Space.Game
         const int FirePool = 96, SmokePool = 160, FragPool = 64, LightPool = 4;
         /// <summary>Свет шара: дальность в радиусах шара. Сила света = яркость × площадь диска (как у плазмы).</summary>
         const float LightRangeRadii = 12;
+        /// <summary>Горение после взрыва (пак Vefects Free Fire HDRP): только где есть чем гореть — плотный воздух
+        /// (Земля 1,2 кг/м³; Марс 0,02 — нет). Очаг на месте падения: масштаб префаба (пламя ≈ 1,6 м) = R·WreckFireK
+        /// в [1, WreckFireMax]; горит R·WreckBurnK с в [WreckBurnMin, WreckBurnMax]. Пара: R — радиус шара выше.</summary>
+        const double BurnDensity = 0.1;
+        const float WreckFireK = 0.12f, WreckFireMax = 12, WreckBurnK = 2, WreckBurnMin = 30, WreckBurnMax = 180;
+        /// <summary>Горящих обломков на взрыв и масштаб огня к размеру осколка. Пара: FragLife — огонь гаснет раньше.</summary>
+        const int BurningFrags = 3;
+        const float FragFireK = 1.5f;
+        /// <summary>Сколько секунд после остановки эмиссии дожидаться, пока догорят частицы (дым Vefects живёт до 5 с).</summary>
+        const float FireFadeOut = 6;
+        /// <summary>Яркость материалов Vefects × это. Пак откалиброван под тёмную сцену (пламя 33 нит, квад 123 нит), у нас
+        /// экспозиция дневного Солнца — без множителя огонь днём не виден. ×25 даёт ≈ 800 нит, как FireNits.</summary>
+        const float VefectsEmissionBoost = 25;
+
         /// <summary>Подъём центра клуба над грунтом в его размерах и мягкое подхождение камеры — как у ExhaustTrail.</summary>
         const float PuffLift = 0.6f, PuffFadeNear = 0.6f, PuffFadeRange = 1.2f;
 
@@ -90,6 +104,22 @@ namespace Kare.Space.Game
             public Transform Tr;
             public Renderer R;
         }
+
+        /// <summary>Экземпляр префаба огня: точка в осях тела (или на осколке); не вращается вместе с осколком.</summary>
+        sealed class Fire
+        {
+            public Blast B;
+            public Frag F;
+            public Vector3d Off;
+            public float StopAt;
+            public bool Stopped, Paused;
+            public GameObject Go;
+            public ParticleSystem Ps;
+        }
+
+        GameObject wreckFire, debrisFire;
+        readonly List<Fire> burning = new List<Fire>();
+        readonly Dictionary<Material, Material> boosted = new Dictionary<Material, Material>();
 
         readonly Sprite[] fires = new Sprite[FirePool], smokes = new Sprite[SmokePool];
         readonly Frag[] frags = new Frag[FragPool];
@@ -138,6 +168,95 @@ namespace Kare.Space.Game
                 l.shadows = LightShadows.None;
                 l.enabled = false;
                 lights[i] = l;
+            }
+        }
+
+        /// <summary>Префабы горения (Vefects); без них — только огненный шар и дым кодом.</summary>
+        public void SetFirePrefabs(GameObject wreck, GameObject debris)
+        {
+            wreckFire = wreck;
+            debrisFire = debris;
+        }
+
+        void SpawnFire(GameObject prefab, Blast b, Frag f, Vector3d off, float scale, float burn)
+        {
+            var go = Instantiate(prefab, transform);
+            go.transform.localScale = Vector3.one * scale;
+            // Плавающее начало двигает мир каждый кадр: частицы в World-пространстве остались бы позади и тянулись
+            // шлейфом на километры. В Local они живут с якорем; масштаб — через иерархию.
+            foreach (var ps in go.GetComponentsInChildren<ParticleSystem>(true))
+            {
+                var m = ps.main;
+                m.simulationSpace = ParticleSystemSimulationSpace.Local;
+                m.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            }
+            foreach (var r in go.GetComponentsInChildren<ParticleSystemRenderer>(true))
+            {
+                var mats = r.sharedMaterials;
+                for (int i = 0; i < mats.Length; i++) if (mats[i] != null) mats[i] = Boost(mats[i]);
+                r.sharedMaterials = mats;
+            }
+            var fire = new Fire { B = b, F = f, Off = off, StopAt = clock + burn, Go = go, Ps = go.GetComponent<ParticleSystem>() };
+            if (fire.Ps == null) fire.Ps = go.GetComponentInChildren<ParticleSystem>();
+            burning.Add(fire);
+            PlaceFire(fire);
+        }
+
+        Material Boost(Material src)
+        {
+            if (boosted.TryGetValue(src, out var m)) return m;
+            m = new Material(src) { name = src.name + " (boost)" };
+            foreach (var p in new[] { "_EmissionIntensity", "_EmissiveIntensity" })
+                if (m.HasProperty(p)) m.SetFloat(p, m.GetFloat(p) * VefectsEmissionBoost);
+            boosted[src] = m;
+            return m;
+        }
+
+        void PlaceFire(Fire f)
+        {
+            var off = f.F != null ? f.F.Pos : f.Off;
+            f.Go.transform.SetPositionAndRotation(ToUnity(f.B, off), Quaternion.FromToRotation(Vector3.up, ToUnityDir(f.B.Body, f.B.Up)));
+        }
+
+        static Vector3 ToUnityDir(CelestialBody body, Vector3d upBf)
+        {
+            var d = body.Orientation * upBf;
+            return new Vector3((float)d.x, (float)d.z, (float)d.y);
+        }
+
+        void UpdateFires(bool show, bool paused)
+        {
+            for (int i = burning.Count - 1; i >= 0; i--)
+            {
+                var f = burning[i];
+                bool gone = f.F != null && (!f.F.Active || f.F.B != f.B);
+                if (!f.Stopped && (clock >= f.StopAt || gone || f.B.Dead))
+                {
+                    f.Stopped = true;
+                    f.StopAt = clock;
+                    if (f.Ps != null) f.Ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                }
+                if (f.Stopped && clock > f.StopAt + FireFadeOut)
+                {
+                    Destroy(f.Go);
+                    burning.RemoveAt(i);
+                    continue;
+                }
+                if (f.Go.activeSelf != show)
+                {
+                    f.Go.SetActive(show);
+                    // Включение заново запускает playOnAwake — догорающий очаг не должен вспыхнуть снова.
+                    if (show && f.Stopped && f.Ps != null) f.Ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                }
+                if (!show) continue;
+                if (f.Ps != null && paused != f.Paused)
+                {
+                    f.Paused = paused;
+                    if (paused) f.Ps.Pause(true);
+                    else f.Ps.Play(true);
+                    if (!paused && f.Stopped) f.Ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                }
+                if (f.F == null || !gone) PlaceFire(f);
             }
         }
 
@@ -307,6 +426,25 @@ namespace Kare.Space.Game
             }
             end = Mathf.Max(end, FragLife);
 
+            if (onGround && !water && v.Density > BurnDensity && wreckFire != null)
+            {
+                // Очаг: 1 на мелочь, до 3 на полную ступень — разлитое топливо горит пятнами.
+                int spots = radius > 60 ? 3 : radius > 20 ? 2 : 1;
+                float scale = Mathf.Clamp(radius * WreckFireK, 1, WreckFireMax);
+                float burn = Mathf.Clamp(radius * WreckBurnK, WreckBurnMin, WreckBurnMax);
+                for (int i = 0; i < spots; i++)
+                    SpawnFire(wreckFire, b, null, i == 0 ? Vector3d.zero : Flat(up) * (radius * Rand(0.2f, 0.45f)),
+                              scale * Rand(0.7f, 1f), burn * Rand(0.7f, 1f));
+                end = Mathf.Max(end, burn + FireFadeOut);
+            }
+            if (!water && v.Density > BurnDensity && debrisFire != null)
+                for (int i = 0, j = nextFrag; i < Mathf.Min(BurningFrags, n); i++)
+                {
+                    j = (j - 1 + FragPool) % FragPool;
+                    var f = frags[j];
+                    SpawnFire(debrisFire, b, f, Vector3d.zero, Mathf.Max(0.5f, f.Size * FragFireK), FragLife - 3);
+                }
+
             b.Light = lights[nextLight];
             nextLight = (nextLight + 1) % LightPool;
             foreach (var other in blasts) if (other.Light == b.Light) other.Light = null;
@@ -393,6 +531,7 @@ namespace Kare.Space.Game
             foreach (var s in fires) UpdateSprite(s, show, dt, camRot, eye);
             foreach (var s in smokes) UpdateSprite(s, show, dt, camRot, eye);
             foreach (var f in frags) UpdateFrag(f, show, dt);
+            UpdateFires(show, PauseMenu.IsOpen);
 
             foreach (var b in blasts)
             {

@@ -154,3 +154,11 @@
   (`FlightSceneBuilder.DeployParts(wheels: true)`), вид крутит узел вокруг X модели.
 - **Пока пользователь в Play, компиляция отложена**: `Kare/Build Flight Scene` падает «cannot be used during play mode», а
   `execute_code` не видит новых членов (`WheelsFor`). Play не останавливать — дождаться выхода, потом собрать сцену.
+- **Новые карты/ассеты не видны в Play** — сцена не пересобрана после добавления (`BodyRenderer.Maps`, `SaturnRing`
+  назначает только `Kare/Build Flight Scene`). Признак: GUID текстуры (из `.meta`) не встречается в `Flight.unity`.
+- **VFX Graph через MCP не собрать**: `manage_vfx` создаёт `.vfx` только из шаблона и крутит exposed-параметры, а у
+  шаблонов их 0, узлы не редактируются. Эффекты — кодом (billboard'ы) или чужими Shuriken-префабами.
+- **Паки из Asset Store проверять на конвейер**: Rainy VFX (материал `Default-Particle`, `Legacy Shaders/Particles`) и
+  AQUAS-Lite (`CGPROGRAM`, built-in RP) в HDRP не рендерятся; README Rainy описывает файлы, которых в паке нет.
+  AQUAS_Lite_Reflection.cs ломал компиляцию всего проекта (`GetInstanceID` в 6000.6 — ошибка CS0619) → заменён на
+  `GetHashCode()`. Проверка: шейдер материала из префаба через `execute_code` (`r.sharedMaterial.shader.name`).

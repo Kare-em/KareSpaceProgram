@@ -180,3 +180,7 @@
 - **Кольцо Сатурна** — плоский annulus в local xz (uv.x — радиус), нормали заданы явно (FixWinding для плоского кольца
   бессмыслен), HDRP Lit transparent + double-sided, fog-on-transparent выкл., теней не отбрасывает. Текстура — Clamp,
   npotScale None. Поверхность Венеры не используется: снаружи видна только атмосфера.
+- **Shuriken-префабы и плавающее начало**: частицы в `World` при сдвиге начала остаются позади и тянутся шлейфом —
+  на экземпляре ставить `main.simulationSpace = Local`, `scalingMode = Hierarchy` (масштаб с корня). Vefects Free Fire
+  откалиброван под тёмную сцену (`_EmissionIntensity` 33, квад `_EmissiveIntensity` 123) — под дневную экспозицию
+  рантайм-копии материалов ×25 (`BlastEffects.VefectsEmissionBoost`). Множитель подобран расчётом, в Play не проверен.
