@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: WFXM_M_MF Side RIFLE1
-  m_Shader: {fileID: 4800000, guid: 76840267cd7c0e64292ec296b1769b24, type: 3}
+  m_Shader: {fileID: 4800000, guid: 1cbcf1d2bf55b404fb3d9a95aefd48fb, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -29,7 +29,13 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _Brightness: 1
+    - _DstBlend: 1
     - _InvFade: 1
+    - _Mode: 0
+    - _ScrollSpeed: 0
+    - _SoftScale: 1
+    - _SrcBlend: 1
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _TintColor: {r: 1, g: 1, b: 1, a: 1}

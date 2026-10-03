@@ -184,3 +184,14 @@
   на экземпляре ставить `main.simulationSpace = Local`, `scalingMode = Hierarchy` (масштаб с корня). Vefects Free Fire
   откалиброван под тёмную сцену (`_EmissionIntensity` 33, квад `_EmissiveIntensity` 123) — под дневную экспозицию
   рантайм-копии материалов ×25 (`BlastEffects.VefectsEmissionBoost`). Множитель подобран расчётом, в Play не проверен.
+- **JMO WarFX (built-in CG-шейдеры) в HDRP**: 11 шейдеров пака + Legacy Particles без `LightMode` → HDRP рисует их
+  как SRPDefaultUnlit мимо экспозиции и с built-in глубиной. Решение: свой `Settings/WfxParticleHDRP.shader`
+  (HLSL, `LightMode=ForwardOnly`, формулы пака по `_Mode`, смешивание `_SrcBlend/_DstBlend`) + меню
+  **Kare/Convert WarFX to HDRP** (`Editor/WarFxConverter.cs`, его же зовёт билдер сцены): 90 из 106 материалов
+  переведены, 16 (Standard демо, `WFX/Transparent Diffuse/Specular` дырок от пуль) — нет, они розовые. Переимпорт
+  пака откатывает шейдеры — запустить меню снова. Цвет пишется «экранным» (без `GetCurrentExposureMultiplier`):
+  буфер предэкспонирован, 1 = белый и днём, и ночью. Мягкость грунта — `_SoftScale` блоком свойств = масштаб.
+- **Shuriken в нашем кадре**: `gravityModifier` тянет к мировому −Y, а это не «вниз» (Unity = эклиптика) →
+  переносить в `forceOverLifetime` Local с g тела. `Horizontal/VerticalBillboard` тоже по мировой Y → `Billboard`.
+  У одноразового эффекта пауза только `simulationSpeed = 0`: `Play()` после `Pause()` перезапускает уже отыгравшие
+  дочерние системы (взрыв повторяется). Масштаб N — скорость симуляции 1/√N (Фруд): тогда баллистика идёт с настоящим g.

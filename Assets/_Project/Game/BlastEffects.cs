@@ -66,6 +66,12 @@ namespace Kare.Space.Game
         /// экспозиция дневного Солнца — без множителя огонь днём не виден. ×25 даёт ≈ 800 нит, как FireNits.</summary>
         const float VefectsEmissionBoost = 25;
 
+        /// <summary>Взрыв пака JMO WarFX поверх шара кодом: вспышка, искры, ударный дым. Масштаб = R / родной радиус
+        /// префаба (WFX_Explosion: пламя Ø4 м → 2,5; WFX_Nuke: Ø8 м → 4). «Гриб» — только у грунта в воздухе и при
+        /// R > BigBlastRadius (≈ 13 т топлива). Время по Фруду: скорость симуляции 1/√масштаба — так баллистика искр и
+        /// всплытие дыма идут с настоящим g (пара: сила тяжести частиц ставится в осях префаба из Blast.Gravity).</summary>
+        const float BlastNativeRadius = 2.5f, BigBlastNativeRadius = 4, BigBlastRadius = 40, BurstMinScale = 0.3f;
+
         /// <summary>Подъём центра клуба над грунтом в его размерах и мягкое подхождение камеры — как у ExhaustTrail.</summary>
         const float PuffLift = 0.6f, PuffFadeNear = 0.6f, PuffFadeRange = 1.2f;
 
@@ -115,9 +121,15 @@ namespace Kare.Space.Game
             public bool Stopped, Paused;
             public GameObject Go;
             public ParticleSystem Ps;
+            /// <summary>Одноразовый взрыв: живёт, пока жива хоть одна система; пауза — нулевой скоростью симуляции
+            /// (Play после паузы перезапустил бы уже отыгравшие дочерние системы).</summary>
+            public bool OneShot;
+            public ParticleSystem[] All;
+            public float[] Speeds;
         }
 
-        GameObject wreckFire, debrisFire;
+        GameObject wreckFire, debrisFire, blastFx, bigBlastFx;
+        MaterialPropertyBlock softMpb;
         readonly List<Fire> burning = new List<Fire>();
         readonly Dictionary<Material, Material> boosted = new Dictionary<Material, Material>();
 
@@ -178,28 +190,95 @@ namespace Kare.Space.Game
             debrisFire = debris;
         }
 
-        void SpawnFire(GameObject prefab, Blast b, Frag f, Vector3d off, float scale, float burn)
+        /// <summary>Префабы взрыва (JMO WarFX, материалы переведены меню Kare/Convert WarFX to HDRP); пусто — без них.</summary>
+        public void SetBlastPrefabs(GameObject blast, GameObject bigBlast)
+        {
+            blastFx = blast;
+            bigBlastFx = bigBlast;
+        }
+
+        Fire SpawnFire(GameObject prefab, Blast b, Frag f, Vector3d off, float scale, float burn, float simSpeed = 1)
         {
             var go = Instantiate(prefab, transform);
             go.transform.localScale = Vector3.one * scale;
+            // Самоуничтожение пака (CFX_AutoDestructShuriken) не знает про паузу и карту — временем жизни правим сами.
+            foreach (var mb in go.GetComponentsInChildren<MonoBehaviour>(true))
+                if (mb.GetType().Name.StartsWith("CFX_")) Destroy(mb);
             // Плавающее начало двигает мир каждый кадр: частицы в World-пространстве остались бы позади и тянулись
             // шлейфом на километры. В Local они живут с якорем; масштаб — через иерархию.
-            foreach (var ps in go.GetComponentsInChildren<ParticleSystem>(true))
+            var all = go.GetComponentsInChildren<ParticleSystem>(true);
+            var speeds = new float[all.Length];
+            for (int i = 0; i < all.Length; i++)
             {
+                var ps = all[i];
                 var m = ps.main;
                 m.simulationSpace = ParticleSystemSimulationSpace.Local;
                 m.scalingMode = ParticleSystemScalingMode.Hierarchy;
+                m.simulationSpeed *= simSpeed;
+                speeds[i] = m.simulationSpeed;
+                // Тяжесть Unity — мировой −Y, а «вниз» у нас — к центру тела: переносим её в силу в осях префаба
+                // (его +Y смотрит от тела) и берём g тела, а не 9,81.
+                float gm = m.gravityModifier.constantMax;
+                if (gm != 0)
+                {
+                    m.gravityModifier = 0;
+                    var fol = ps.forceOverLifetime;
+                    if (!fol.enabled)
+                    {
+                        fol.enabled = true;
+                        fol.space = ParticleSystemSimulationSpace.Local;
+                        fol.x = 0;
+                        fol.y = -b.Gravity * gm;
+                        fol.z = 0;
+                    }
+                }
             }
+            if (softMpb == null) softMpb = new MaterialPropertyBlock();
             foreach (var r in go.GetComponentsInChildren<ParticleSystemRenderer>(true))
             {
                 var mats = r.sharedMaterials;
                 for (int i = 0; i < mats.Length; i++) if (mats[i] != null) mats[i] = Boost(mats[i]);
                 r.sharedMaterials = mats;
+                // Горизонтальные и вертикальные билборды Unity ориентирует по мировой оси Y — у нас это не вертикаль.
+                if (r.renderMode == ParticleSystemRenderMode.HorizontalBillboard ||
+                    r.renderMode == ParticleSystemRenderMode.VerticalBillboard)
+                    r.renderMode = ParticleSystemRenderMode.Billboard;
+                softMpb.Clear();
+                softMpb.SetFloat("_SoftScale", scale);
+                r.SetPropertyBlock(softMpb);
             }
-            var fire = new Fire { B = b, F = f, Off = off, StopAt = clock + burn, Go = go, Ps = go.GetComponent<ParticleSystem>() };
+            var fire = new Fire { B = b, F = f, Off = off, StopAt = clock + burn, Go = go, Ps = go.GetComponent<ParticleSystem>(),
+                                  All = all, Speeds = speeds };
             if (fire.Ps == null) fire.Ps = go.GetComponentInChildren<ParticleSystem>();
             burning.Add(fire);
             PlaceFire(fire);
+            return fire;
+        }
+
+        /// <summary>Одноразовый взрыв WarFX радиусом шара; возвращает, сколько секунд он идёт.</summary>
+        float SpawnBurst(GameObject prefab, Blast b, float nativeRadius, bool air)
+        {
+            float scale = Mathf.Max(BurstMinScale, b.Radius / nativeRadius);
+            float speed = 1 / Mathf.Sqrt(scale);
+            var fire = SpawnFire(prefab, b, null, Vector3d.zero, scale, float.PositiveInfinity, speed);
+            fire.OneShot = true;
+            float length = 0;
+            foreach (var ps in fire.All)
+            {
+                var m = ps.main;
+                // В вакууме дыму не из чего быть: гасим системы с дымными материалами, вспышка и искры остаются.
+                var r = ps.GetComponent<ParticleSystemRenderer>();
+                if (!air && r != null && r.sharedMaterial != null && r.sharedMaterial.name.Contains("Smoke"))
+                {
+                    var em = ps.emission;
+                    em.enabled = false;
+                    continue;
+                }
+                length = Mathf.Max(length, (m.startDelay.constantMax + m.duration + m.startLifetime.constantMax) / m.simulationSpeed);
+            }
+            // Свет шара у нас свой (lights); свет пака под HDRP откалиброван не в люменах.
+            foreach (var l in fire.Go.GetComponentsInChildren<Light>(true)) l.enabled = false;
+            return length;
         }
 
         Material Boost(Material src)
@@ -229,6 +308,29 @@ namespace Kare.Space.Game
             for (int i = burning.Count - 1; i >= 0; i--)
             {
                 var f = burning[i];
+                if (f.Go == null) { burning.RemoveAt(i); continue; }
+                if (f.OneShot)
+                {
+                    // Карта выключает объект, а включение заново перезапустило бы взрыв — короткий одноразовый
+                    // эффект проще убрать. Отыгравший — тоже.
+                    if (!show || f.B.Dead || (!f.Paused && f.Ps != null && !f.Ps.IsAlive(true)))
+                    {
+                        Destroy(f.Go);
+                        burning.RemoveAt(i);
+                        continue;
+                    }
+                    if (paused != f.Paused)
+                    {
+                        f.Paused = paused;
+                        for (int k = 0; k < f.All.Length; k++)
+                        {
+                            var m = f.All[k].main;
+                            m.simulationSpeed = paused ? 0 : f.Speeds[k];
+                        }
+                    }
+                    PlaceFire(f);
+                    continue;
+                }
                 bool gone = f.F != null && (!f.F.Active || f.F.B != f.B);
                 if (!f.Stopped && (clock >= f.StopAt || gone || f.B.Dead))
                 {
@@ -444,6 +546,12 @@ namespace Kare.Space.Game
                     var f = frags[j];
                     SpawnFire(debrisFire, b, f, Vector3d.zero, Mathf.Max(0.5f, f.Size * FragFireK), FragLife - 3);
                 }
+
+            if (!water && blastFx != null)
+            {
+                bool big = onGround && air && bigBlastFx != null && radius > BigBlastRadius;
+                end = Mathf.Max(end, SpawnBurst(big ? bigBlastFx : blastFx, b, big ? BigBlastNativeRadius : BlastNativeRadius, air));
+            }
 
             b.Light = lights[nextLight];
             nextLight = (nextLight + 1) % LightPool;

@@ -91,6 +91,10 @@ namespace Kare.Space.EditorTools
             // Пак Vefects Free Fire HDRP (Asset Store); нет пака — поля пустые, горения нет.
             boot.WreckFirePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Vefects/Free Fire HDRP/Particles/VFX_Fire_Floor_01_Smoke.prefab");
             boot.DebrisFirePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Vefects/Free Fire HDRP/Particles/VFX_Fire_01_Small_Smoke.prefab");
+            // Пак JMO WarFX: шейдеры built-in — сначала перевести материалы на HDRP (идемпотентно).
+            if (AssetDatabase.IsValidFolder("Assets/JMO Assets/WarFX")) WarFxConverter.Convert();
+            boot.BlastPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/JMO Assets/WarFX/_Effects/Explosions/WFX_Explosion.prefab");
+            boot.BigBlastPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/JMO Assets/WarFX/_Effects/Explosions/WFX_Nuke.prefab");
             boot.EarthLand = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthLand.bytes");
             boot.PadTexture = GroundTexture("Concrete", false);
             // Лоу-поли детали из Blender (Tools/blender); нет файла — вид берёт процедурный меш.
