@@ -37,6 +37,9 @@ Library/, Temp/, Logs/, UserSettings/ — не трогать и не комми
   RT-тени + DLSS, стыковка (V), исторические стартовые столы, яркость и перезапуски в Esc.
 - Автопилот всей миссии (Y, сам ведёт ускорение), «к Луне» (R), манёвр к цели с авторасчётом (P), тутор после
   выведения (`MissionGuide`), орбиты тел и кораблей на карте, звёзды за экспозицией.
+- 04.10: **Tab — ручная стыковка** (РСУ WASD+Shift/Ctrl, прибор `FlightHud.Dock.cs`, SAS к цели), **V на состыкованном —
+  расстыковка**, **PgUp/PgDn/Home — переключение аппаратов** (`Universe.SwitchTo`, `MissionVessel`), панели HUD
+  перетаскиваются, отделение на q > 10 кПа — двойным пробелом, пары разделения «свежие» (`Universe.Fresh`). См. STATE.md.
 - Конструктор ракет (M3): сцена `Scenes/Hangar.unity` (меню **Kare/Build Hangar Scene**), `PartCatalog`/`Craft` в ядре,
   Esc → «В конструктор»; боковые блоки отделяются отдельными бортами, столкновения бортов.
 - Луна LROC 8k, «Луна-17» через окололунную орбиту и съезд по трапам, подвеска, Δv ступеней в HUD, сдвиг камеры колесом.
@@ -62,8 +65,8 @@ juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apol
 Не собирать во время прогона — exe заблокирован, сборка падает.
 
 ## MCP
-MCP for Unity (CoplayDev), порт 8767 (`McpPortPin.cs`). Проверка: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8767/mcp` → 406 = жив.
-ECONNREFUSED при живом сервере — переподключить через /mcp. Детали и грабли — `docs/pitfalls-tools.md`.
+MCP for Unity (CoplayDev) v10.3.0, **stdio** (мост Unity на 6400). Проверка: `execute_code` версии пакета; без сессии — stdio-клиент.
+Обновление и грабли — `docs/pitfalls-tools.md` (старый HTTP-режим 8767 / `McpPortPin.cs` — там же).
 Blender MCP (`.mcp.json`, сокет 9876) — лоу-поли детали, экспорт FBX в `Assets/_Project/Models`; см. `docs/pitfalls-tools.md`.
 
 ## Соглашения

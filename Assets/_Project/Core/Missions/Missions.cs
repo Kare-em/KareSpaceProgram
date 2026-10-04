@@ -27,6 +27,8 @@ namespace Kare.Space.Core
         Return,
         /// <summary>Проехать по телу не меньше Min метров (луноход, GDD §6.12).</summary>
         Drive,
+        /// <summary>Причалить к станции и пробыть в связке HoldSeconds (GDD §6.6, «Союз ТМ-31», Demo-2).</summary>
+        Dock,
     }
 
     public sealed class Objective
@@ -51,6 +53,8 @@ namespace Kare.Space.Core
                 case ObjectiveType.Impact: return $"Достичь поверхности: {b}";
                 case ObjectiveType.Landing: return $"Мягкая посадка: {b}, не быстрее {MaxSpeed:F0} м/с";
                 case ObjectiveType.Drive: return $"Проехать {Min:F0} м: {b}";
+                case ObjectiveType.Dock:
+                    return "Стыковка со станцией" + (HoldSeconds > 0 ? $", в связке {GameCalendar.FormatDuration(HoldSeconds)}" : "");
                 case ObjectiveType.Return:
                     return $"Вернуть капсулу: {b}" + (FlightPhysics.GLoadLimit
                         ? $", экипаж не дольше {FlightPhysics.CrewGTime:F0} с выше {FlightPhysics.CrewGLimit:F0} g" : "");
@@ -70,6 +74,14 @@ namespace Kare.Space.Core
         /// <summary>Посадка на Луну с окололунной орбиты (м над средним радиусом), 0 — прямой спуск с трассы перелёта,
         /// как у «Луны-9» и «Сервейера-1». LunarPerilune — перицентр, из которого начинается торможение.</summary>
         public double LunarOrbit, LunarPerilune;
+        /// <summary>
+        /// Станция-цель (GDD §6.6): секция проекта, которая на старте уже летает отдельным бортом (StationSetup.Place);
+        /// −1 — станции нет. Орбита круговая: высота, наклонение, опережение по дуге над точкой выведения (°)
+        /// на момент StartTime + StationLaunchDelay. Пара: StationLead ↔ ParkingAltitude автопилота (дрейф фаз).
+        /// </summary>
+        public int StationSection = -1;
+        public double StationAltitude, StationInclination, StationLead, StationLaunchDelay = 120;
+        public string StationName;
         public readonly List<Objective> Objectives = new List<Objective>();
     }
 
@@ -103,7 +115,8 @@ namespace Kare.Space.Core
         public static Universe CreateUniverse(MissionDef def, SolarSystem system)
         {
             var u = new Universe(system, def.StartTime);
-            u.Launch(VesselPresets.ById(def.DesignId), def.SiteId);
+            var v = u.Launch(VesselPresets.ById(def.DesignId), def.SiteId);
+            if (def.StationSection >= 0) StationSetup.Place(u, v, def);
             return u;
         }
 
@@ -120,7 +133,8 @@ namespace Kare.Space.Core
         public void Update(Universe u)
         {
             if (Status != MissionStatus.Active) return;
-            var v = u.Active;
+            // Игрок увёл управление на другой борт — задачи считаются по борту миссии (§6.13).
+            var v = u.MissionVessel ?? u.Active;
             if (v == null) return;
             for (int i = 0; i < Done.Length; i++)
             {
@@ -221,6 +235,21 @@ namespace Kare.Space.Core
                 case ObjectiveType.Drive:
                     return onBody && v.IsLanded && v.DriveDistance >= o.Min;
 
+                case ObjectiveType.Dock:
+                {
+                    // Состыкован — к борту прицеплены перевёрнутые секции со стыковочным узлом (Vessel.Dock).
+                    bool docked = false;
+                    for (int k = 0; k < v.Attached.Length; k++)
+                        if (v.Attached[k] && v.Flipped[k] && v.Design.Sections[k].DockingPort) docked = true;
+                    if (!docked)
+                    {
+                        holdStart[i] = double.NaN;
+                        return false;
+                    }
+                    if (double.IsNaN(holdStart[i])) holdStart[i] = t;
+                    return t - holdStart[i] >= o.HoldSeconds;
+                }
+
                 case ObjectiveType.Return:
                 {
                     if (!launched) return false;
@@ -243,7 +272,7 @@ namespace Kare.Space.Core
     }
 
     /// <summary>Миссии эры I (GDD §7.3) в датах реальных стартов — окна запуска и положение Луны настоящие.</summary>
-    public static class MissionCatalog
+    public static partial class MissionCatalog
     {
         public static readonly List<MissionDef> All = Build();
 
@@ -428,6 +457,7 @@ namespace Kare.Space.Core
             apollo11.Objectives.Add(new Objective { Type = ObjectiveType.Return });
             list.Add(apollo11);
 
+            AddModern(list); // после «Аполлона» — StationMissions.cs
             return list;
         }
     }

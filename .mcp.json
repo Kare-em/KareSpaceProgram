@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "UnityMCP": {
-      "type": "http",
-      "url": "http://127.0.0.1:8767/mcp"
+      "command": "C:\Users\karim\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\uvx.exe",
+      "args": ["--from", "mcpforunityserver==10.3.0", "mcp-for-unity", "--transport", "stdio"]
     },
     "blender": {
       "command": "uvx",

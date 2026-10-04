@@ -87,12 +87,13 @@ namespace Kare.Space.Game
             if (!MapView.IsOpen) NavBall(u, v, w, h - 24); // 24 — строка подсказки клавиш внизу
             Messages(boot, w, h);
             NodePanel(u, v, h);
+            DockPanel(u, v, w, h);
             if (details) Details(u, v, boot);
             else if (boot.AscentTutor && !Tutor(u, v)) Guide(u, boot);
 
             GUI.color = Dim;
-            GUI.Label(new Rect(10, h - 24, 1100, 22),
-                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · H взлёт/посадка · G опоры/трапы · R к Луне · N/B манёвр · ,/. время · M карта · F1 детали · Esc", small);
+            GUI.Label(new Rect(10, h - 24, 1400, 22),
+                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · H взлёт/посадка · G опоры/трапы · R к Луне · V стыковка/расстыковка · Tab ручная стыковка · PgUp/PgDn аппарат · N/B манёвр · ,/. время · M карта · F1 детали · Esc", small);
             GUI.color = Color.white;
         }
 
@@ -277,7 +278,9 @@ namespace Kare.Space.Game
             bool surface = speedFrame == SpeedFrame.Surface || speedFrame == SpeedFrame.Auto && v.Altitude < AutoSurfaceBelow;
 
             const float pw = 250;
-            var r = new Rect(12, FlightPanelTop(h), pw, FlightPanelHeight);
+            // Перетаскивается за любое место, кроме кнопки системы отсчёта (её прямоугольник ниже — та же пара).
+            var r = Draggable(flightDrag, new Rect(12, FlightPanelTop(h), pw, FlightPanelHeight), w, h,
+                new Rect(6, 78, pw - 12, 22));
             Fill(r, Panel);
             float x = r.x + 12, y = r.y;
             GUI.color = Dim; GUI.Label(new Rect(x, y + 4, pw - 24, 22), surface ? "ВЫСОТА НАД ГРУНТОМ" : "ВЫСОТА (ур. моря)", small); GUI.color = Color.white;
@@ -350,6 +353,9 @@ namespace Kare.Space.Game
                 case SasMode.RadialOut: return Icon.RadialOut;
                 case SasMode.RadialIn: return Icon.RadialIn;
                 case SasMode.Maneuver: return Icon.Maneuver;
+                case SasMode.Target: return Icon.Prograde;
+                case SasMode.AntiTarget: return Icon.Retrograde;
+                case SasMode.DockAlign: return Icon.Autopilot;
                 default: return Icon.Stability;
             }
         }
@@ -365,6 +371,9 @@ namespace Kare.Space.Game
                 case SasMode.RadialOut: return "радиально наружу";
                 case SasMode.RadialIn: return "радиально внутрь";
                 case SasMode.Maneuver: return "на манёвр";
+                case SasMode.Target: return "на цель";
+                case SasMode.AntiTarget: return "от цели";
+                case SasMode.DockAlign: return "соосно с узлом цели";
                 default: return "удержание";
             }
         }

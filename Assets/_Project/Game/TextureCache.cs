@@ -14,7 +14,7 @@ namespace Kare.Space.Game
     {
         /// <summary>Версия генераторов. Пара: BodyRenderer.BuildTexture/BuildClouds/AddNightLights, EarthSurface —
         /// без подъёма после их правки игра будет показывать старые текстуры из кеша.</summary>
-        const int Version = 2;
+        const int Version = 3; // 3 — рельеф по реальным картам высот (bake-dem.py): маска и цвета Земли другие
         const int Magic = 0x4B544331; // «KTC1»
 
         static string Dir => Path.Combine(Application.persistentDataPath, "BodyTextures");

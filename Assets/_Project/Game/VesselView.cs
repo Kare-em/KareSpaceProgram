@@ -171,6 +171,47 @@ namespace Kare.Space.Game
         static readonly Color PanelColor = new Color(0.06f, 0.08f, 0.16f);
         static readonly Color ShieldColor = new Color(0.33f, 0.24f, 0.17f);
         static readonly Color WhiteColor = new Color(0.90f, 0.90f, 0.88f);
+        // Цвета слотов под отделки без текущих владельцев (Шаттл, Буран, зонды): цвет — то, как слот выглядит без
+        // карт отделки (сцена Hangar, нет FinishMaterials); с картами цвет даёт текстура (SelfColored).
+        public static readonly Color FoamColor = new Color(0.78f, 0.38f, 0.14f);
+        public static readonly Color TileBlackColor = new Color(0.08f, 0.08f, 0.08f);
+        public static readonly Color TileWhiteColor = new Color(0.88f, 0.87f, 0.84f);
+        public static readonly Color SilverFoilColor = new Color(0.75f, 0.76f, 0.78f);
+
+        /// <summary>
+        /// Отделка слота по его цвету (§9.5): цвета палитр уже различают «что это за поверхность», поэтому отдельного
+        /// признака в ядре не нужно. Пара: FlightSceneBuilder.HullFinishes (материал на каждую отделку).
+        /// </summary>
+        public static HullFinish FinishOf(Color c)
+        {
+            if (c == FoilColor) return HullFinish.FoilGold;
+            if (c == SilverFoilColor) return HullFinish.FoilSilver;
+            if (c == ShieldColor || c == CapsuleColor) return HullFinish.Ablative;
+            if (c == MetalColor) return HullFinish.Stringer;
+            if (c == PolishedColor || c == NozzleColor) return HullFinish.Steel;
+            if (c == FoamColor) return HullFinish.Foam;
+            if (c == TileBlackColor) return HullFinish.TilesBlack;
+            if (c == TileWhiteColor) return HullFinish.TilesWhite;
+            return HullFinish.Painted;
+        }
+
+        /// <summary>Цвет у отделки в самой текстуре (фольга, пена, плитки, абляция) — _BaseColor белый, палитра не умножается.</summary>
+        static bool SelfColored(HullFinish f) => f >= HullFinish.Foam;
+
+        /// <summary>Материал отделки из GameBootstrap.FinishMaterials; нет его — общий bodyMat (окрашенный металл).</summary>
+        Material FinishMaterial(HullFinish f)
+        {
+            var list = GameBootstrap.Instance != null ? GameBootstrap.Instance.FinishMaterials : null;
+            int i = (int)f;
+            return list != null && i < list.Length && list[i] != null ? list[i] : bodyMat;
+        }
+
+        /// <summary>_BaseColor слота: палитра, а у отделок с цветом в текстуре (и их материалом) — белый.</summary>
+        Color SlotColor(Color c)
+        {
+            var f = FinishOf(c);
+            return SelfColored(f) && FinishMaterial(f) != bodyMat ? Color.white : c;
+        }
 
         /// <summary>Цвета слотов моделей аппаратов — в порядке материалов FBX (Hull/Metal/Foil… из parts.blend).</summary>
         static Color[] CraftPalette(SectionModel m)
@@ -939,13 +980,16 @@ namespace Kare.Space.Game
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
             // У FBX слоты материалов — отдельные субмеши: с одним материалом рисовался бы только первый.
+            // Материал слота — по отделке его цвета (FinishOf); слоты без цвета в палитре — окрашенный металл.
             if (mesh.subMeshCount > 1)
             {
                 var mats = new Material[mesh.subMeshCount];
-                for (int i = 0; i < mats.Length; i++) mats[i] = bodyMat;
+                for (int i = 0; i < mats.Length; i++)
+                    mats[i] = palette.Length == 1 ? FinishMaterial(FinishOf(palette[0]))
+                            : i < palette.Length ? FinishMaterial(FinishOf(palette[i])) : bodyMat;
                 mr.sharedMaterials = mats;
             }
-            else mr.sharedMaterial = bodyMat;
+            else mr.sharedMaterial = palette.Length > 0 ? FinishMaterial(FinishOf(palette[0])) : bodyMat;
             Paint(mr, palette, Color.clear);
             return mr;
         }
@@ -962,7 +1006,7 @@ namespace Kare.Space.Game
                 // mpb общий с факелом: без Clear корпус после отделения ступени наследовал эмиссию факела
                 // (3·10³ нит) и ночью при EV −5 выбеливал кадр целиком.
                 mpb.Clear();
-                mpb.SetColor("_BaseColor", palette[i]);
+                mpb.SetColor("_BaseColor", SlotColor(palette[i]));
                 if (emissive.a > 0) mpb.SetColor("_EmissiveColor", emissive);
                 if (palette.Length == 1) mr.SetPropertyBlock(mpb);
                 else mr.SetPropertyBlock(mpb, i);

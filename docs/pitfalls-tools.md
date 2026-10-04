@@ -3,6 +3,14 @@
 Читать перед работой через MCP, отладкой в Play и массовой правкой файлов.
 
 ## MCP
+- **С 04.10.2026 транспорт stdio, пакет и сервер v10.3.0.** Unity слушает мост на 6400 (`~/.unity-mcp/unity-mcp-status-*.json`,
+  `last_heartbeat`), `EditorPrefs MCPForUnity.UseHttpTransport = false`. Сервер — `uvx --from mcpforunityserver==<версия>
+  mcp-for-unity --transport stdio` в `.mcp.json` (UnityMCP) и в `%APPDATA%/Claude/claude_desktop_config.json` (unityMCP).
+  **Обновление**: `manage_packages add_package` с git-URL `...#vX.Y.Z` (~16 с, без ошибок консоли) + версия сервера в обоих
+  конфигах; новый сервер подхватывается только новой сессией. Проверка без сессии — stdio-клиент в скретчпаде
+  (initialize → initialized → tools/list → tools/call `execute_code`): 04.10 — 48 тулов, ответ «10.3.0».
+  Последняя версия: `git ls-remote --tags https://github.com/CoplayDev/unity-mcp.git | sort -V`, PyPI `mcpforunityserver`.
+- Ниже про HTTP/8767 — старый режим (процесс `mcp-for-unity.exe --transport http` может висеть с прошлого запуска).
 - `.mcp.json` → `http://127.0.0.1:8767/mcp`. Car_Train занимает 8765 — порт хранится в EditorPrefs на всю машину,
   поэтому `McpPortPin.cs` перезаписывает его при загрузке редактора.
 - Проверка: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8767/mcp` → 406 = сервер жив.

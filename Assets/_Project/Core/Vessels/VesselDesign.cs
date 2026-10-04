@@ -524,7 +524,7 @@ namespace Kare.Space.Core
                 case "surveyor": return AtlasCentaurSurveyor();
                 case "apollo8": return SaturnApollo8();
                 case "apollo11": return SaturnApollo11();
-                default: return Kara1Heavy();
+                default: return ModernById(id) ?? Kara1Heavy(); // корабли после «Аполлона» — StationRockets.cs
             }
         }
     }

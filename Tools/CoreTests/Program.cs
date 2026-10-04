@@ -22,8 +22,23 @@ static class Program
             var f = System.IO.Path.Combine(dir.FullName, "Assets/_Project/Data/EarthLand.bytes");
             if (System.IO.File.Exists(f)) land = f;
         }
+        // Копия тестов вне репозитория (параллельные прогоны): корень — из KARE_ROOT или по умолчанию.
+        if (land == null)
+        {
+            var root = Environment.GetEnvironmentVariable("KARE_ROOT") ?? "C:/CocosGames/KareSpaceProgram";
+            var f = System.IO.Path.Combine(root, "Assets/_Project/Data/EarthLand.bytes");
+            if (System.IO.File.Exists(f)) land = f;
+        }
         if (land != null) SolarSystem.EarthLand = new LandMap(System.IO.File.ReadAllBytes(land));
         else Console.WriteLine("   карта суши не найдена — процедурные материки");
+        // Реальные карты высот тел (§2.8, Tools/bake-dem.py): посадки идут по настоящему рельефу. KARE_NO_DEM=1 —
+        // прежний процедурный рельеф (сравнение).
+        if (land != null && Environment.GetEnvironmentVariable("KARE_NO_DEM") == null)
+            foreach (var (id, name) in new[] { ("earth", "Earth"), ("moon", "Moon"), ("mars", "Mars"), ("mercury", "Mercury"), ("venus", "Venus") })
+            {
+                var f = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(land), name + "Height.bytes");
+                if (System.IO.File.Exists(f)) SolarSystem.HeightMaps[id] = new HeightMap(System.IO.File.ReadAllBytes(f));
+            }
         Run("math", TestMath, only);
         Run("orbit", TestOrbit, only);
         Run("moon", TestEphemeris, only);
@@ -194,6 +209,7 @@ static class Program
     {
         "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
         "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
+        "voskhod2", "soyuz_tm31", "crew_dragon",
     };
 
     /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
@@ -219,6 +235,8 @@ static class Program
             var av = u.Active;
             // Замер входа — только при возврате с высокой орбиты (выведение тоже идёт сквозь атмосферу).
             if (av != null && av.Alive && av.Body.HasAtmosphere && av.Altitude > 1e6) wasHigh = true;
+            // С низкой орбиты — после тормозного импульса (сценарий «Сход с орбиты»).
+            if (u.Mission != null && u.Mission.Phase == "Сход с орбиты") wasHigh = true;
             if (wasHigh && av.Alive && av.Body.HasAtmosphere && !av.IsLanded && av.Altitude < av.Body.AtmosphereTop)
             {
                 if (!inAir)

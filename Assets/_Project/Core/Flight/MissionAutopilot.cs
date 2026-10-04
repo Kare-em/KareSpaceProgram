@@ -12,7 +12,7 @@ namespace Kare.Space.Core
     /// Сценарий — корутина: Tick раз в кадр (и на рельсах) продвигает его на шаг; Update в физике исполняет то,
     /// чему нужен каждый шаг интегратора (программа тангажа «Редстоуна», езда лунохода).
     /// </summary>
-    public sealed class MissionAutopilot
+    public sealed partial class MissionAutopilot
     {
         /// <summary>Опорная орбита, м. Пара: LunarAutopilot.ParkingAltitude и клавиша H — то же выведение на 200 км.</summary>
         const double ParkingAltitude = 200e3;
@@ -79,7 +79,7 @@ namespace Kare.Space.Core
         /// <summary>Прожиги короче этого — на ×1 (точность отсечки и смотреть есть на что). Пара: Universe.AutoBurnWarpMin.</summary>
         const double ShortBurn = 15;
 
-        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo }
+        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station }
 
         public readonly MissionTracker Tracker;
         public readonly ProfileType Profile;
@@ -115,6 +115,7 @@ namespace Kare.Space.Core
         /// <summary>Какой сценарий у миссии — по её целям. Общий с подсказкой (MissionGuide).</summary>
         public static ProfileType Classify(MissionDef def)
         {
+            if (def.StationSection >= 0) return ProfileType.Station; // сближение со станцией — MissionAutopilot.Station.cs
             bool moonOrbit = false, moonGoal = false, earthOrbit = false;
             foreach (var o in def.Objectives)
             {
@@ -182,6 +183,7 @@ namespace Kare.Space.Core
                 case ProfileType.Suborbital: s = Suborbital(); break;
                 case ProfileType.Orbital: s = Orbital(); break;
                 case ProfileType.LunarProbe: s = LunarProbe(); break;
+                case ProfileType.Station: s = Station(); break;
                 default: s = Apollo(); break;
             }
             foreach (var x in s) yield return x;

@@ -35,6 +35,16 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.Comma)) u.WarpDown();
             // «/» — сброс ускорения сразу в ×1, как в KSP.
             if (Input.GetKeyDown(KeyCode.Slash) || Input.GetKeyDown(KeyCode.KeypadDivide)) u.WarpReset();
+            // PageUp / PageDown — переключение между бортами (§6.13, как [ ] в KSP: скобки здесь двигают время узла,
+            // Shift/Ctrl — газ). Home — назад к борту миссии. Работает и после гибели активного — увести управление на живой.
+            if (Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.PageDown))
+            {
+                var next = u.NextVessel(Input.GetKeyDown(KeyCode.PageDown) ? 1 : -1);
+                if (next == null) u.Post("Других аппаратов нет");
+                else u.SwitchTo(next);
+                return;
+            }
+            if (Input.GetKeyDown(KeyCode.Home) && u.MissionVessel != null) { u.SwitchTo(u.MissionVessel); return; }
             if (!v.Alive) return;
             // Y — автопилот всей миссии (§6.11): от стола до последней цели без рук, ускорением правит сам.
             // Снимается только повторным Y: руль, газ и прочие клавиши на время автопилота закрыты.
@@ -55,22 +65,43 @@ namespace Kare.Space.Game
             Maneuver(u, v);
 
             // Ось: x тангаж (W = +1), y рыскание (D = +1), z крен (E = +1) — соглашение Core.
-            var pilot = new Vector3d(
-                Axis(KeyCode.W, KeyCode.S),
-                Axis(KeyCode.D, KeyCode.A),
-                Axis(KeyCode.E, KeyCode.Q));
+            // Tab — режим стыковки (§6.6, как в KSP): WASD двигают борт РСУ вбок (W — к «верху» навбола, D — вправо),
+            // Shift/Ctrl — вперёд/назад, повороты — стрелками, Q/E — крен. Цель — ближайший совместимый борт.
+            if (Input.GetKeyDown(KeyCode.Tab) && !MapView.IsOpen) ToggleDockMode(u, v);
+            if (DockMode && (v.Target == null || !v.Target.Alive)) ToggleDockMode(u, v);
+
+            Vector3d pilot;
+            if (DockMode)
+            {
+                pilot = new Vector3d(
+                    Axis(KeyCode.UpArrow, KeyCode.DownArrow),
+                    Axis(KeyCode.RightArrow, KeyCode.LeftArrow),
+                    Axis(KeyCode.E, KeyCode.Q));
+                // Связанные оси: верх навбола — −X, право — −Z, нос — +Y (см. FlightHud.NavBall).
+                var tr = new Vector3d(
+                    Axis(KeyCode.S, KeyCode.W),
+                    (Shift ? 1 : 0) - (Ctrl ? 1 : 0),
+                    Axis(KeyCode.A, KeyCode.D));
+                if (tr.sqrMagnitude > 0) DropAutopilots(u);
+                if (u.Docking == null) v.RcsTranslate = tr; // автопилот V сам правит РСУ — не перебивать нулём
+            }
+            else
+                pilot = new Vector3d(
+                    Axis(KeyCode.W, KeyCode.S),
+                    Axis(KeyCode.D, KeyCode.A),
+                    Axis(KeyCode.E, KeyCode.Q));
             v.PilotInput = pilot;
             if (pilot.sqrMagnitude > 0) DropAutopilots(u);
 
             double thr = v.Throttle;
-            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) thr += ThrottleRate * Time.deltaTime;
-            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) thr -= ThrottleRate * Time.deltaTime;
+            if (!DockMode && Shift) thr += ThrottleRate * Time.deltaTime;
+            if (!DockMode && Ctrl) thr -= ThrottleRate * Time.deltaTime;
             if (Input.GetKeyDown(KeyCode.Z)) thr = 1;
             if (Input.GetKeyDown(KeyCode.X)) thr = 0;
             thr = System.Math.Max(0, System.Math.Min(1, thr));
             if (thr != v.Throttle) { v.Throttle = thr; DropAutopilots(u); }
 
-            if (Input.GetKeyDown(KeyCode.Space)) u.Stage();
+            if (Input.GetKeyDown(KeyCode.Space)) StageKey(u, v);
             if (Input.GetKeyDown(KeyCode.T))
             {
                 v.Sas = v.Sas == SasMode.Off ? SasMode.Stability : SasMode.Off;
@@ -125,11 +156,12 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.V))
             {
                 if (u.Docking != null) { u.Docking = null; FlightControl.Cutoff(v); u.Post("Стыковка прервана"); }
+                else if (v.IsDocked) u.Undock();
                 else
                 {
                     var t = u.NearestDockTarget();
                     if (t == null) u.Post("Нет борта для стыковки");
-                    else { u.Docking = new DockingAutopilot(u, t); u.Post($"Стыковка: цель {t.Name}"); }
+                    else { v.Target = t; u.Docking = new DockingAutopilot(u, t); u.Post($"Стыковка: цель {t.Name}"); }
                 }
             }
         }
@@ -203,8 +235,52 @@ namespace Kare.Space.Game
         static readonly KeyCode[] LockedKeys =
         {
             KeyCode.W, KeyCode.S, KeyCode.A, KeyCode.D, KeyCode.Q, KeyCode.E, KeyCode.Z, KeyCode.X, KeyCode.LeftShift,
-            KeyCode.LeftControl, KeyCode.Space, KeyCode.T, KeyCode.F, KeyCode.G, KeyCode.H, KeyCode.R, KeyCode.V, KeyCode.P, KeyCode.B, KeyCode.N,
+            KeyCode.LeftControl, KeyCode.Space, KeyCode.T, KeyCode.F, KeyCode.G, KeyCode.H, KeyCode.R, KeyCode.V, KeyCode.P, KeyCode.B, KeyCode.N, KeyCode.Tab,
         };
+
+        /// <summary>
+        /// Напор, Па, выше которого отделение просит второе нажатие пробела за StageConfirmWindow с. Замер 04.10.2026
+        /// (sepx, ручное отделение на 55-й с): «Джемини» на 26 кПа и «Атлас» на 36 кПа — голая верхняя ступень
+        /// статически неустойчива, руль упирается в предел (τ 110 кН·м у LR-91) и за 1–2 с рвётся при α 9–12°.
+        /// Пара: автопилот миссии отделяет при q ≤ 1 кПа, и его это окно не касается.
+        /// </summary>
+        const double StageConfirmQ = 10e3;
+        const float StageConfirmWindow = 3;
+        static float stageAsked = -100;
+
+        static void StageKey(Universe u, Vessel v)
+        {
+            if (v.NextStageSeparates && v.DynamicPressure > StageConfirmQ && Time.unscaledTime - stageAsked > StageConfirmWindow)
+            {
+                stageAsked = Time.unscaledTime;
+                u.Post($"Напор {v.DynamicPressure / 1000:F0} кПа: после отделения ступень может сорваться в кувырок. Пробел ещё раз — отделить");
+                return;
+            }
+            stageAsked = -100;
+            u.Stage();
+        }
+
+        /// <summary>Ручной режим стыковки (Tab): клавиши — поступательная РСУ, HUD — прибор сближения.</summary>
+        public static bool DockMode { get; private set; }
+
+        static bool Shift => Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        static bool Ctrl => Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
+        static void ToggleDockMode(Universe u, Vessel v)
+        {
+            if (DockMode)
+            {
+                DockMode = false;
+                v.RcsTranslate = Vector3d.zero;
+                u.Post("Режим стыковки выключен");
+                return;
+            }
+            if (v.Target == null || !v.Target.Alive) v.Target = u.NearestDockTarget();
+            if (v.Target == null) { u.Post("Нет борта для стыковки"); return; }
+            DockMode = true;
+            u.Post($"Режим стыковки: цель {v.Target.Name}. WASD — сдвиг, Shift/Ctrl — вперёд/назад, стрелки — поворот"
+                + (v.RcsThrust > 0 ? "" : ". Нет РСУ — сдвиг не работает"));
+        }
 
         static double Axis(KeyCode plus, KeyCode minus) => (Input.GetKey(plus) ? 1 : 0) - (Input.GetKey(minus) ? 1 : 0);
 

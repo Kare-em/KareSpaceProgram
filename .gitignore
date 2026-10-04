@@ -93,3 +93,6 @@ Crazy_Car_BackUpThisFolder_ButDontShipItWithYourGame\il2cppOutput
 # Исходники текстур NASA (десятки МБ), в проект идут PNG
 /Tools/textures/*.tif
 /KSP_Build
+
+# Исходники DEM для Tools/bake-dem.py (сотни МБ, качаются заново)
+/Tools/dem_src/

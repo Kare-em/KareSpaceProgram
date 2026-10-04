@@ -122,6 +122,7 @@ namespace Kare.Space.Game
                 DrawIcon(new Rect(p.x - 13, p.y - 13, 26, 26), SasIcon(mode));
             }
             GUI.color = Color.white;
+            NavTargetMarkers(u, v, ball, nose, right, top);
 
             // Нос — неподвижная «галка» в центре.
             var c = ball.center;

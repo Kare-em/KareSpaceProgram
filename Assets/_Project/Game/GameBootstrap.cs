@@ -31,6 +31,8 @@ namespace Kare.Space.Game
         public Volume Volume;
         [Tooltip("Базовый материал HDRP/Lit для бортов; цвет секций — через MaterialPropertyBlock.")]
         public Material VesselMaterial;
+        [Tooltip("Материалы отделок обшивки по индексу HullFinish (0 — Painted = VesselMaterial); пусто — всё VesselMaterial.")]
+        public Material[] FinishMaterials;
         [Tooltip("Эмиссионный материал факела.")]
         public Material PlumeMaterial;
         [Tooltip("Шейдер оболочки плазмы входа (Settings/PlasmaSheathHDRP.shader): ссылкой, чтобы попал в билд.")]
@@ -134,6 +136,8 @@ namespace Kare.Space.Game
         public bool InfiniteFuel;
         [Tooltip("Карта суши Земли (Tools/bake-earth-land.py, §2.8). Без неё материки процедурные.")]
         public TextAsset EarthLand;
+        [Tooltip("Карты высот тел (Tools/bake-dem.py, §2.8): ETOPO, LOLA, MOLA, MESSENGER, Magellan. Нет — рельеф процедурный.")]
+        public TextAsset EarthHeight, MoonHeight, MarsHeight, MercuryHeight, VenusHeight;
 
         Universe universe;
         public MissionTracker Tracker { get; private set; }
@@ -145,12 +149,24 @@ namespace Kare.Space.Game
         readonly Dictionary<Vessel, VesselView> views = new Dictionary<Vessel, VesselView>();
         readonly List<Vessel> gone = new List<Vessel>();
 
+        /// <summary>Карта высот в ядро до CreateReal; как и карта суши, читается один раз за сессию (13 МБ).</summary>
+        static void LoadHeight(string bodyId, TextAsset asset)
+        {
+            if (asset != null && !SolarSystem.HeightMaps.ContainsKey(bodyId))
+                SolarSystem.HeightMaps[bodyId] = new HeightMap(asset.bytes);
+        }
+
         void Awake()
         {
             Instance = this;
             Mission = MissionCatalog.Get(NextMissionId ?? MissionId) ?? MissionCatalog.Get("sputnik");
             // Карту читаем один раз: статическое поле переживает перезагрузку сцены (выбор миссии в Esc).
             if (EarthLand != null && SolarSystem.EarthLand == null) SolarSystem.EarthLand = new LandMap(EarthLand.bytes);
+            LoadHeight("earth", EarthHeight);
+            LoadHeight("moon", MoonHeight);
+            LoadHeight("mars", MarsHeight);
+            LoadHeight("mercury", MercuryHeight);
+            LoadHeight("venus", VenusHeight);
             universe = MissionTracker.CreateUniverse(Mission, SolarSystem.CreateReal());
             if (NextDesign != null)
             {

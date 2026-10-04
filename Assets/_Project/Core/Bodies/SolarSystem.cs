@@ -90,6 +90,23 @@ namespace Kare.Space.Core
         /// до CreateReal. null — процедурные материки.</summary>
         public static LandMap EarthLand;
 
+        /// <summary>Реальные карты высот по id тела (Data/&lt;Body&gt;Height.bytes, §2.8): earth, moon, mars, mercury,
+        /// venus. Ставит хост до CreateReal (игра — GameBootstrap из TextAsset, тесты — из файлов); тела без карты
+        /// остаются на процедурном шуме. Карты нужны до первого Terrain.Height: котловина космодрома кеширует
+        /// перепад (LaunchSite.BasinDrop).</summary>
+        public static readonly Dictionary<string, HeightMap> HeightMaps = new Dictionary<string, HeightMap>();
+
+        static void ApplyHeightMap(CelestialBody b)
+        {
+            if (b.Terrain == null || !HeightMaps.TryGetValue(b.Id, out var map) || map == null) return;
+            b.Terrain.Map = map;
+            b.Terrain.DetailOctaves = Terrain.DetailOctaves(map, b.Radius);
+            // Amplitude — ещё и граница «выше любых гор»: FlightPhysics.CheckContact, LandingAutopilot.PredictGate и
+            // PatchedConics.RailsFloorRadius берут 1,5·Amplitude. С картой это высшая точка плюс шум деталей
+            // (Олимп 21,2 км: прежние 7 км у Марса отсекали бы касание на его склонах).
+            b.Terrain.Amplitude = Math.Max(1, map.MaxWithDetail) / 1.5;
+        }
+
         static TerrainSettings Ter(double amp, int seed, bool ocean = false, double landBias = 0, double craters = 0) =>
             new TerrainSettings { Amplitude = amp, Seed = seed, Ocean = ocean, LandBias = landBias, Craters = craters };
 
@@ -185,6 +202,8 @@ namespace Kare.Space.Core
                 double a = b.OrbitModel == OrbitModelType.Circular ? b.CircularRadius : b.OrbitAt(0).A;
                 b.SoiRadius = a * Math.Pow(b.Mu / b.Parent.Mu, 0.4);
             }
+
+            foreach (var b in s.Bodies) ApplyHeightMap(b);
 
             if (Terrain.Sites.Count == 0)
             {

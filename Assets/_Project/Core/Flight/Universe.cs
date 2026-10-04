@@ -28,7 +28,7 @@ namespace Kare.Space.Core
         /// восстановления ниже неё. Пара: Vessel.StagePush 1,5 м/с и RadialPush 2 м/с — штатное разделение не крушит.
         /// </summary>
         public const double CrashSpeed = 12, Restitution = 0.2;
-        /// <summary>Секунды после разделения, пока части не сталкиваются: в момент отстрела они стоят вплотную.</summary>
+        /// <summary>Секунды после разделения, пока новые части не сталкиваются ни с кем; с родителем их дальше разводит Fresh.</summary>
         public const double CollisionGrace = 1.5;
         /// <summary>За сколько секунд до запуска манёвра ускорение сбрасывается само.</summary>
         public const double NodeWarpMargin = 30;
@@ -74,7 +74,8 @@ namespace Kare.Space.Core
         public bool AutoWarpManual => AutoWarp && AutoWarpPaused && AutopilotActive;
         /// <summary>Автоускорение выбрало физическую ступень (≤ MaxPhysicsWarp) при свободных рельсах: окно перед прожигом.</summary>
         bool autoPhysics;
-        public bool AutopilotActive => Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null || Mission != null;
+        /// <summary>«Миссия целиком» на паузе, пока игрок ведёт другой борт (MissionVessel): иначе сценарий взялся бы за чужой.</summary>
+        public bool AutopilotActive => Ascent != null || NodePilot != null || Landing != null || Docking != null || Lunar != null || Mission != null && MissionVessel == null;
         /// <summary>Ускорением сейчас управляет автопилот — для HUD.</summary>
         public bool AutoWarpDriving => autoDriving;
 
@@ -131,6 +132,46 @@ namespace Kare.Space.Core
             eventValid = false;
         }
 
+        /// <summary>
+        /// Борт миссии, пока игрок управляет другим (переключение §6.13): по нему считаются задачи, на него ждёт
+        /// автопилот «миссия целиком». null — борт миссии и есть активный (так всегда без ручного переключения:
+        /// переход экипажа в ЛМ через ControlTransfer миссию не покидает).
+        /// </summary>
+        public Vessel MissionVessel { get; private set; }
+
+        /// <summary>
+        /// Переключиться на другой борт (Shift+[ / Shift+], как [ ] в KSP). Нельзя с работающим двигателем: брошенный
+        /// борт остался бы с газом без пилота. Ускорение — в ×1: новый борт может оказаться в физике (в воздухе, у грунта).
+        /// </summary>
+        public bool SwitchTo(Vessel v)
+        {
+            if (v == null || v == Active || !v.Alive || !Vessels.Contains(v)) return false;
+            if (Active != null && Active.Alive && Active.AnyEngineRunning)
+            {
+                Post("Сначала заглушите двигатель");
+                return false;
+            }
+            if (Active != null && Active.Alive) FlightControl.Cutoff(Active);
+            if (MissionVessel == null && Active != null && Active.Alive) MissionVessel = Active;
+            if (v == MissionVessel) MissionVessel = null;
+            SetWarp(0);
+            SetActive(v);
+            Post($"Управление: {v.Name}");
+            return true;
+        }
+
+        /// <summary>Следующий (dir = +1) или предыдущий живой борт по порядку списка — порядок не прыгает от расстояний.</summary>
+        public Vessel NextVessel(int dir)
+        {
+            int n = Vessels.Count, i0 = Vessels.IndexOf(Active);
+            for (int k = 1; k <= n; k++)
+            {
+                var c = Vessels[((i0 + dir * k) % n + n) % n];
+                if (c != Active && c.Alive) return c;
+            }
+            return null;
+        }
+
         void OnVesselEvent(Vessel v, string msg)
         {
             if (v == Active) Post(msg);
@@ -146,6 +187,69 @@ namespace Kare.Space.Core
             if (msg != null) Post(msg);
         }
 
+        /// <summary>Расстыковка вручную (V на состыкованном борту): отошедший борт сразу цель — можно причалить снова.</summary>
+        public void Undock()
+        {
+            if (Active == null || !Active.Alive) return;
+            if (Active.OnRails) LeaveRails(Active);
+            var d = Active.Undock();
+            if (d == null) { Post("Нет состыкованного борта"); return; }
+            Docking = null;
+            AddSeparated(Active, new List<Vessel> { d });
+            Active.Target = d;
+        }
+
+        /// <summary>
+        /// Отделившиеся борта — в мир. Каждая пара из родителя и частей «свежая»: не сталкивается и не стыкуется,
+        /// пока корпуса не разойдутся на SeparationClear (Fresh). Раньше был общий таймер CollisionGrace на весь
+        /// активный борт: на напоре он то гас, пока части ещё вплотную, то глушил удары и с чужими бортами.
+        /// </summary>
+        void AddSeparated(Vessel parent, List<Vessel> parts)
+        {
+            if (parts.Count == 0) return;
+            fresh.RemoveAll(f => Time > f.until || !f.a.Alive || !f.b.Alive);
+            foreach (var d in parts)
+            {
+                d.NoCollideUntil = Time + CollisionGrace;
+                d.Event += OnVesselEvent;
+                Vessels.Add(d);
+            }
+            for (int i = -1; i < parts.Count; i++)
+                for (int j = i + 1; j < parts.Count; j++)
+                    fresh.Add((i < 0 ? parent : parts[i], parts[j], Time + FreshMaxTime));
+            eventValid = false;
+        }
+
+        /// <summary>
+        /// Зазор между корпусами, м, после которого пара разделения снова «обычная» (удары, стыковка). Пара:
+        /// DockCaptureRange 1 м — меньше нельзя, иначе только что отстыкованный борт тут же причалит обратно.
+        /// </summary>
+        public const double SeparationClear = 1.5;
+        /// <summary>Сколько пара может оставаться «свежей», с: части, идущие вплотную дольше, — уже не разделение.</summary>
+        const double FreshMaxTime = 60;
+        readonly List<(Vessel a, Vessel b, double until)> fresh = new List<(Vessel, Vessel, double)>();
+
+        /// <summary>Пара a–b ещё не разошлась после разделения. Разошлась (или истёк срок) — вычёркивается навсегда.</summary>
+        bool Fresh(Vessel a, Vessel b)
+        {
+            for (int k = fresh.Count - 1; k >= 0; k--)
+            {
+                var f = fresh[k];
+                if (!(f.a == a && f.b == b || f.a == b && f.b == a)) continue;
+                bool gone = !a.Alive || !b.Alive || a.Body != b.Body || Time > f.until;
+                if (!gone)
+                {
+                    Hull(a, out var a0, out var a1, out double ra, out _);
+                    Hull(b, out var b0, out var b1, out double rb, out _);
+                    ClosestPoints(a0, a1, b0, b1, out var ca, out var cb);
+                    gone = (cb - ca).magnitude - ra - rb > SeparationClear;
+                }
+                if (gone) { fresh.RemoveAt(k); return false; }
+                return true;
+            }
+            return false;
+        }
+
         /// <summary>Следующая ступень активного корабля (пробел).</summary>
         public void Stage()
         {
@@ -153,15 +257,7 @@ namespace Kare.Space.Core
             var block = Active.StageBlock;
             if (block != null) { Post(block); return; }
             if (Active.OnRails) LeaveRails(Active);
-            var parts = Active.Stage();
-            if (parts.Count > 0) Active.NoCollideUntil = Time + CollisionGrace;
-            foreach (var d in parts)
-            {
-                d.NoCollideUntil = Time + CollisionGrace;
-                d.Event += OnVesselEvent;
-                Vessels.Add(d);
-            }
-            eventValid = false;
+            AddSeparated(Active, Active.Stage());
             // Расстыковка с переходом экипажа (§6.6): управление — отошедшему борту (ЛМ уходит на посадку).
             if (Active.ControlTransfer != null)
             {
@@ -365,7 +461,7 @@ namespace Kare.Space.Core
         {
             if (Active == null) return;
             // Программа миссии (тангаж «Редстоуна») идёт до частных автопилотов и не исключает их.
-            bool missionStage = Mission != null && Mission.Update(Active, Time, h) == AutopilotRequest.Stage;
+            bool missionStage = Mission != null && MissionVessel == null && Mission.Update(Active, Time, h) == AutopilotRequest.Stage;
             AutopilotRequest req = AutopilotRequest.None;
             if (Ascent != null)
             {
@@ -495,7 +591,7 @@ namespace Kare.Space.Core
         bool CanCollide(Vessel a, Vessel b)
         {
             if (!a.Alive || !b.Alive || a.IsLanded || b.IsLanded || a.Body != b.Body) return false;
-            if (a.NoCollideUntil > Time || b.NoCollideUntil > Time) return false;
+            if (a.NoCollideUntil > Time || b.NoCollideUntil > Time || Fresh(a, b)) return false;
             // Створки обтекателя раскрываются вокруг груза вплотную — их разводит сам сброс (Vessel.SplitFairing).
             if (a.FairingHalf != 0 || b.FairingHalf != 0) return false;
             // Сближение двух бортов с узлами — дело стыковки (§6.6), её захват мягче удара.
@@ -612,7 +708,7 @@ namespace Kare.Space.Core
             var pa = a.Position + a.NoseP * a.PortHeight();
             foreach (var t in Vessels)
             {
-                if (!CanDock(a, t)) continue;
+                if (!CanDock(a, t) || Fresh(a, t)) continue;
                 var pt = t.Position + t.NoseP * t.PortHeight();
                 if (Vector3d.Distance(pa, pt) > DockCaptureRange) continue;
                 if ((a.Velocity - t.Velocity).magnitude > DockMaxSpeed) continue;
@@ -623,7 +719,11 @@ namespace Kare.Space.Core
                 LeaveRails(a);
                 LeaveRails(t);
                 if (host != Active) SetActive(host);
+                // Причалили к борту миссии (или он сам пришёл к нам) — дальше он и есть активный.
+                if (MissionVessel == a || MissionVessel == t) MissionVessel = null;
                 host.Dock(guest);
+                host.Target = null;
+                if (host.Sas >= SasMode.Target) host.Sas = SasMode.Stability; // цели больше нет — держим, что есть
                 guest.Event -= OnVesselEvent;
                 Vessels.Remove(guest);
                 Docking = null;

@@ -425,6 +425,9 @@ namespace Kare.Space.Game
         }
 
         /// <summary>Список фокуса слева, под подсказками туториала (они занимают верх до ≈ 210 px).</summary>
+        /// <summary>Строк в списке аппаратов: фокус-лист (≈ 12 строк) + 10 — укладывается в 1080 по высоте.</summary>
+        const int VesselRows = 10;
+
         void FocusPanel(Universe u)
         {
             if (listStyle == null)
@@ -442,6 +445,25 @@ namespace Kare.Space.Game
                 if (GUI.Button(new Rect(x, y, wdt, rowH), name, listStyle)) SetFocus(u.Active, b);
                 y += rowH;
             }
+
+            // Аппараты (§6.13): щелчок — управление им, как PageUp/PageDown. Сначала управляемые, обломки — следом,
+            // не больше VesselRows строк: после пакета Р-7 обломков с десяток.
+            y += 8;
+            GUI.color = Color.white;
+            GUI.Label(new Rect(x, y, wdt + 60, rowH), "Аппараты (PgUp/PgDn)", markStyle);
+            y += rowH + 2;
+            int rows = 0;
+            for (int pass = 0; pass < 2 && rows < VesselRows; pass++)
+                foreach (var ov in u.Vessels)
+                {
+                    if (!ov.Alive || ov.IsDebris != (pass == 1) || rows >= VesselRows) continue;
+                    bool me = ov == u.Active;
+                    string km = me ? "" : $"  {Vector3d.Distance(ov.Body.Position + ov.Position, u.Active.Body.Position + u.Active.Position) / 1000:0.#} км";
+                    GUI.color = me ? new Color(0.45f, 0.85f, 1f) : ov == u.MissionVessel ? new Color(1f, 0.85f, 0.4f) : Color.white;
+                    if (GUI.Button(new Rect(x, y, wdt + 60, rowH), (me ? "▲ " : "") + ov.Name + km, listStyle) && !me) u.SwitchTo(ov);
+                    y += rowH;
+                    rows++;
+                }
             GUI.color = Color.white;
         }
     }

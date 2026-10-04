@@ -67,6 +67,17 @@ namespace Kare.Space.Core
                 dir = v.Node.Remaining.normalized;
                 return true;
             }
+            if (mode == SasMode.Target || mode == SasMode.AntiTarget || mode == SasMode.DockAlign)
+            {
+                var tg = v.Target;
+                if (tg == null || !tg.Alive || tg.Body != v.Body) return false;
+                if (mode == SasMode.DockAlign) { dir = -tg.NoseP; return true; }
+                Universe.StateOf(tg, t, out var rt, out _);
+                var d = rt - r;
+                if (d.sqrMagnitude < 1e-6) return false;
+                dir = mode == SasMode.Target ? d.normalized : -d.normalized;
+                return true;
+            }
             if (vel.sqrMagnitude < 1e-4) return false;
             var pro = vel.normalized;
             var nrm = Vector3d.Cross(r, vel).normalized;

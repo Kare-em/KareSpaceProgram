@@ -22,6 +22,11 @@ namespace Kare.Space.Core
         RadialOut,
         RadialIn,
         Maneuver,
+        /// <summary>Нос на цель / от цели (Vessel.Target) — ручное сближение (§6.6).</summary>
+        Target,
+        AntiTarget,
+        /// <summary>Соосно стыковочному узлу цели: нос против её носа — так причаливают руками.</summary>
+        DockAlign,
     }
 
     /// <summary>Манёвр: импульс в осях орбиты на момент Time (GDD §6.11, бортовой вычислитель).</summary>
@@ -131,6 +136,8 @@ namespace Kare.Space.Core
         public double RcsForward;
         /// <summary>Поступательная РСУ в связанных осях, −1…1 по каждой оси: сближение и причаливание (§6.6).</summary>
         public Vector3d RcsTranslate;
+        /// <summary>Цель сближения и стыковки (§6.6): для SAS Target/DockAlign и прибора стыковки HUD.</summary>
+        public Vessel Target;
         /// <summary>Расстыковка с переходом экипажа (ЛМ «Аполлона»): Universe делает этот борт активным и обнуляет поле.</summary>
         public Vessel ControlTransfer;
         /// <summary>Перезапуски двигателей без счёта (настройка меню Esc, §6.3). В ядре по умолчанию — честный счёт: тесты миссий.</summary>
@@ -683,6 +690,55 @@ namespace Kare.Space.Core
                     default: return "Парашют";
                 }
             }
+        }
+
+        /// <summary>Следующая ступень что-то отделяет (не запуск и не парашют) — на напоре это опасно (FlightInput).</summary>
+        public bool NextStageSeparates
+        {
+            get
+            {
+                int k = NextApplicable(NextStage);
+                if (k >= Design.Sequence.Count) return false;
+                var t = Design.Sequence[k].Type;
+                return t == StageActionType.Separate || t == StageActionType.JettisonFairing || t == StageActionType.Undock;
+            }
+        }
+
+        /// <summary>Есть причаленное сверху (перевёрнутые секции) — его можно отстыковать (V).</summary>
+        public bool IsDocked
+        {
+            get
+            {
+                for (int i = 0; i < Attached.Length; i++)
+                    if (Attached[i] && Flipped[i]) return true;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Ручная расстыковка (V, §6.6): причаленное сверху уходит отдельным бортом на пружинах UndockPush. Это не
+        /// обломок — у него свой SAS, его можно снова взять целью и причалить. Null — отстыковывать нечего.
+        /// </summary>
+        public Vessel Undock()
+        {
+            if (!IsDocked) return null;
+            var mask = new bool[Design.Sections.Count];
+            double m = 0, md = 0;
+            for (int i = 0; i < mask.Length; i++)
+            {
+                mask[i] = Attached[i] && Flipped[i];
+                if (!Attached[i]) continue;
+                m += SectionMass(i);
+                if (mask[i]) md += SectionMass(i);
+            }
+            // Split толкает отходящую часть на dv, а остаток получает отдачу dv·md/mv — расхождение dv·m/mv. Пружины
+            // узла дают расхождение UndockPush при любом раскладе масс (замер: полная S-IVB с ЛМ 120 т от КСМ 30 т без
+            // поправки расходилась на 1,6 м/с вместо 0,3).
+            double dv = m > md ? UndockPush * (m - md) / m : UndockPush;
+            var d = Split(mask, dv, debris: false);
+            d.Unflip();
+            Raise($"Расстыковка: {d.Name}");
+            return d;
         }
 
         /// <summary>

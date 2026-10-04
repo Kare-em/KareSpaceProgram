@@ -3,7 +3,8 @@ using System.Collections.Generic;
 
 namespace Kare.Space.Core
 {
-    /// <summary>Параметры процедурного рельефа тела. Пока нет реальных карт высот (GDD §2.8, §9.4) — шум.</summary>
+    /// <summary>Параметры рельефа тела (GDD §2.8, §9.4): реальная карта высот (Map), если её подал хост, иначе
+    /// процедурный шум (тела без карты, headless-тесты без файлов).</summary>
     public sealed class TerrainSettings
     {
         /// <summary>Размах гор, м.</summary>
@@ -16,11 +17,130 @@ namespace Kare.Space.Core
         /// <summary>Частота крупного рельефа (на единичной сфере).</summary>
         public double BaseFrequency = 2.0;
         public int Octaves = 9;
+        /// <summary>Октав шума деталей поверх карты высот (Terrain.DetailOctaves: от текселя до ~30 м).</summary>
+        public int DetailOctaves = 8;
         /// <summary>Кратерированность для безатмосферных тел (0…1).</summary>
         public double Craters;
         /// <summary>Реальная карта суши (Земля): если задана, материки и горные пояса берутся из неё, шум только
         /// дорисовывает детали. Без неё — процедурные материки (тела без карты, headless-тесты без файла).</summary>
         public LandMap Land;
+        /// <summary>Реальная карта высот (DEM): если задана, рельеф — она плюс шум мельче её текселя
+        /// (Terrain.DemHeight), Land и процедурные материки не используются. Ставит SolarSystem.CreateReal.</summary>
+        public HeightMap Map;
+    }
+
+    /// <summary>
+    /// Реальная карта высот тела (Tools/bake-dem.py → Data/&lt;Body&gt;Height.bytes; GDD §2.8): ETOPO 2022 (Земля,
+    /// с батиметрией), LRO LOLA, MGS MOLA, MESSENGER, Magellan. Равнопромежуточная, раскладка как у LandMap:
+    /// строка 0 — северный полюс, x = 0 — 180° з. д., центры текселей; билинейно, по долготе по кругу.
+    /// Формат: 'KDEM', int32 W, int32 H, float32 scale, float32 offset, W·H int16 (LE); высота = offset + scale·v,
+    /// м над радиусом тела в ядре.
+    /// </summary>
+    public sealed class HeightMap
+    {
+        public readonly int Width, Height;
+        /// <summary>Высоты карты по текселям, м: самая низкая и самая высокая.</summary>
+        public readonly double MinHeight, MaxHeight;
+        /// <summary>Верхняя граница рельефа вместе с шумом деталей, м — для отсевов «выше любых гор».</summary>
+        public readonly double MaxWithDetail;
+        readonly short[] h;
+        readonly double scale, offset;
+        // Шероховатость: СКО перепада между соседними текселями, м, по блокам RoughBlock² текселей.
+        readonly float[] rough;
+        readonly int rw, rh;
+
+        /// <summary>Блок сетки шероховатости, текселей. Пара: 8 × 0,1° ≈ 24 км на Луне — шум деталей меняет силу
+        /// плавно, но моря и материк различает (моря ≈ 20–50 м на тексель, материк 200–400 м).</summary>
+        const int RoughBlock = 8;
+        /// <summary>Предел шероховатости, м: на обрывах (стены Долин Маринер — 1–2 км на тексель) шум силой в
+        /// перепад рисовал бы километровые зубья, которых в данных нет.</summary>
+        public const double RoughCap = 400;
+
+        public HeightMap(byte[] data)
+        {
+            if (data.Length < 20 || data[0] != 'K' || data[1] != 'D' || data[2] != 'E' || data[3] != 'M')
+                throw new ArgumentException("Не карта высот KDEM");
+            Width = BitConverter.ToInt32(data, 4);
+            Height = BitConverter.ToInt32(data, 8);
+            scale = BitConverter.ToSingle(data, 12);
+            offset = BitConverter.ToSingle(data, 16);
+            int n = Width * Height;
+            if (Width <= 0 || Height <= 0 || data.Length < 20 + 2 * n) throw new ArgumentException("Повреждённая карта высот");
+            h = new short[n];
+            Buffer.BlockCopy(data, 20, h, 0, 2 * n);
+
+            short lo = short.MaxValue, hi = short.MinValue;
+            foreach (var v in h)
+            {
+                if (v < lo) lo = v;
+                if (v > hi) hi = v;
+            }
+            double a = offset + scale * lo, b = offset + scale * hi;
+            MinHeight = Math.Min(a, b);
+            MaxHeight = Math.Max(a, b);
+
+            rw = (Width + RoughBlock - 1) / RoughBlock;
+            rh = (Height + RoughBlock - 1) / RoughBlock;
+            rough = new float[rw * rh];
+            double maxRough = 0;
+            for (int by = 0; by < rh; by++)
+            for (int bx = 0; bx < rw; bx++)
+            {
+                double sum = 0;
+                int cnt = 0;
+                for (int y = by * RoughBlock; y < Math.Min(Height, (by + 1) * RoughBlock); y++)
+                for (int x = bx * RoughBlock; x < Math.Min(Width, (bx + 1) * RoughBlock); x++)
+                {
+                    int i = y * Width + x;
+                    double dx = h[y * Width + (x + 1) % Width] - h[i];
+                    sum += dx * dx;
+                    cnt++;
+                    if (y + 1 >= Height) continue;
+                    double dy = h[i + Width] - h[i];
+                    sum += dy * dy;
+                    cnt++;
+                }
+                double r = Math.Min(RoughCap, Math.Abs(scale) * Math.Sqrt(sum / Math.Max(1, cnt)));
+                rough[by * rw + bx] = (float)r;
+                maxRough = Math.Max(maxRough, r);
+            }
+            // Билинейная смесь не выходит за максимум узлов, |Fbm| ≤ 1 — граница с запасом.
+            MaxWithDetail = MaxHeight + Terrain.DetailGain * maxRough;
+        }
+
+        /// <summary>Размер текселя на экваторе, м, для тела радиуса radius.</summary>
+        public double CellSize(double radius) => 2 * Math.PI * radius / Width;
+
+        /// <summary>Высота карты (м) и шероховатость (СКО перепада на тексель, м) в направлении в осях тела.</summary>
+        public double Sample(Vector3d dirBodyFixed, out double roughness)
+        {
+            CelestialBody.BodyFixedToLatLon(dirBodyFixed, out double lat, out double lon);
+            return Sample(lat, lon, out roughness);
+        }
+
+        public double Sample(double lat, double lon, out double roughness)
+        {
+            double fx = (lon + 180) / 360 * Width - 0.5, fy = (90 - lat) / 180 * Height - 0.5;
+            int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+            double tx = fx - x0, ty = fy - y0;
+            int xa = ((x0 % Width) + Width) % Width, xb = (xa + 1) % Width;
+            int ya = Math.Max(0, Math.Min(Height - 1, y0)), yb = Math.Max(0, Math.Min(Height - 1, y0 + 1));
+            double top = h[ya * Width + xa] + (h[ya * Width + xb] - h[ya * Width + xa]) * tx;
+            double bot = h[yb * Width + xa] + (h[yb * Width + xb] - h[yb * Width + xa]) * tx;
+
+            // Шероховатость — билинейно по центрам блоков (центр блока k — тексель k·B + (B−1)/2): без ступенек
+            // силы шума на границах блоков.
+            double gx = (fx - (RoughBlock - 1) * 0.5) / RoughBlock, gy = (fy - (RoughBlock - 1) * 0.5) / RoughBlock;
+            int rx0 = (int)Math.Floor(gx), ry0 = (int)Math.Floor(gy);
+            double sx = gx - rx0, sy = gy - ry0;
+            int ra = ((rx0 % rw) + rw) % rw, rb = (ra + 1) % rw;
+            int rya = Math.Max(0, Math.Min(rh - 1, ry0)), ryb = Math.Max(0, Math.Min(rh - 1, ry0 + 1));
+            double r0 = rough[rya * rw + ra] + (rough[rya * rw + rb] - rough[rya * rw + ra]) * sx;
+            double r1 = rough[ryb * rw + ra] + (rough[ryb * rw + rb] - rough[ryb * rw + ra]) * sx;
+            roughness = r0 + (r1 - r0) * sy;
+
+            return offset + scale * (top + (bot - top) * ty);
+        }
     }
 
     /// <summary>
@@ -98,7 +218,7 @@ namespace Kare.Space.Core
 
     /// <summary>
     /// Высота рельефа — одна функция и для физики посадки, и для меша (иначе корабль стоит над землёй
-    /// или в ней). Детерминированный градиентный шум, только double.
+    /// или в ней). Реальная карта высот с шумом деталей или процедурный градиентный шум; детерминировано, double.
     /// </summary>
     public static class Terrain
     {
@@ -140,8 +260,9 @@ namespace Kare.Space.Core
         /// <summary>Рельеф без океана и площадок: отрицательное — дно.</summary>
         public static double RawHeight(TerrainSettings ts, Vector3d d)
         {
-            var p = d * ts.BaseFrequency;
             var perm = Perm(ts.Seed);
+            if (ts.Map != null) return DemHeight(ts, perm, d);
+            var p = d * ts.BaseFrequency;
             if (ts.Land != null) return MappedHeight(ts, perm, d, p);
             // Континенты — низкая частота, горы — гребневый шум, растущий к центру материков.
             double continent = Fbm(perm, p * 0.6, 4, 0.5) + ts.LandBias;
@@ -152,6 +273,46 @@ namespace Kare.Space.Core
             double h = continent * 0.6 + detail * 0.25 + ridge * land * 0.35;
             if (ts.Craters > 0) h += ts.Craters * Craters(perm, d * 8);
             return h * ts.Amplitude;
+        }
+
+        /// <summary>Сила шума деталей в долях шероховатости карты. Fbm ≈ ±1 (СКО ≈ 0,25): мелочь ≈ ¼ перепада между
+        /// соседними текселями — фрактальное продолжение рельефа ниже разрешения карты; крупные формы не трогает.
+        /// Пара: HeightMap.MaxWithDetail считает границу с этим же множителем.</summary>
+        public const double DetailGain = 1.0;
+        /// <summary>Самая короткая волна шума деталей, м. Пара: узлы патча BodyRenderer у борта ≈ 20 м — мельче
+        /// сетка не покажет, только наложение.</summary>
+        public const double DetailFinest = 30;
+        /// <summary>Шум береговой линии Земли, м. Пара: шельф ≈ 2 м/км, приморская равнина 1–5 м/км — 12 м сдвигают
+        /// берег на 3–6 км, порядка текселя ETOPO (11 км): берег изрезан, а не ломаной по текселям.</summary>
+        const double CoastAmp = 12;
+
+        /// <summary>Октав шума деталей для карты на теле радиуса radius: от текселя до DetailFinest.</summary>
+        public static int DetailOctaves(HeightMap map, double radius) =>
+            Math.Max(1, Math.Min(10, (int)Math.Ceiling(Math.Log(map.CellSize(radius) / DetailFinest) / Math.Log(2.03))));
+
+        /// <summary>
+        /// Рельеф по реальной карте высот (§2.8): билинейная высота DEM + шум мельче текселя, сила которого — местная
+        /// шероховатость карты (моря гладкие, материки и горы — изрезанные). Первая октава шума — размер текселя:
+        /// p = d·W/2π, единица шума = 2πR/W. У тела с океаном шум не меняет знак высоты (не роет ложных озёр на
+        /// низменностях и не насыпает островов в море); берег изрезан отдельным слабым шумом только у берега по
+        /// карте суши (EarthLand), а не везде, где суша низкая (Прикаспий поднят до +1 м — там были бы «соты» озёр).
+        /// </summary>
+        static double DemHeight(TerrainSettings ts, int[] perm, Vector3d d)
+        {
+            var map = ts.Map;
+            double h = map.Sample(d, out double rough);
+            var p = d * (map.Width / (2 * Math.PI));
+            double det = DetailGain * rough * Fbm(perm, p + new Vector3d(31.7, -12.9, 5.3), ts.DetailOctaves, 0.5);
+            if (!ts.Ocean) return h + det;
+            // Знак сохраняется: |h| уходит к нулю не дальше чем на 90 %, на самом берегу шум гаснет.
+            h = h >= 0 ? h + Math.Max(det, -0.9 * h) : h + Math.Min(det, -0.9 * h);
+            if (ts.Land == null) return h;
+            ts.Land.Sample(d, out double f, out _);
+            double near = 1 - MathD.Smoothstep(0.1, 0.25, Math.Abs(f - 0.5));
+            if (near <= 0) return h;
+            double band = 1 - MathD.Smoothstep(CoastAmp, 3 * CoastAmp, Math.Abs(h));
+            // ×2: типичный |Fbm| ≈ 0,5, берег гуляет на ±CoastAmp.
+            return h + near * band * CoastAmp * Fbm(perm, p * 3 + new Vector3d(-8.1, 4.4, 19.2), 6, 0.55) * 2;
         }
 
         /// <summary>Сила шума берега в долях поля суши. Пара: шаг карты ≈ 20 км (bake-earth-land.py) — шум

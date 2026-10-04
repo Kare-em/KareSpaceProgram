@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &189428856
+--- !u!1 &44004473
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,242 +127,88 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 189428860}
-  - component: {fileID: 189428857}
-  - component: {fileID: 189428859}
-  - component: {fileID: 189428858}
+  - component: {fileID: 44004475}
+  - component: {fileID: 44004474}
   m_Layer: 0
-  m_Name: Sun
+  m_Name: Bodies
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!108 &189428857
-Light:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 189428856}
-  m_Enabled: 1
-  serializedVersion: 13
-  m_Type: 1
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 127000
-  m_Range: 10
-  m_SpotAngle: 30
-  m_InnerSpotAngle: 21.80208
-  m_CookieSize2D: {x: 0.5, y: 0.5}
-  m_Shadows:
-    m_Type: 2
-    m_Resolution: -1
-    m_CustomResolution: -1
-    m_Strength: 1
-    m_Bias: 0.05
-    m_NormalBias: 0.4
-    m_NearPlane: 0.2
-    m_CullingMatrixOverride:
-      e00: 1
-      e01: 0
-      e02: 0
-      e03: 0
-      e10: 0
-      e11: 1
-      e12: 0
-      e13: 0
-      e20: 0
-      e21: 0
-      e22: 1
-      e23: 0
-      e30: 0
-      e31: 0
-      e32: 0
-      e33: 1
-    m_UseCullingMatrixOverride: 0
-  m_Cookie: {fileID: 0}
-  m_DrawHalo: 0
-  m_Flare: {fileID: 0}
-  m_RenderMode: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingLayerMask: 1
-  m_Lightmapping: 4
-  m_LightShadowCasterMode: 0
-  m_AreaSize: {x: 1, y: 1}
-  m_BounceIntensity: 1
-  m_ColorTemperature: 6500
-  m_UseColorTemperature: 1
-  m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
-  m_UseBoundingSphereOverride: 0
-  m_UseViewFrustumForShadowCasterCull: 1
-  m_ForceVisible: 0
-  m_ShapeRadius: 0.025
-  m_ShadowAngle: 0
-  m_LightUnit: 2
-  m_LuxAtDistance: 1
-  m_EnableSpotReflector: 1
---- !u!114 &189428858
+--- !u!114 &44004474
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 189428856}
+  m_GameObject: {fileID: 44004473}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 90013aea05d01b248b190c02458475c3, type: 3}
+  m_Script: {fileID: 11500000, guid: 8aac56f161dba2540848fcf625603db2, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SunLight
---- !u!114 &189428859
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 189428856}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7a68c43fe1f2a47cfa234b5eeaa98012, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.HighDefinition.Runtime::UnityEngine.Rendering.HighDefinition.HDAdditionalLightData
-  m_PointlightHDType: 0
-  m_SpotLightShape: 0
-  m_AreaLightShape: 0
-  m_EnableSpotReflector: 1
-  m_LightUnit: 0
-  m_LuxAtDistance: 1
-  m_Intensity: 0
-  m_InnerSpotPercent: -1
-  m_ShapeWidth: -1
-  m_ShapeHeight: -1
-  m_AspectRatio: -1
-  m_ShapeRadius: -1
-  m_Version: 15
-  m_ObsoleteShadowResolutionTier: 1
-  m_ObsoleteUseShadowQualitySettings: 0
-  m_ObsoleteCustomShadowResolution: 512
-  m_ObsoleteContactShadows: 0
-  m_SpotIESCutoffPercent: 100
-  m_LightDimmer: 1
-  m_VolumetricDimmer: 1
-  m_FadeDistance: 10000
-  m_VolumetricFadeDistance: 10000
-  m_AffectDiffuse: 1
-  m_AffectSpecular: 1
-  m_NonLightmappedOnly: 0
-  m_SoftnessScale: 1
-  m_UseCustomSpotLightShadowCone: 0
-  m_CustomSpotLightShadowCone: 30
-  m_MaxSmoothness: 0.99
-  m_ApplyRangeAttenuation: 1
-  m_DisplayAreaLightEmissiveMesh: 0
-  m_AreaLightCookie: {fileID: 0}
-  m_IESPoint: {fileID: 0}
-  m_IESSpot: {fileID: 0}
-  m_IncludeForRayTracing: 1
-  m_IncludeForPathTracing: 1
-  m_AreaLightShadowCone: 120
-  m_UseScreenSpaceShadows: 0
-  m_InteractsWithSky: 1
-  m_AngularDiameter: 0.53
-  diameterMultiplerMode: 0
-  diameterMultiplier: 1
-  diameterOverride: 0.5
-  celestialBodyShadingSource: 1
-  sunLightOverride: {fileID: 0}
-  sunColor: {r: 1, g: 1, b: 1, a: 1}
-  sunIntensity: 130000
-  moonPhase: 0.2
-  moonPhaseRotation: 0
-  earthshine: 1
-  flareSize: 2
-  flareTint: {r: 1, g: 1, b: 1, a: 1}
-  flareFalloff: 4
-  flareMultiplier: 1
-  surfaceTexture: {fileID: 0}
-  surfaceTint: {r: 1, g: 1, b: 1, a: 1}
-  m_Distance: 1.5e+11
-  m_UseRayTracedShadows: 0
-  m_NumRayTracingSamples: 4
-  m_FilterTracedShadow: 1
-  m_FilterSizeTraced: 16
-  m_SunLightConeAngle: 0.5
-  m_SemiTransparentShadow: 0
-  m_ColorShadow: 1
-  m_DistanceBasedFiltering: 0
-  m_EvsmExponent: 15
-  m_EvsmLightLeakBias: 0
-  m_EvsmVarianceBias: 0.00001
-  m_EvsmBlurPasses: 0
-  m_LightlayersMask: 1
-  m_LinkShadowLayers: 1
-  m_ShadowNearPlane: 0.1
-  m_BlockerSampleCount: 24
-  m_FilterSampleCount: 16
-  m_MinFilterSize: 0.1
-  m_DirLightPCSSBlockerSampleCount: 24
-  m_DirLightPCSSFilterSampleCount: 16
-  m_DirLightPCSSMaxPenumbraSize: 0.56
-  m_DirLightPCSSMaxSamplingDistance: 0.5
-  m_DirLightPCSSMinFilterSizeTexels: 1.5
-  m_DirLightPCSSMinFilterMaxAngularDiameter: 10
-  m_DirLightPCSSBlockerSearchAngularDiameter: 12
-  m_DirLightPCSSBlockerSamplingClumpExponent: 2
-  m_KernelSize: 5
-  m_LightAngle: 1
-  m_MaxDepthBias: 0.001
-  m_ShadowResolution:
-    m_Override: 512
-    m_UseOverride: 1
-    m_Level: 0
-  m_ShadowDimmer: 1
-  m_VolumetricShadowDimmer: 1
-  m_ShadowFadeDistance: 10000
-  m_UseContactShadow:
-    m_Override: 0
-    m_UseOverride: 1
-    m_Level: 0
-  m_RayTracedContactShadow: 0
-  m_ShadowTint: {r: 0, g: 0, b: 0, a: 1}
-  m_PenumbraTint: 0
-  m_NormalBias: 0.75
-  m_SlopeBias: 0.5
-  m_ShadowUpdateMode: 0
-  m_AlwaysDrawDynamicShadows: 0
-  m_UpdateShadowOnLightMovement: 0
-  m_CachedShadowTranslationThreshold: 0.01
-  m_CachedShadowAngularThreshold: 0.5
-  m_BarnDoorAngle: 90
-  m_BarnDoorLength: 0.05
-  m_preserveCachedShadow: 0
-  m_OnDemandShadowRenderOnPlacement: 1
-  m_ShadowCascadeRatios:
-  - 0.05
-  - 0.2
-  - 0.3
-  m_ShadowCascadeBorders:
-  - 0.2
-  - 0.2
-  - 0.2
-  - 0.2
-  m_ShadowAlgorithm: 0
-  m_ShadowVariant: 0
-  m_ShadowPrecision: 0
-  useOldInspector: 0
-  useVolumetric: 1
-  featuresFoldout: 1
-  m_AreaLightEmissiveMeshShadowCastingMode: 0
-  m_AreaLightEmissiveMeshMotionVectorGenerationMode: 0
-  m_AreaLightEmissiveMeshLayer: -1
---- !u!4 &189428860
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.BodyRenderer
+  BaseMaterial: {fileID: 2100000, guid: ee56cfd1c50ec4c42bcee69a31c7b5bd, type: 2}
+  EarthGround: {fileID: 2800000, guid: e5bdfc3501c76e542bf68ff5e1c84f67, type: 3}
+  EarthMacro: {fileID: 2800000, guid: 5400357b8ef61dd488dcde67defb4e0f, type: 3}
+  MoonGround: {fileID: 2800000, guid: 38349d882868569408ec2b183090eb9b, type: 3}
+  MarsGround: {fileID: 2800000, guid: cce9f7be0e1b10244979707127c0bfc5, type: 3}
+  EarthGroundNormal: {fileID: 2800000, guid: 817358eba3aa2e34e9a0f73eb7850fe9, type: 3}
+  WaterNormal: {fileID: 2800000, guid: a38362efe8fcae940af5e567fb226755, type: 3}
+  Maps:
+  - Id: moon
+    Map: {fileID: 2800000, guid: 56e784c10fc1a49449ba45875a8caf3b, type: 3}
+    Small: {fileID: 2800000, guid: d3613527d7ccf4440835fc91120af0ee, type: 3}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: earth
+    Map: {fileID: 2800000, guid: 774cff5249f6bd64daaaa947d13a3a07, type: 3}
+    Small: {fileID: 2800000, guid: 11a0a9f5665db404e9897f870a7303ed, type: 3}
+    Night: {fileID: 2800000, guid: f3fec076a81c3c642b5ef1adfc83dff5, type: 3}
+    Clouds: {fileID: 2800000, guid: 38d50d6ca53be8048a336c06aeee8297, type: 3}
+  - Id: mercury
+    Map: {fileID: 2800000, guid: 4576e440d7d5ebe429294a94ca107f16, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: venus
+    Map: {fileID: 2800000, guid: 7902f812e02b7dd4295ba15a322caad6, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: mars
+    Map: {fileID: 2800000, guid: 63839ba5812c5704d9a1bd9601873b84, type: 3}
+    Small: {fileID: 2800000, guid: 31f166fd6b394434380459e87ca9b7e4, type: 3}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: jupiter
+    Map: {fileID: 2800000, guid: 3f4ff9c4b37ccdf4ca0e68e811e4a50e, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: saturn
+    Map: {fileID: 2800000, guid: d6ad9e44d79ce334db9a8ad8ed870830, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: uranus
+    Map: {fileID: 2800000, guid: 0cfaea251bb4de64181e46d5b608a0cc, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: neptune
+    Map: {fileID: 2800000, guid: 9b739e0940c07fa49b9f82edecd3c270, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  SaturnRing: {fileID: 2800000, guid: 2c92d65e27d115a43a66aba8192325f7, type: 3}
+--- !u!4 &44004475
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 189428856}
+  m_GameObject: {fileID: 44004473}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -371,7 +217,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &420535915
+--- !u!1 &432839368
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -379,12 +225,75 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 420535921}
-  - component: {fileID: 420535916}
-  - component: {fileID: 420535920}
-  - component: {fileID: 420535919}
-  - component: {fileID: 420535918}
-  - component: {fileID: 420535917}
+  - component: {fileID: 432839371}
+  - component: {fileID: 432839369}
+  - component: {fileID: 432839370}
+  m_Layer: 0
+  m_Name: Global Volume
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &432839369
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 432839368}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: c217d6ea0ffc9884f89fe4f27d02928b, type: 2}
+--- !u!114 &432839370
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 432839368}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b33d184a5ad092f488a16668cc0c9854, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SkyController
+  Volume: {fileID: 432839369}
+--- !u!4 &432839371
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 432839368}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &762646262
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 762646268}
+  - component: {fileID: 762646263}
+  - component: {fileID: 762646267}
+  - component: {fileID: 762646266}
+  - component: {fileID: 762646265}
+  - component: {fileID: 762646264}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -392,13 +301,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &420535916
+--- !u!20 &762646263
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 420535915}
+  m_GameObject: {fileID: 762646262}
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 1
@@ -443,25 +352,25 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!114 &420535917
+--- !u!114 &762646264
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 420535915}
+  m_GameObject: {fileID: 762646262}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e8f3e21eaf37b8a42a3a873d0482a235, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.RenderQuality
---- !u!114 &420535918
+--- !u!114 &762646265
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 420535915}
+  m_GameObject: {fileID: 762646262}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a74223da20fd79f41a3a01d19c5d3e1b, type: 3}
@@ -473,21 +382,21 @@ MonoBehaviour:
   Yaw: 30
   Pitch: 10
   OrbitSpeed: 3
---- !u!81 &420535919
+--- !u!81 &762646266
 AudioListener:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 420535915}
+  m_GameObject: {fileID: 762646262}
   m_Enabled: 1
---- !u!114 &420535920
+--- !u!114 &762646267
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 420535915}
+  m_GameObject: {fileID: 762646262}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 23c1ce4fb46143f46bc5cb5224c934f6, type: 3}
@@ -620,13 +529,13 @@ MonoBehaviour:
       data1: 0
       data2: 0
   defaultFrameSettings: 0
---- !u!4 &420535921
+--- !u!4 &762646268
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 420535915}
+  m_GameObject: {fileID: 762646262}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -635,7 +544,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &461115109
+--- !u!1 &796594628
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -643,75 +552,12 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 461115112}
-  - component: {fileID: 461115110}
-  - component: {fileID: 461115111}
-  m_Layer: 0
-  m_Name: Global Volume
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &461115110
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 461115109}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
-  m_IsGlobal: 1
-  priority: 0
-  blendDistance: 0
-  weight: 1
-  sharedProfile: {fileID: 11400000, guid: c217d6ea0ffc9884f89fe4f27d02928b, type: 2}
---- !u!114 &461115111
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 461115109}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b33d184a5ad092f488a16668cc0c9854, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SkyController
-  Volume: {fileID: 461115110}
---- !u!4 &461115112
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 461115109}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &623910936
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 623910942}
-  - component: {fileID: 623910941}
-  - component: {fileID: 623910940}
-  - component: {fileID: 623910939}
-  - component: {fileID: 623910938}
-  - component: {fileID: 623910937}
+  - component: {fileID: 796594634}
+  - component: {fileID: 796594633}
+  - component: {fileID: 796594632}
+  - component: {fileID: 796594631}
+  - component: {fileID: 796594630}
+  - component: {fileID: 796594629}
   m_Layer: 0
   m_Name: Game
   m_TagString: Untagged
@@ -719,75 +565,86 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &623910937
+--- !u!114 &796594629
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623910936}
+  m_GameObject: {fileID: 796594628}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9a9a878a938f20f41be338c474bb46e2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.MapView
-  Camera: {fileID: 420535916}
+  Camera: {fileID: 762646263}
   LineMaterial: {fileID: 2100000, guid: 9d7643be48ce5f543bad9bd333429a18, type: 2}
---- !u!114 &623910938
+--- !u!114 &796594630
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623910936}
+  m_GameObject: {fileID: 796594628}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 53ce6d0cf805a6b46bea5a9b7350a4a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightHud
   Icons: {fileID: 2800000, guid: c4ed70b5fef9cc64291127f45b761746, type: 3}
---- !u!114 &623910939
+--- !u!114 &796594631
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623910936}
+  m_GameObject: {fileID: 796594628}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d2159aa8700a20a42aa8b60e47600caf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightInput
---- !u!114 &623910940
+--- !u!114 &796594632
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623910936}
+  m_GameObject: {fileID: 796594628}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0000ef320f7f464418ef79f5c388e551, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FloatingOrigin
---- !u!114 &623910941
+--- !u!114 &796594633
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623910936}
+  m_GameObject: {fileID: 796594628}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0c8e796a15890514eb585f982fc8fe26, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.GameBootstrap
   MissionId: vostok
-  Camera: {fileID: 420535916}
-  Sun: {fileID: 189428857}
-  Volume: {fileID: 461115110}
+  Camera: {fileID: 762646263}
+  Sun: {fileID: 1619596829}
+  Volume: {fileID: 432839369}
   VesselMaterial: {fileID: 2100000, guid: 73c6f2463d9719342a8f60327806af52, type: 2}
+  FinishMaterials:
+  - {fileID: 2100000, guid: 73c6f2463d9719342a8f60327806af52, type: 2}
+  - {fileID: 2100000, guid: 16bba7c05f2cbfe4187951ef81b789aa, type: 2}
+  - {fileID: 2100000, guid: 1890c9560591e1b45bbfb28df1fdeac5, type: 2}
+  - {fileID: 2100000, guid: cf587b9cc6ea2424cb44d84cc55c129c, type: 2}
+  - {fileID: 2100000, guid: abdd3077cf536a5439d3605042e61403, type: 2}
+  - {fileID: 2100000, guid: 35fa714c164905745b3840ec1c41c471, type: 2}
+  - {fileID: 2100000, guid: 05f572ee4f6bc2241920ff59261af25a, type: 2}
+  - {fileID: 2100000, guid: 848c6ae2a0138a04e8659a7cb4eaedf9, type: 2}
+  - {fileID: 2100000, guid: 7f665ca743de6b24faeb4c75e24ed80f, type: 2}
   PlumeMaterial: {fileID: 2100000, guid: 7bc18a60e8a525442af346aa126361d0, type: 2}
+  PlasmaShader: {fileID: 4800000, guid: 9cfa0d73e4b1196499d8405f80c111f9, type: 3}
   SmokeMaterial: {fileID: 2100000, guid: 14c8c22dd31ca5745a9d2f2a315234a7, type: 2}
   WreckFirePrefab: {fileID: 1255053967005034563, guid: 7e8d30e7be9957c43862563919b4cbcf, type: 3}
   DebrisFirePrefab: {fileID: 1781949194303238870, guid: e92a0207ed6f749459a3646c2aaf3cd9, type: 3}
@@ -1020,13 +877,18 @@ MonoBehaviour:
   AutoWarp: 1
   InfiniteFuel: 0
   EarthLand: {fileID: 4900000, guid: 4e16bb1612bcf794d8158124a2e950bc, type: 3}
---- !u!4 &623910942
+  EarthHeight: {fileID: 4900000, guid: de5d9acfe3edcf945a20b84952ba6972, type: 3}
+  MoonHeight: {fileID: 4900000, guid: eeaae0facc6fb234e8f3b3b57a2732cf, type: 3}
+  MarsHeight: {fileID: 4900000, guid: 4c4685dbb432e6f47b18e4864e055838, type: 3}
+  MercuryHeight: {fileID: 4900000, guid: 27f988399286eef45b1acd86db853dcb, type: 3}
+  VenusHeight: {fileID: 4900000, guid: caade6c7c8c5bbc4bbcc8d17c897d7c1, type: 3}
+--- !u!4 &796594634
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 623910936}
+  m_GameObject: {fileID: 796594628}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -1035,7 +897,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1754203449
+--- !u!1 &1619596828
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1043,88 +905,242 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1754203451}
-  - component: {fileID: 1754203450}
+  - component: {fileID: 1619596832}
+  - component: {fileID: 1619596829}
+  - component: {fileID: 1619596831}
+  - component: {fileID: 1619596830}
   m_Layer: 0
-  m_Name: Bodies
+  m_Name: Sun
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1754203450
+--- !u!108 &1619596829
+Light:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1619596828}
+  m_Enabled: 1
+  serializedVersion: 13
+  m_Type: 1
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Intensity: 127000
+  m_Range: 10
+  m_SpotAngle: 30
+  m_InnerSpotAngle: 21.80208
+  m_CookieSize2D: {x: 0.5, y: 0.5}
+  m_Shadows:
+    m_Type: 2
+    m_Resolution: -1
+    m_CustomResolution: -1
+    m_Strength: 1
+    m_Bias: 0.05
+    m_NormalBias: 0.4
+    m_NearPlane: 0.2
+    m_CullingMatrixOverride:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    m_UseCullingMatrixOverride: 0
+  m_Cookie: {fileID: 0}
+  m_DrawHalo: 0
+  m_Flare: {fileID: 0}
+  m_RenderMode: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingLayerMask: 1
+  m_Lightmapping: 4
+  m_LightShadowCasterMode: 0
+  m_AreaSize: {x: 1, y: 1}
+  m_BounceIntensity: 1
+  m_ColorTemperature: 6500
+  m_UseColorTemperature: 1
+  m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
+  m_UseBoundingSphereOverride: 0
+  m_UseViewFrustumForShadowCasterCull: 1
+  m_ForceVisible: 0
+  m_ShapeRadius: 0.025
+  m_ShadowAngle: 0
+  m_LightUnit: 2
+  m_LuxAtDistance: 1
+  m_EnableSpotReflector: 1
+--- !u!114 &1619596830
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1754203449}
+  m_GameObject: {fileID: 1619596828}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8aac56f161dba2540848fcf625603db2, type: 3}
+  m_Script: {fileID: 11500000, guid: 90013aea05d01b248b190c02458475c3, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.BodyRenderer
-  BaseMaterial: {fileID: 2100000, guid: ee56cfd1c50ec4c42bcee69a31c7b5bd, type: 2}
-  EarthGround: {fileID: 2800000, guid: e5bdfc3501c76e542bf68ff5e1c84f67, type: 3}
-  EarthMacro: {fileID: 2800000, guid: 5400357b8ef61dd488dcde67defb4e0f, type: 3}
-  MoonGround: {fileID: 2800000, guid: 38349d882868569408ec2b183090eb9b, type: 3}
-  MarsGround: {fileID: 2800000, guid: cce9f7be0e1b10244979707127c0bfc5, type: 3}
-  EarthGroundNormal: {fileID: 2800000, guid: 817358eba3aa2e34e9a0f73eb7850fe9, type: 3}
-  WaterNormal: {fileID: 2800000, guid: a38362efe8fcae940af5e567fb226755, type: 3}
-  Maps:
-  - Id: moon
-    Map: {fileID: 2800000, guid: 56e784c10fc1a49449ba45875a8caf3b, type: 3}
-    Small: {fileID: 2800000, guid: d3613527d7ccf4440835fc91120af0ee, type: 3}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: earth
-    Map: {fileID: 2800000, guid: 774cff5249f6bd64daaaa947d13a3a07, type: 3}
-    Small: {fileID: 2800000, guid: 11a0a9f5665db404e9897f870a7303ed, type: 3}
-    Night: {fileID: 2800000, guid: f3fec076a81c3c642b5ef1adfc83dff5, type: 3}
-    Clouds: {fileID: 2800000, guid: 38d50d6ca53be8048a336c06aeee8297, type: 3}
-  - Id: mercury
-    Map: {fileID: 2800000, guid: 4576e440d7d5ebe429294a94ca107f16, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: venus
-    Map: {fileID: 2800000, guid: 7902f812e02b7dd4295ba15a322caad6, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: mars
-    Map: {fileID: 2800000, guid: 63839ba5812c5704d9a1bd9601873b84, type: 3}
-    Small: {fileID: 2800000, guid: 31f166fd6b394434380459e87ca9b7e4, type: 3}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: jupiter
-    Map: {fileID: 2800000, guid: 3f4ff9c4b37ccdf4ca0e68e811e4a50e, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: saturn
-    Map: {fileID: 2800000, guid: d6ad9e44d79ce334db9a8ad8ed870830, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: uranus
-    Map: {fileID: 2800000, guid: 0cfaea251bb4de64181e46d5b608a0cc, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: neptune
-    Map: {fileID: 2800000, guid: 9b739e0940c07fa49b9f82edecd3c270, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  SaturnRing: {fileID: 2800000, guid: 2c92d65e27d115a43a66aba8192325f7, type: 3}
---- !u!4 &1754203451
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SunLight
+--- !u!114 &1619596831
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1619596828}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a68c43fe1f2a47cfa234b5eeaa98012, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.HighDefinition.Runtime::UnityEngine.Rendering.HighDefinition.HDAdditionalLightData
+  m_PointlightHDType: 0
+  m_SpotLightShape: 0
+  m_AreaLightShape: 0
+  m_EnableSpotReflector: 1
+  m_LightUnit: 0
+  m_LuxAtDistance: 1
+  m_Intensity: 0
+  m_InnerSpotPercent: -1
+  m_ShapeWidth: -1
+  m_ShapeHeight: -1
+  m_AspectRatio: -1
+  m_ShapeRadius: -1
+  m_Version: 15
+  m_ObsoleteShadowResolutionTier: 1
+  m_ObsoleteUseShadowQualitySettings: 0
+  m_ObsoleteCustomShadowResolution: 512
+  m_ObsoleteContactShadows: 0
+  m_SpotIESCutoffPercent: 100
+  m_LightDimmer: 1
+  m_VolumetricDimmer: 1
+  m_FadeDistance: 10000
+  m_VolumetricFadeDistance: 10000
+  m_AffectDiffuse: 1
+  m_AffectSpecular: 1
+  m_NonLightmappedOnly: 0
+  m_SoftnessScale: 1
+  m_UseCustomSpotLightShadowCone: 0
+  m_CustomSpotLightShadowCone: 30
+  m_MaxSmoothness: 0.99
+  m_ApplyRangeAttenuation: 1
+  m_DisplayAreaLightEmissiveMesh: 0
+  m_AreaLightCookie: {fileID: 0}
+  m_IESPoint: {fileID: 0}
+  m_IESSpot: {fileID: 0}
+  m_IncludeForRayTracing: 1
+  m_IncludeForPathTracing: 1
+  m_AreaLightShadowCone: 120
+  m_UseScreenSpaceShadows: 0
+  m_InteractsWithSky: 1
+  m_AngularDiameter: 0.53
+  diameterMultiplerMode: 0
+  diameterMultiplier: 1
+  diameterOverride: 0.5
+  celestialBodyShadingSource: 1
+  sunLightOverride: {fileID: 0}
+  sunColor: {r: 1, g: 1, b: 1, a: 1}
+  sunIntensity: 130000
+  moonPhase: 0.2
+  moonPhaseRotation: 0
+  earthshine: 1
+  flareSize: 2
+  flareTint: {r: 1, g: 1, b: 1, a: 1}
+  flareFalloff: 4
+  flareMultiplier: 1
+  surfaceTexture: {fileID: 0}
+  surfaceTint: {r: 1, g: 1, b: 1, a: 1}
+  m_Distance: 1.5e+11
+  m_UseRayTracedShadows: 0
+  m_NumRayTracingSamples: 4
+  m_FilterTracedShadow: 1
+  m_FilterSizeTraced: 16
+  m_SunLightConeAngle: 0.5
+  m_SemiTransparentShadow: 0
+  m_ColorShadow: 1
+  m_DistanceBasedFiltering: 0
+  m_EvsmExponent: 15
+  m_EvsmLightLeakBias: 0
+  m_EvsmVarianceBias: 0.00001
+  m_EvsmBlurPasses: 0
+  m_LightlayersMask: 1
+  m_LinkShadowLayers: 1
+  m_ShadowNearPlane: 0.1
+  m_BlockerSampleCount: 24
+  m_FilterSampleCount: 16
+  m_MinFilterSize: 0.1
+  m_DirLightPCSSBlockerSampleCount: 24
+  m_DirLightPCSSFilterSampleCount: 16
+  m_DirLightPCSSMaxPenumbraSize: 0.56
+  m_DirLightPCSSMaxSamplingDistance: 0.5
+  m_DirLightPCSSMinFilterSizeTexels: 1.5
+  m_DirLightPCSSMinFilterMaxAngularDiameter: 10
+  m_DirLightPCSSBlockerSearchAngularDiameter: 12
+  m_DirLightPCSSBlockerSamplingClumpExponent: 2
+  m_KernelSize: 5
+  m_LightAngle: 1
+  m_MaxDepthBias: 0.001
+  m_ShadowResolution:
+    m_Override: 512
+    m_UseOverride: 1
+    m_Level: 0
+  m_ShadowDimmer: 1
+  m_VolumetricShadowDimmer: 1
+  m_ShadowFadeDistance: 10000
+  m_UseContactShadow:
+    m_Override: 0
+    m_UseOverride: 1
+    m_Level: 0
+  m_RayTracedContactShadow: 0
+  m_ShadowTint: {r: 0, g: 0, b: 0, a: 1}
+  m_PenumbraTint: 0
+  m_NormalBias: 0.75
+  m_SlopeBias: 0.5
+  m_ShadowUpdateMode: 0
+  m_AlwaysDrawDynamicShadows: 0
+  m_UpdateShadowOnLightMovement: 0
+  m_CachedShadowTranslationThreshold: 0.01
+  m_CachedShadowAngularThreshold: 0.5
+  m_BarnDoorAngle: 90
+  m_BarnDoorLength: 0.05
+  m_preserveCachedShadow: 0
+  m_OnDemandShadowRenderOnPlacement: 1
+  m_ShadowCascadeRatios:
+  - 0.05
+  - 0.2
+  - 0.3
+  m_ShadowCascadeBorders:
+  - 0.2
+  - 0.2
+  - 0.2
+  - 0.2
+  m_ShadowAlgorithm: 0
+  m_ShadowVariant: 0
+  m_ShadowPrecision: 0
+  useOldInspector: 0
+  useVolumetric: 1
+  featuresFoldout: 1
+  m_AreaLightEmissiveMeshShadowCastingMode: 0
+  m_AreaLightEmissiveMeshMotionVectorGenerationMode: 0
+  m_AreaLightEmissiveMeshLayer: -1
+--- !u!4 &1619596832
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1754203449}
+  m_GameObject: {fileID: 1619596828}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -1137,8 +1153,8 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 461115112}
-  - {fileID: 189428860}
-  - {fileID: 420535921}
-  - {fileID: 623910942}
-  - {fileID: 1754203451}
+  - {fileID: 432839371}
+  - {fileID: 1619596832}
+  - {fileID: 762646268}
+  - {fileID: 796594634}
+  - {fileID: 44004475}

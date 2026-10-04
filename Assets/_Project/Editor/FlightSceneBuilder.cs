@@ -45,7 +45,13 @@ namespace Kare.Space.EditorTools
             var bodyMat = LitMaterial(SettingsDir + "/BodyLit.mat", Color.white, 0.15f);
             var vesselMat = LitMaterial(SettingsDir + "/VesselLit.mat", Color.white, 0.45f);
             vesselMat.SetFloat("_Metallic", 0.3f);
+            // Без экранных отражений: тела рисуются «в оболочке» с подменённой глубиной, SSR промахивается и кладёт
+            // на корпус светлую полосу — край Земли со сдвигом (замер 04.10.2026: до 131/765 по яркости на блоке А).
+            // Отражённый свет Земли/Луны даёт NightLight, а зеркал на обшивке нет.
+            vesselMat.SetFloat("_ReceivesSSR", 0f);
+            HDMaterial.ValidateMaterial(vesselMat);
             HullTexturing(vesselMat);
+            var finishMats = HullFinishes(vesselMat);
             var plumeMat = PlumeMaterial(SettingsDir + "/Plume.mat");
             var smokeMat = SmokeMaterial(SettingsDir + "/Smoke.mat");
             var lineMat = UnlitMaterial(SettingsDir + "/MapLine.mat");
@@ -86,6 +92,7 @@ namespace Kare.Space.EditorTools
             boot.Sun = sun;
             boot.Volume = vol;
             boot.VesselMaterial = vesselMat;
+            boot.FinishMaterials = finishMats;
             boot.PlumeMaterial = plumeMat;
             boot.PlasmaShader = AssetDatabase.LoadAssetAtPath<Shader>(SettingsDir + "/PlasmaSheathHDRP.shader");
             boot.SmokeMaterial = smokeMat;
@@ -97,6 +104,12 @@ namespace Kare.Space.EditorTools
             boot.BlastPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/JMO Assets/WarFX/_Effects/Explosions/WFX_Explosion.prefab");
             boot.BigBlastPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/JMO Assets/WarFX/_Effects/Explosions/WFX_Nuke.prefab");
             boot.EarthLand = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthLand.bytes");
+            // Карты высот (Tools/bake-dem.py, §2.8); нет файла — поле пустое, тело на процедурном рельефе.
+            boot.EarthHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthHeight.bytes");
+            boot.MoonHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MoonHeight.bytes");
+            boot.MarsHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MarsHeight.bytes");
+            boot.MercuryHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MercuryHeight.bytes");
+            boot.VenusHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/VenusHeight.bytes");
             boot.PadTexture = GroundTexture("Concrete", false);
             // Лоу-поли детали из Blender (Tools/blender); нет файла — вид берёт процедурный меш.
             boot.CapsuleMesh = ModelMesh("Vostok_Capsule");
@@ -588,6 +601,67 @@ namespace Kare.Space.EditorTools
             m.SetFloat("_TexWorldScale", 1f / HullTileMeters);
             HDMaterial.ValidateMaterial(m); // ставит _MAPPING_TRIPLANAR, _NORMALMAP, _MASKMAP, _DETAIL_MAP по свойствам
             EditorUtility.SetDirty(m);
+        }
+
+        /// <summary>
+        /// Метров на тайл отделки (§9.5) — по рисунку сгенерированной карты (Tools/gen-finish-textures.py). Пары:
+        /// TilesBlack — 5 плиток HRSI по 15 см в тайле после обрезки по периоду; TilesWhite — 7 плиток ≈ 20 см;
+        /// Painted — 2–3 панели по ширине (панели ≈ 1,5–2 м); Stringer — ≈ 18 рёбер с шагом ≈ 11 см.
+        /// </summary>
+        static float FinishTileMeters(HullFinish f)
+        {
+            switch (f)
+            {
+                case HullFinish.Painted: return 4f;
+                case HullFinish.Stringer: return 2f;
+                case HullFinish.Steel: return 3f;
+                case HullFinish.Foam: return 2f;
+                case HullFinish.TilesBlack: return 0.75f;
+                case HullFinish.TilesWhite: return 1.4f;
+                case HullFinish.Ablative: return 1f;
+                default: return 1.5f; // фольга: складки ≈ 10–30 см
+            }
+        }
+
+        /// <summary>
+        /// Материалы отделок (§9.5) по индексу HullFinish: Painted — сам VesselLit.mat (его же берут Hangar и стол),
+        /// остальные — VesselLit_&lt;отделка&gt;.mat копией его настроек (трипланар в объекте, деталь, без SSR) со своими
+        /// картами. Металл и гладкость записаны прямо в Mask (gen-finish-textures.py), поэтому remap 0…1.
+        /// Нет карт отделки — материал остаётся копией VesselLit (окрашенный металл).
+        /// </summary>
+        static Material[] HullFinishes(Material vesselMat)
+        {
+            var names = System.Enum.GetNames(typeof(HullFinish));
+            var mats = new Material[names.Length];
+            for (int i = 0; i < names.Length; i++)
+            {
+                var f = (HullFinish)i;
+                Material m;
+                if (f == HullFinish.Painted) m = vesselMat;
+                else
+                {
+                    m = LoadOrCreate($"{SettingsDir}/VesselLit_{names[i]}.mat", "HDRP/Lit");
+                    m.CopyPropertiesFromMaterial(vesselMat);
+                }
+                var albedo = HullMap($"{names[i]}/{names[i]}_Albedo", TextureImporterType.Default, true);
+                if (albedo != null)
+                {
+                    m.SetTexture("_BaseColorMap", albedo);
+                    m.SetTexture("_NormalMap", HullMap($"{names[i]}/{names[i]}_Normal", TextureImporterType.NormalMap, false));
+                    m.SetFloat("_NormalScale", 1f); // сила нормали уже подобрана в генераторе
+                    m.SetTexture("_MaskMap", HullMap($"{names[i]}/{names[i]}_Mask", TextureImporterType.Default, false));
+                    m.SetFloat("_MetallicRemapMin", 0f); m.SetFloat("_MetallicRemapMax", 1f);
+                    m.SetFloat("_SmoothnessRemapMin", 0f); m.SetFloat("_SmoothnessRemapMax", 1f);
+                    m.SetFloat("_TexWorldScale", 1f / FinishTileMeters(f));
+                }
+                m.SetColor("_BaseColor", Color.white);
+                m.SetFloat("_ReceivesSSR", 0f); // как у VesselLit: SSR промахивается по телам «в оболочке»
+                HDMaterial.ValidateMaterial(m);
+                EditorUtility.SetDirty(m);
+                mats[i] = m;
+            }
+            AssetDatabase.SaveAssets();
+            return mats;
         }
 
         /// <summary>Нормаль-карта тайла (из Car_Train, GL-формат — как ждёт Unity), повтор и мипы.</summary>
