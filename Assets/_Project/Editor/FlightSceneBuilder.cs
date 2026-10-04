@@ -87,6 +87,7 @@ namespace Kare.Space.EditorTools
             boot.Volume = vol;
             boot.VesselMaterial = vesselMat;
             boot.PlumeMaterial = plumeMat;
+            boot.PlasmaShader = AssetDatabase.LoadAssetAtPath<Shader>(SettingsDir + "/PlasmaSheathHDRP.shader");
             boot.SmokeMaterial = smokeMat;
             // Пак Vefects Free Fire HDRP (Asset Store); нет пака — поля пустые, горения нет.
             boot.WreckFirePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Vefects/Free Fire HDRP/Particles/VFX_Fire_Floor_01_Smoke.prefab");

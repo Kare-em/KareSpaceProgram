@@ -198,7 +198,14 @@ namespace Kare.Space.Game
             // на тех же азимутах (0°, 90°…, VesselView), и пакет висит на фермах за них — упор по их внешней стенке.
             float hull = (float)v.Design.Sections[0].Radius;
             foreach (var s in v.Design.Sections)
-                if (s.IsRadial && s.RadialParent == 0) hull = Mathf.Max(hull, (float)(s.RadialOffset + s.Radius));
+                if (s.IsRadial && s.RadialParent == 0)
+                {
+                    // Конус бокового Р-7 к верху тоньше: упор по его стенке на высоте верха фермы (низ пакета — y = 0).
+                    double y = top + ArmReach, outer = s.RadialOffset + s.Radius;
+                    if (s.Model == SectionModel.R7Booster)
+                        outer = s.RadialOffset + VesselPresets.R7BoosterLean(y) + VesselPresets.R7BoosterRadiusAt(y);
+                    hull = Mathf.Max(hull, (float)outer);
+                }
             float tilt0 = Mathf.Atan2(H - hull, ArmReach) * Mathf.Rad2Deg;
             float len = Mathf.Sqrt(ArmReach * ArmReach + (H - hull) * (H - hull));
             var steelMat = steel[0];

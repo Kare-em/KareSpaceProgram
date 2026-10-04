@@ -59,6 +59,9 @@ namespace Kare.Space.Core
         public bool IsDebris;
         /// <summary>Створка сброшенного обтекателя: +1 — половина со стороны +X связанных осей, −1 — со стороны −X, 0 — целый.</summary>
         public int FairingHalf;
+        /// <summary>Обломок радиальной группы: азимут его копии в пакете, рад. Вид поворачивает блок на этот угол, чтобы
+        /// косой конус бокового Р-7 и после отделения лежал носком к бывшей оси пакета. Физики не касается.</summary>
+        public double RadialYaw;
 
         // Секции.
         public bool[] Attached;
@@ -111,6 +114,8 @@ namespace Kare.Space.Core
         public bool OnRails;
         public string DestroyReason;
         public CelestialBody DestroyedOn;
+        /// <summary>Место гибели в осях тела (вращается вместе с ним); NaN — ещё не закреплено. См. Universe.PinWreck.</summary>
+        public Vector3d WreckLocal = new Vector3d(double.NaN, 0, 0);
         public double LaunchTime = double.NaN;
 
         // Управление.
@@ -1022,6 +1027,7 @@ namespace Kare.Space.Core
                     Attitude = Attitude,
                     // ω × (0, h, 0) = dir при ω = up × dir: верх блока уходит наружу.
                     AngularVelocity = w + Vector3d.Cross(Vector3d.up, dir) * RadialTumble,
+                    RadialYaw = ang,
                     Situation = Situation,
                     AnchorBodyFixed = AnchorBodyFixed + (AttitudeBodyFixed * r).SwapYZ,
                     AttitudeBodyFixed = AttitudeBodyFixed,

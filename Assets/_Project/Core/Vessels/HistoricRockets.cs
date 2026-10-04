@@ -27,18 +27,48 @@ namespace Kare.Space.Core
         {
             Name = "Р-7 / блок А", Kind = SectionKind.Stage, DryMass = dry, Propellant = propellant,
             Engine = RD108(), EngineCount = 1, Length = 28, Diameter = 2.95, RcsTorque = 2e4, MaxHeatFlux = 2e5,
+            Model = SectionModel.R7BlockA,
         };
+
+        /// <summary>
+        /// Профиль пакета Р-7 — пары (высота от днища, радиус), м. Блок А — «бутылка»: Ø2,15 у хвоста, к верху
+        /// боковых раздаётся до Ø2,95 (Diameter секции). Боковой — Ø2,68 у днища (Diameter секции), конус кверху,
+        /// носок упирается в блок А шаровой опорой. Пара: низ «талии» R7CoreProfile[1] задаёт RadialOffset боковых,
+        /// верх R7CoreProfile[5] — Diameter блока А / 2, низ R7BoosterProfile[1] — Diameter боковых / 2.
+        /// </summary>
+        static readonly double[] R7CoreProfile = { 0, 1.075, 3.0, 1.075, 17.5, 1.475 };
+        static readonly double[] R7BoosterProfile = { 0, 1.34, 1.8, 1.34, 9.0, 1.16, 16.8, 0.55, 19.0, 0.2, 19.8, 0.04 };
+        /// <summary>Зазор между блоком А и внутренней образующей бокового по всей высоте, м.</summary>
+        public const double R7BoosterGap = 0.1;
+        /// <summary>Ось бокового у днища от оси пакета: «талия» + радиус бокового + зазор (2,515 м).</summary>
+        public const double R7BoosterOffset = 1.075 + 1.34 + R7BoosterGap;
+
+        static double Profile(double[] p, double y)
+        {
+            if (y <= p[0]) return p[1];
+            for (int k = 2; k < p.Length; k += 2)
+                if (y <= p[k]) return p[k - 1] + (p[k + 1] - p[k - 1]) * (y - p[k - 2]) / (p[k] - p[k - 2]);
+            return p[p.Length - 1];
+        }
+
+        public static double R7CoreRadiusAt(double y) => Profile(R7CoreProfile, y);
+        public static double R7BoosterRadiusAt(double y) => Profile(R7BoosterProfile, y);
+
+        /// <summary>Сдвиг оси сечения бокового на высоте y к оси пакета, м (≤ 0 по направлению «наружу»): внутренняя
+        /// образующая идёт вдоль «талии» блока А с зазором R7BoosterGap — конус косой, носок ложится на блок А.</summary>
+        public static double R7BoosterLean(double y) =>
+            R7CoreRadiusAt(y) + R7BoosterGap + R7BoosterRadiusAt(y) - R7BoosterOffset;
 
         /// <summary>
         /// Боковые блоки Б, В, Г, Д — радиальная группа ×4 у блока А (секция 0): по 3,45 т сухих и 39,6 т топлива,
         /// РД-107 работает ~120 с (1000 кН / 314 с → 325 кг/с). Ø2,68 × 19,8 м, низ вровень с блоком А.
-        /// RadialOffset — касание корпусов (2,95 / 2 + 2,68 / 2) плюс зазор, как Craft.RadialGap = 0,15.
+        /// RadialOffset — у днища в «талию» блока А (R7BoosterOffset), а не по его полному Ø2,95.
         /// </summary>
         static SectionDef R7Boosters() => new SectionDef
         {
             Name = "Р-7 / блоки Б, В, Г, Д", Kind = SectionKind.Stage, DryMass = 4 * 3450, Propellant = 4 * 39600,
             Engine = RD107(), EngineCount = 4, Length = 19.8, Diameter = 2.68, MaxHeatFlux = 2e5,
-            RadialCount = 4, RadialParent = 0, RadialOffset = 2.95 / 2 + 2.68 / 2 + 0.15,
+            RadialCount = 4, RadialParent = 0, RadialOffset = R7BoosterOffset, Model = SectionModel.R7Booster,
         };
 
         /// <summary>Пакет Р-7: блок А (0), боковые (1), выше — верхние ступени и ПН. Пуск — все пять блоков разом.</summary>

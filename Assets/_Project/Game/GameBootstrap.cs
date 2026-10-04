@@ -33,6 +33,8 @@ namespace Kare.Space.Game
         public Material VesselMaterial;
         [Tooltip("Эмиссионный материал факела.")]
         public Material PlumeMaterial;
+        [Tooltip("Шейдер оболочки плазмы входа (Settings/PlasmaSheathHDRP.shader): ссылкой, чтобы попал в билд.")]
+        public Shader PlasmaShader;
         [Tooltip("Дым шлейфа и облака у стола: HDRP/Lit прозрачный (§9.5).")]
         public Material SmokeMaterial;
         [Tooltip("Огонь на месте падения и на обломках (Vefects Free Fire HDRP); пусто — без горения.")]
@@ -160,6 +162,7 @@ namespace Kare.Space.Game
             Tracker.Changed += OnMessage;
             OnMessage($"Миссия «{Mission.Title}»: {Mission.Brief}");
             gameObject.AddComponent<PauseMenu>();
+            new GameObject("Flight Audio").AddComponent<FlightAudio>();
             if (PlumeMaterial != null && SmokeMaterial != null && VesselMaterial != null)
             {
                 blasts = new GameObject("Blast Effects").AddComponent<BlastEffects>();
@@ -214,6 +217,7 @@ namespace Kare.Space.Game
                 if (views.ContainsKey(v)) continue;
                 var go = new GameObject(v.IsDebris ? $"Debris {v.Name}" : $"Vessel {v.Name}");
                 var view = go.AddComponent<VesselView>();
+                if (PlasmaShader != null) VesselView.SheathShader = PlasmaShader;
                 view.Init(v, VesselMaterial, PlumeMaterial);
                 if (!v.IsDebris && SmokeMaterial != null)
                     new GameObject($"Trail {v.Name}").AddComponent<ExhaustTrail>().Init(view, SmokeMaterial);

@@ -52,6 +52,8 @@ namespace Kare.Space.Core
         Agena, Centaur, TitanStage1, TitanStage2, SaturnSIC, SaturnSII, SaturnSIVB, ProtonStage1, ProtonStage2, ProtonStage3, BlokD,
         // Сбрасываемые оболочки «Аполлона» (Tools/blender/apollo_fairings.py): САС целиком и половина переходника SLA.
         ApolloLES, ApolloSLA,
+        // Процедурные тела вращения «семёрки» по профилю VesselPresets.R7*RadiusAt: блок А с «талией», конусы боковых.
+        R7BlockA, R7Booster,
     }
 
     public enum SectionKind

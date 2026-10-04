@@ -162,3 +162,6 @@
   AQUAS-Lite (`CGPROGRAM`, built-in RP) в HDRP не рендерятся; README Rainy описывает файлы, которых в паке нет.
   AQUAS_Lite_Reflection.cs ломал компиляцию всего проекта (`GetInstanceID` в 6000.6 — ошибка CS0619) → заменён на
   `GetHashCode()`. Проверка: шейдер материала из префаба через `execute_code` (`r.sharedMaterial.shader.name`).
+- **`execute_code` в редакторе вне Play не вызывает `Awake`** у `AddComponent` (компонент без `[ExecuteInEditMode]`):
+  все поля пустые. Проверка синтеза/инициализации — `GetMethod("Awake", NonPublic|Instance).Invoke(c, null)`.
+- **Скриншот `manage_camera` кладёт png в `Assets/Screenshots`** (+ .meta) — после проверки удалить, это не ассет проекта.

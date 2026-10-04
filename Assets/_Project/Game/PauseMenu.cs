@@ -35,7 +35,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
 
             int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + DetailBlock + CreditsBlock;
+            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -117,6 +117,11 @@ namespace Kare.Space.Game
                 BrightnessSettings.PlumeMin, BrightnessSettings.PlumeMax, "×{0:0.00}"); y += Row + 6 + 20;
             if (Event.current.type == EventType.MouseUp) BrightnessSettings.Save();
 
+            // Звук (§9.3): общая громкость синтезированного звука полёта, применяет FlightAudio через AudioListener.
+            GUI.Label(new Rect(x, y, w, 24), "Звук", label); y += 30;
+            SoundSettings.Volume = Slider(x, y, w, "Громкость", SoundSettings.Volume, 0, 1, "{0:P0}"); y += Row + 6 + 20;
+            if (Event.current.type == EventType.MouseUp) SoundSettings.Save();
+
             // Читы для тестов: телепорт и бесконечное топливо. Миссия при этом не засчитывается честно — это отладка.
             GUI.Label(new Rect(x, y, w, 24), "Читы (для тестов)", label); y += 30;
             boot.InfiniteFuel = GUI.Toggle(new Rect(x, y, w, Row), boot.InfiniteFuel, "  Бесконечное топливо", toggle); y += Row;
@@ -144,6 +149,7 @@ namespace Kare.Space.Game
 
         /// <summary>Высота блока «Яркость»: заголовок, два ползунка, отступ. Пара: код блока в OnGUI.</summary>
         const float BrightnessBlock = 30 + 2 * (Row + 6) + 20;
+        const float SoundBlock = 30 + (Row + 6) + 20;
         /// <summary>Строка «Детализация» в блоке «Графика» и ширина её подписи. Пара: код строки в OnGUI.</summary>
         const float DetailBlock = Row + 4, DetailLabel = 110;
 

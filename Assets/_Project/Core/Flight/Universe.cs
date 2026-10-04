@@ -307,7 +307,23 @@ namespace Kare.Space.Core
                 CheckDocking();
             }
             System.Update(Time);
+            PinWreck(Active);
             Vessels.RemoveAll(v => !v.Alive && v != Active);
+        }
+
+        /// <summary>
+        /// Погибший активный борт физика больше не двигает, и он замирал в невращающихся осях, а взрыв и обломки
+        /// (BlastEffects) стоят в осях тела — Земля уезжала из-под камеры на ≈ 400 м/с (§9.5). Место гибели
+        /// крепим к телу в тот же момент, что и взрыв (по Body.Orientation текущего кадра), и дальше ведём вместе с ним.
+        /// </summary>
+        void PinWreck(Vessel v)
+        {
+            if (v == null || v.Alive || v.DestroyedOn == null) return;
+            var body = v.DestroyedOn;
+            if (v.Body != body) return;
+            if (double.IsNaN(v.WreckLocal.x)) v.WreckLocal = body.Orientation.Inverse * v.Position;
+            v.Position = body.Orientation * v.WreckLocal;
+            v.Velocity = Vector3d.Cross(FlightPhysics.SpinAxis(body, Time), v.Position);
         }
 
         // ---------------------------------------------------------------- полная физика
