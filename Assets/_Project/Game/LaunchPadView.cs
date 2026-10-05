@@ -536,7 +536,7 @@ namespace Kare.Space.Game
         {
             var o = body.Orientation;
             var pos = FloatingOrigin.ToUnity(body.Position + o * anchorBf);
-            bool show = !MapView.IsOpen && pos.magnitude < DrawDistance;
+            bool show = !MapView.IsOpen && FlightView.Near(pos, DrawDistance);
             foreach (var r in renderers) r.enabled = show;
             float night = show ? FloodNight(o) : 0;
             LitNits = FloodHullNits * night * Mathf.Clamp01((FloodFar - pos.magnitude) / (FloodFar - FloodNear));

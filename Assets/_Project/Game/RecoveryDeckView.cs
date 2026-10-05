@@ -89,7 +89,7 @@ namespace Kare.Space.Game
             if (body == null) return;
             var o = body.Orientation;
             var pos = FloatingOrigin.ToUnity(body.Position + o * anchorBf);
-            bool show = !MapView.IsOpen && pos.magnitude < DrawDistance;
+            bool show = !MapView.IsOpen && FlightView.Near(pos, DrawDistance);
             foreach (var r in renderers) r.enabled = show;
             if (show) transform.SetPositionAndRotation(pos, FloatingOrigin.ToQuaternion(o.SwapYZ * frameBf));
         }

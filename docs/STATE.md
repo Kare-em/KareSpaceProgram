@@ -314,3 +314,11 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   (open in 2.5 s when the stage flies alone). `RecoveryDeckView.cs` — OCISLY barge (52 × 91 m) at the recovery target.
   `LaunchPadView` Kind.Starbase — tower "Mechazilla" with chopsticks (pad chosen by `SectionModel.SuperHeavy`).
 - Not verified in Play: the full IFT-5 / Demo-2 flight with the view (barge and catch seen only from the core tests).
+- **Order "stage ↔ ship" after separation** (`Game/FlightView.cs`, `Core/Flight/Universe.Deferred.cs`, `FlightHud.View.cs`):
+  control always stays on `u.Active` (the ship's mission autopilot flies only the active vessel); only the *view* moves.
+  F2 — view on the returning stage ("landing first": ship flies itself, view returns 8 s after touchdown);
+  F4 — defer the landing ("ship first": `Universe.DeferRecovery` removes the stage from the world, rails open;
+  F4 again or the end of the ship's mission (+4 s) → `ResumeRecovery` puts it back with a time shift); F3 — split screen
+  (left: main view, right: the other vessel, cloned main camera). A prompt with the three keys shows 20 s after separation.
+  `FlightView.Main` drives FloatingOrigin, terrain patch, sky, sun, night light, audio; `FlightView.Near` keeps pads/barge/vessels
+  visible near the second view. Test `booster_defer`: 40 min pause (warp up to ×1000), landing 3.0 m/s, 8 m — same as `booster`.

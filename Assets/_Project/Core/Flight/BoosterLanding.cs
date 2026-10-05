@@ -92,6 +92,9 @@ namespace Kare.Space.Core
 
         public bool Running => Phase != PhaseType.Done && Phase != PhaseType.Failed;
 
+        /// <summary>Отложенная посадка вернулась (Universe.ResumeRecovery): отметки времени пилота — на длину паузы.</summary>
+        internal void ShiftTime(double dt) => nextPredict += dt;
+
         /// <summary>Отделился борт из одной секции с RecoveryDef и топливом — взвести и начать возврат.</summary>
         public static BoosterLandingAutopilot TryStart(Vessel d)
         {

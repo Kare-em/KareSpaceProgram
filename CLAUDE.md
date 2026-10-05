@@ -42,7 +42,7 @@ Library/, Temp/, Logs/, UserSettings/ — do not touch or commit.
 D="/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Data/DotNetSdk/dotnet.exe"; P=/c/CocosGames/KareSpaceProgram/Tools/CoreTests/CoreTests.csproj; "$D" build $P -nologo -v q && "$D" run --no-build --project $P
 ```
 `-- <name>` — a single test (math, orbit, moon, atmo, stats, stability, separation, craft, collide, undock, craft_fly, karman, sputnik, mechta, vympel, farside, vostok, luna9, moondrop,
-juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11, planets, autoplan, patches, booster, starship; `auto` — all missions
+juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11, planets, autoplan, patches, booster, booster_defer, starship; `auto` — all missions
 hands-off, `auto_<mission>` — one).
 Do not build during a run — the exe is locked, the build fails.
 

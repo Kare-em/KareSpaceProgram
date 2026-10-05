@@ -479,7 +479,7 @@ namespace Kare.Space.Game
                 e.Tr.SetPositionAndRotation(pos, FloatingOrigin.BodyRotation(e.Body));
                 e.Tr.localScale = Vector3.one * (float)(e.SphereRadius * k);
             }
-            UpdatePatch(u.Active);
+            UpdatePatch(FlightView.Main);
             // Снос ряби: только дробная часть, чтобы смещение не копило ошибку float.
             float wk = (float)(GroundTile / WaterTile);
             waterOffset.x = Frac(waterOffset.x + Time.deltaTime * WaterDrift / WaterTile);

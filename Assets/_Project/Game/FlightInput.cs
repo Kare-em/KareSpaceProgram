@@ -35,6 +35,11 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.Comma)) u.WarpDown();
             // «/» — сброс ускорения сразу в ×1, как в KSP.
             if (Input.GetKeyDown(KeyCode.Slash) || Input.GetKeyDown(KeyCode.KeypadDivide)) u.WarpReset();
+            // Порядок «ступень — корабль» после отделения (§6.9, FlightView): F2 — вид на посадку ступени, F3 — сплит-скрин,
+            // F4 — отложить посадку / продолжить отложенную. Это вид, а не управление: открыто и под автопилотом миссии.
+            if (Input.GetKeyDown(KeyCode.F2)) FlightView.ToggleFocus(u);
+            if (Input.GetKeyDown(KeyCode.F3)) FlightView.ToggleSplit(u);
+            if (Input.GetKeyDown(KeyCode.F4)) FlightView.ToggleDefer(u);
             // PageUp / PageDown — переключение между бортами (§6.13, как [ ] в KSP: скобки здесь двигают время узла,
             // Shift/Ctrl — газ). Home — назад к борту миссии. Работает и после гибели активного — увести управление на живой.
             if (Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.PageDown))

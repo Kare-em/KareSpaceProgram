@@ -50,7 +50,7 @@ namespace Kare.Space.Game
             var u = GameBootstrap.U;
             if (u?.Active == null) return;
             var s = u.System.Sun;
-            var me = FloatingOrigin.WorldP(u.Active);
+            var me = FloatingOrigin.WorldP(FlightView.Main);
             var toSun = s.Position - me;
             double r = toSun.magnitude;
             transform.rotation = Quaternion.LookRotation(FloatingOrigin.DirToUnity(-toSun / r));

@@ -1398,7 +1398,7 @@ namespace Kare.Space.Game
             if (Vessel == null || u?.Active == null) return;
             bool show = Vessel.Alive && !MapView.IsOpen;
             var pos = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(Vessel));
-            if (Vessel != u.Active && pos.magnitude > DrawDistance) show = false;
+            if (Vessel != FlightView.Main && !FlightView.Near(pos, DrawDistance)) show = false;
             SetVisible(show);
             if (!show) return;
 

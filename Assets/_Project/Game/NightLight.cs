@@ -78,7 +78,7 @@ namespace Kare.Space.Game
         {
             var u = GameBootstrap.U;
             if (u?.Active == null) return;
-            var v = u.Active;
+            var v = FlightView.Main;
             var sys = u.System;
             var me = FloatingOrigin.WorldP(v);
 

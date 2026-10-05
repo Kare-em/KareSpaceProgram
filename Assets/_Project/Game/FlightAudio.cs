@@ -149,7 +149,7 @@ namespace Kare.Space.Game
             if (u == null) return;
             var c = GameBootstrap.Instance.Camera != null ? GameBootstrap.Instance.Camera : Camera.main;
             cam = c != null ? c.transform : null;
-            active = u.Active;
+            active = FlightView.Main;
             quiet = u.RailsActive || u.EffectiveWarp > QuietWarp;
             // Карта — взгляд со стороны: звук борта приглушён, но не пропадает, чтобы было слышно работу двигателя.
             master = (MapView.IsOpen ? 0.5f : 1) * (u.EffectiveWarp > 1.5 && !quiet ? 0.7f : 1);

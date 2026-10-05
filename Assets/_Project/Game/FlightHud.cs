@@ -79,21 +79,26 @@ namespace Kare.Space.Game
             float s = Mathf.Max(0.75f, Screen.height / BaseHeight);
             GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1));
             float w = Screen.width / s, h = Screen.height / s;
+            // Сплит-скрин (FlightView): весь прежний HUD — в левой половине, правая — панель второго борта.
+            // Числа полёта (высота, скорость, навбол) — у борта главного вида, стек ступеней и манёвры — у управляемого.
+            float wl = FlightView.Second != null ? w / 2 : w;
+            var m = FlightView.Main ?? v;
 
-            TopCenter(u, v, boot, w);
-            Warnings(u, v, w);
-            StageStack(v, w, h);
-            Bottom(u, v, w, h);
-            if (!MapView.IsOpen) NavBall(u, v, w, h - 24); // 24 — строка подсказки клавиш внизу
-            Messages(boot, w, h);
+            TopCenter(u, m, boot, wl);
+            Warnings(u, m, wl);
+            StageStack(v, wl, h);
+            Bottom(u, m, wl, h);
+            if (!MapView.IsOpen) NavBall(u, m, wl, h - 24); // 24 — строка подсказки клавиш внизу
+            Messages(boot, wl, h);
             NodePanel(u, v, h);
-            DockPanel(u, v, w, h);
+            DockPanel(u, v, wl, h);
             if (details) Details(u, v, boot);
-            else if (boot.AscentTutor && !Tutor(u, v)) Guide(u, boot);
+            else if (boot.AscentTutor && m == v && !Tutor(u, v)) Guide(u, boot);
+            ViewOverlay(u, w, wl, h);
 
             GUI.color = Dim;
-            GUI.Label(new Rect(10, h - 24, 1400, 22),
-                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · H взлёт/посадка · G опоры/трапы · R к Луне · V стыковка/расстыковка · Tab ручная стыковка · PgUp/PgDn аппарат · N/B манёвр · ,/. время · M карта · F1 детали · Esc", small);
+            GUI.Label(new Rect(10, h - 24, 1800, 22),
+                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · H взлёт/посадка · G опоры/трапы · R к Луне · V стыковка/расстыковка · Tab ручная стыковка · PgUp/PgDn аппарат · N/B манёвр · ,/. время · M карта · F1 детали · F2 вид на ступень · F3 сплит · F4 отложить посадку · Esc", small);
             GUI.color = Color.white;
         }
 
@@ -294,7 +299,10 @@ namespace Kare.Space.Game
         {
             Icon icon; string title, status; Color col;
             // Автопилот миссии сам запускает частные — показываем его шаг, а их статус — строкой ниже.
-            if (u.Mission != null) { icon = Icon.Autopilot; title = "МИССИЯ"; status = u.Mission.Phase + (u.Mission.Status.Length > 0 ? ": " + u.Mission.Status : ""); col = Accent; }
+            // Вид на ступени (FlightView): её ведёт фоновый пилот возврата, а не автопилоты активного борта.
+            var rec = v != u.Active ? PilotOf(u, v) : null;
+            if (v != u.Active) { icon = Icon.Autopilot; title = "ВОЗВРАТ СТУПЕНИ"; status = rec != null ? rec.Status : "без пилота"; col = Accent; }
+            else if (u.Mission != null) { icon = Icon.Autopilot; title = "МИССИЯ"; status = u.Mission.Phase + (u.Mission.Status.Length > 0 ? ": " + u.Mission.Status : ""); col = Accent; }
             else if (u.Ascent != null) { icon = Icon.Autopilot; title = "АВТОПИЛОТ"; status = u.Ascent.Status; col = Accent; }
             else if (u.NodePilot != null) { icon = Icon.Maneuver; title = "МАНЁВР"; status = u.NodePilot.Status; col = Accent; }
             else if (u.Landing != null) { icon = Icon.Autopilot; title = "ПОСАДКА"; status = u.Landing.Phase.ToString(); col = Accent; }
@@ -414,17 +422,7 @@ namespace Kare.Space.Game
             var r = new Rect(12, h - ThrustFuelTop, 250, 104);
             Fill(r, Panel);
             Bar(new Rect(r.x + 12, r.y + 12, 226, 22), "Газ", (float)v.Throttle, Accent);
-            // Топливо ближайшей работающей (или первой с двигателем) ступени — ему и кончаться первым.
-            int idx = -1;
-            for (int i = 0; i < v.Attached.Length; i++)
-            {
-                if (!v.Attached[i] || !v.Design.Sections[i].HasEngine) continue;
-                if (idx < 0 || v.Running[i]) idx = i;
-                if (v.Running[i]) break;
-            }
-            float fuel = 0;
-            if (idx >= 0 && v.Design.Sections[idx].Propellant > 0)
-                fuel = (float)(v.Propellant[idx] / v.Design.Sections[idx].Propellant);
+            float fuel = FuelShare(v);
             Bar(new Rect(r.x + 12, r.y + 44, 226, 22), "Топливо", fuel, fuel < 0.1f ? Danger : Warn);
 
             // Тяговооружённость при текущей тяге: меньше 1 — ракета не разгоняется вверх, а теряет скорость.

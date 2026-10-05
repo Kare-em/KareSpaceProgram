@@ -19,9 +19,10 @@ namespace Kare.Space.Game
         /// <summary>Вызывается и после шага симуляции, и перед рендером — порядок LateUpdate не важен.</summary>
         public static void Refresh()
         {
-            var u = GameBootstrap.U;
-            if (u?.Active == null) return;
-            OriginP = WorldP(u.Active);
+            // Ноль — у главного вида (FlightView): при «сначала посадка» это ступень, а не активный корабль.
+            var main = FlightView.Main;
+            if (main == null) return;
+            OriginP = WorldP(main);
         }
 
         /// <summary>Гелиоцентрическое положение борта в P.</summary>

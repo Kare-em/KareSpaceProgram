@@ -91,13 +91,13 @@ namespace Kare.Space.Game
             var u = GameBootstrap.U;
             if (u?.Active == null) return;
             FloatingOrigin.Refresh();
-            var b = u.Active.Body;
+            var b = FlightView.Main.Body;
             if (b != profileBody) ApplyProfile(b);
             // Цвет земли PBSky — это и подсветка борта снизу (ambient). У поверхности под бортом местный грунт,
             // выше воздуха — весь диск планеты: тот же вес высоты, что у предела EV (DarkSkyAltitude).
             var look = BodyVisuals.Get(b.Id);
             var disc = look.Disc.a > 0 ? look.Disc : look.Low;
-            sky.groundTint.Override(Color.Lerp(look.Low, disc, AirWeight(u.Active)));
+            sky.groundTint.Override(Color.Lerp(look.Low, disc, AirWeight(FlightView.Main)));
 
             // HDRP ждёт центр и радиус планеты в КИЛОМЕТРАХ (VisualEnvironment), сцена — в метрах.
             var c = BodyRenderer.Project(b, out double k);
@@ -117,7 +117,7 @@ namespace Kare.Space.Game
                 float comp = BrightnessSettings.Ev;
                 exposure.compensation.Override(comp);
                 exposure.fixedExposure.Override(MapEv - comp);
-                float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active));
+                float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(FlightView.Main));
                 // Экспозиция ведётся по факелу «как задуман» (без ползунка «Факел»), а реальная яркость — с ним:
                 // так ползунок меняет факел относительно сцены, а не съедается экспозицией.
                 float plume = VesselView.PlumePeakNits, plumeReal = plume * BrightnessSettings.Plume;

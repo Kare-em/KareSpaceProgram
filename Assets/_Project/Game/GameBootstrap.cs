@@ -185,6 +185,7 @@ namespace Kare.Space.Game
             Tracker.Changed += OnMessage;
             OnMessage($"Миссия «{Mission.Title}»: {Mission.Brief}");
             gameObject.AddComponent<PauseMenu>();
+            gameObject.AddComponent<FlightView>();
             new GameObject("Flight Audio").AddComponent<FlightAudio>();
             if (PlumeMaterial != null && SmokeMaterial != null && VesselMaterial != null)
             {
@@ -228,6 +229,7 @@ namespace Kare.Space.Game
             if (InfiniteFuel && universe.Active != null && universe.Active.Alive) universe.Active.Refuel();
             if (!PauseMenu.IsOpen) universe.Advance(Time.deltaTime);
             Tracker.Update(universe);
+            FlightView.Tick(universe, Tracker);
             FloatingOrigin.Refresh();
             SyncViews();
             if (blasts != null) blasts.Watch(universe);

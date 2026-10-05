@@ -8,7 +8,7 @@ namespace Kare.Space.Core
     /// физике или на рельсах (кеплерова орбита), остальные — на рельсах или удаляются: считать
     /// физику обломка за тысячи километров незачем, а на ускорении — невозможно.
     /// </summary>
-    public sealed class Universe
+    public sealed partial class Universe
     {
         public static readonly double[] Warps = { 1, 5, 10, 50, 100, 1e3, 1e4, 1e5, 1e6, 1e7 };
         /// <summary>Потолок физического ускорения (атмосфера, работа двигателя, автопилот). Шаг интегратора

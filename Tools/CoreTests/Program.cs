@@ -80,6 +80,7 @@ static class Program
         Run("autoplan", TestAutoPlan, only);
         Run("patches", TestPatches, only);
         Run("booster", TestBooster, only);
+        Run("booster_defer", TestBoosterDefer, only);
         Run("starship", TestStarship, only);
         // Миссии целиком автопилотом Y без рук и с автоускорением: «auto» — все, «auto_<id>» — одна.
         foreach (var id in AutoMissions)
@@ -335,6 +336,56 @@ static class Program
         Console.WriteLine($"   итог: {p.Phase} — {p.Status}");
         Check("booster: касание медленнее 6 м/с", p.TouchdownSpeed < 6, $"{p.TouchdownSpeed:F1} м/с");
         Check("booster: промах не больше 50 м", p.Miss <= 50, $"{p.Miss:F0} м");
+    }
+
+    /// <summary>
+    /// «Сначала корабль, потом посадка» (§6.9): ступень Falcon 9 откладывается сразу после отделения, корабль летит
+    /// дальше (рельсы открыты), через 40 мин ступень возвращается со сдвигом времени и садится на баржу так же, как
+    /// без паузы: Земля за паузу повернулась на 10°, и без поворота состояния ступень промахнулась бы на сотни км.
+    /// </summary>
+    static void TestBoosterDefer()
+    {
+        var (u, tr) = StartMission("crew_dragon");
+        u.AutoWarp = true;
+        u.Mission = new MissionAutopilot(u, tr);
+        BoosterLandingAutopilot p = null;
+        double tSep = double.NaN, maxWarp = 0;
+        const double pause = 2400;
+        for (int f = 0; f < 200000; f++)
+        {
+            u.Advance(0.1);
+            tr.Update(u);
+            if (double.IsNaN(tSep) && u.RunningRecovery() is BoosterLandingAutopilot r && u.Time - r.Vessel.LaunchTime > 0)
+            {
+                tSep = u.Time;
+                p = r;
+            }
+            if (p != null && u.Deferred.Count == 0 && u.Recoveries.Contains(p) && u.Time - tSep > 3 && u.Time - tSep < pause)
+            {
+                Check("booster_defer: посадка откладывается", u.DeferRecovery(p), "отказ");
+                Check("booster_defer: ступень ушла из мира", !u.Vessels.Contains(p.Vessel) && u.RunningRecovery() == null, "осталась");
+            }
+            if (u.Deferred.Count > 0)
+            {
+                maxWarp = Math.Max(maxWarp, u.EffectiveWarp);
+                if (u.Time - u.Deferred[0].FrozenAt >= pause)
+                {
+                    var b = p.Vessel;
+                    double h0 = b.Altitude;
+                    u.ResumeRecovery(u.Deferred[0]);
+                    Console.WriteLine($"   пауза {pause:F0} с, корабль: h {u.Active.Altitude / 1000:F0} км; ступень вернулась: h {h0 / 1000:F1} → {b.Altitude / 1000:F1} км, " +
+                                      $"v пов. {b.SurfaceSpeed:F0} м/с, наибольшее ускорение в паузе ×{maxWarp:F0}");
+                    Check("booster_defer: высота после возврата та же", Math.Abs(b.Altitude - h0) < 1, $"{b.Altitude - h0:F1} м");
+                }
+            }
+            if (p != null && u.Deferred.Count == 0 && !p.Running) break;
+        }
+        Check("booster_defer: ступень отделилась", p != null, "нет пилота");
+        if (p == null) return;
+        Console.WriteLine($"   итог: {p.Phase} — {p.Status}; миссия: {tr.Status}");
+        Check("booster_defer: рельсы открыты, пока посадка отложена", maxWarp > Universe.MaxPhysicsWarp, $"×{maxWarp:F0}");
+        Check("booster_defer: касание медленнее 6 м/с", p.TouchdownSpeed < 6, $"{p.TouchdownSpeed:F1} м/с");
+        Check("booster_defer: промах не больше 50 м", p.Miss <= 50, $"{p.Miss:F0} м");
     }
 
     /// <summary>

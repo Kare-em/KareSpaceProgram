@@ -44,6 +44,11 @@ namespace Kare.Space.Game
         /// </summary>
         const float GroundClearance = 2f;
 
+        /// <summary>Камера правой половины сплит-скрина (FlightView): смотрит на FlightView.Second.</summary>
+        public bool Secondary;
+        /// <summary>Чья половина приняла нажатие ПКМ/СКМ: тянуть мышь можно и через границу половин.</summary>
+        static FlightCamera dragOwner;
+
         Camera cam;
         Quaternion frame = Quaternion.identity;
         Vector3 lastUp = Vector3.up;
@@ -75,14 +80,22 @@ namespace Kare.Space.Game
         {
             var u = GameBootstrap.U;
             if (u?.Active == null || MapView.IsOpen) return;
-            var v = u.Active;
+            var v = Secondary ? FlightView.Second : FlightView.Main;
+            if (v == null) return;
 
-            if (Input.GetMouseButton(1))
+            // Мышь — у камеры под курсором; без сплита — целиком у главной.
+            bool split = FlightView.Second != null;
+            bool under = !split ? !Secondary : cam.pixelRect.Contains(Input.mousePosition);
+            if ((Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2)) && under) dragOwner = this;
+            bool held = Input.GetMouseButton(1) || Input.GetMouseButton(2);
+            bool mine = held ? dragOwner == this : under;
+
+            if (mine && Input.GetMouseButton(1))
             {
                 Yaw += Input.GetAxis("Mouse X") * OrbitSpeed;
                 Pitch = Mathf.Clamp(Pitch - Input.GetAxis("Mouse Y") * OrbitSpeed, -89, 89);
             }
-            float wheel = Input.mouseScrollDelta.y;
+            float wheel = mine ? Input.mouseScrollDelta.y : 0;
             if (wheel != 0) Distance = Mathf.Clamp(Distance * Mathf.Pow(0.88f, wheel), MinDistance, MaxDistance);
 
             // Местная вертикаль; кадр камеры доворачивается на её изменение, а не строится заново —
@@ -115,8 +128,8 @@ namespace Kare.Space.Game
 
             var rot = frame * Quaternion.Euler(Pitch, Yaw, 0);
             var att = FloatingOrigin.ToQuaternion(v.Attitude);
-            if (Input.GetMouseButtonDown(2)) panTravel = 0;
-            if (Input.GetMouseButton(2))
+            if (mine && Input.GetMouseButtonDown(2)) panTravel = 0;
+            if (mine && Input.GetMouseButton(2))
             {
                 float mx = Input.GetAxis("Mouse X"), my = Input.GetAxis("Mouse Y");
                 panTravel += Mathf.Abs(mx) + Mathf.Abs(my);
@@ -124,7 +137,7 @@ namespace Kare.Space.Game
                 var d = rot * new Vector3(-mx, -my, 0) * (Distance * PanSpeed);
                 pan = Vector3.ClampMagnitude(pan + Quaternion.Inverse(att) * d, (float)fit * PanLimit);
             }
-            if (Input.GetMouseButtonUp(2) && panTravel < PanClick) pan = Vector3.zero;
+            if (dragOwner == this && Input.GetMouseButtonUp(2) && panTravel < PanClick) pan = Vector3.zero;
             var target = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v)) // ≈ 0 — борт и есть ноль
                        + att * (new Vector3(0, (float)(length * (1 - FitBelow) * 0.5 - com), 0) + pan)
                        // Купол висит над бортом по вертикали: цель на середину связки, иначе купол режется верхним краем

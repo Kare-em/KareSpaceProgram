@@ -389,3 +389,14 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
   compensation 0.098, atmosphericScattering flipping 0/1 depending on the last body). Verified: `ReferenceEquals(copy.components[0],
   asset.components[0]) == true`. Fix — `Instantiate` every component of the copy too (after it — `sameObj=False`). The same applies
   to any test code: edits through `vol.sharedProfile` in Play used to hit the rendered profile, now they do not — use `vol.profile`.
+
+## Split screen / second view (05.10.2026, `Game/FlightView.cs`)
+- The second view is a clone of the main camera (`Instantiate`, AudioListener removed, tag `Untagged`), FloatingOrigin stays at
+  `FlightView.Main`. Measured 05.10.2026 in Play (Demo-2): the landed F9 on OCISLY seen from the ship's origin at 1.25e7 m
+  (float ulp ≈ 1 m) — no visible jitter at a 40 m stage. Terrain patch is only built under `Main` — the second view sees the
+  coarse sphere mesh. Sky/exposure follow `Main`: once the right half (ship, booster as Main in daylight) showed only stars —
+  probably the ship on the night side under day exposure; not confirmed.
+- Things that face `Camera.main` (ExhaustTrail billboards, VesselView glow, NightLight, BlastEffects, SpaceFogFix) are oriented
+  to the main camera only — in the right half they may look flat/turned. Sky/exposure/sun follow `Main` too.
+- Objects hidden by distance (`VesselView`, `RecoveryDeckView`, `LaunchPadView`) check `FlightView.Near(pos, dist)`,
+  not `pos.magnitude` — with it the barge is drawn in the right half 12 000 km from the origin (split3, 05.10.2026).
