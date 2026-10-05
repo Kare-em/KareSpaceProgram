@@ -69,6 +69,20 @@ namespace Kare.Space.Game
         const float WakeStart = 1.5f;
         /// <summary>Перестройка меша оболочки при смене длины борта, шаг в радиусах.</summary>
         const float SheathStep = 0.5f;
+        /// <summary>Ударный слой крылатого борта (§4.6), радиусов фюзеляжа. Орбитер входит с углом атаки ~40°: оболочка
+        /// «вдоль потока от носа» уходила на 14 r в сторону от корпуса белой капсулой (05.10.2026). У планера слой
+        /// прижат к наветренной стороне — брюхо, носок, передние кромки крыла, — поэтому оболочка идёт вдоль оси корпуса:
+        /// сечение — полуэллипсы, к брюху WingSheathWind (фюзеляж 1 + слой ~0,35, пара: ShockStandoff), к спине
+        /// WingSheathLee (едва над обшивкой, почти не светится), по размаху — WingSheathBody у фюзеляжа и
+        /// WingSheathSpan от полуразмаха у задней кромки; за кормой гаснет на длине WingSheathTail.</summary>
+        const float WingSheathWind = 1.35f, WingSheathLee = 1.1f, WingSheathBody = 1.3f, WingSheathSpan = 1.08f, WingSheathTail = 1f;
+        /// <summary>Яркость слоя крылатого борта (доля PlasmaNits): точка торможения на носке 1, передние кромки
+        /// WingGlowEdge, брюхо WingGlowBelly, подветренная спина WingGlowLee. Пара: площадь слоя у орбитера в ~20 раз
+        /// больше, чем у капсулы того же радиуса, — брюхо втрое тусклее лба капсулы, иначе плоскость выбеливает кадр.</summary>
+        const float WingGlowEdge = 0.7f, WingGlowBelly = 0.3f, WingGlowLee = 0.04f;
+        /// <summary>След крылатого: начинается за задней кромкой на WingWakeGap радиусов; ширина — доля полуразмаха
+        /// (пара: PlasmaWakeLength — длина в тех же радиусах).</summary>
+        const float WingWakeGap = 0.5f, WingWakeWidth = 0.5f;
         static readonly Color SheathHot = new Color(1f, 0.78f, 0.58f), SheathCool = new Color(1f, 0.45f, 0.27f);
         static readonly Color PlasmaTint = new Color(1f, 0.5f, 0.32f);
         /// <summary>Накал обшивки на входе, нит при полном нагреве: абляционное покрытие светится тёмно-красным
@@ -132,8 +146,13 @@ namespace Kare.Space.Game
             public Renderer CoreR, GlowR;
             public Light PlumeLight;
             public float PlumeRadius, Throttle;
-            public Transform Chute, Canopy;
+            public Transform Chute;
+            /// <summary>Купола веера (SectionDef.ChuteCount) — дети Chute; стропы всех — одна ломаная Lines.</summary>
+            public Transform[] Canopies;
             public LineRenderer Lines;
+            /// <summary>Копии факела (Draco на боку Crew Dragon); null — факел один. NoSmoke — не источник шлейфа.</summary>
+            public List<Mirror> Mirrors;
+            public bool NoSmoke;
             // Корпус может состоять из нескольких рендереров (две створки), у каждого — палитра по слотам.
             public readonly List<Renderer> BodyR = new List<Renderer>();
             public readonly List<Color[]> BodyColors = new List<Color[]>();
@@ -169,6 +188,8 @@ namespace Kare.Space.Game
         Renderer sheathR;
         MeshFilter sheathMf;
         float sheathL = -1;
+        /// <summary>Ключ меша оболочки крылатого: полуразмах и станции кромок (радиусы); NaN — меш капсульный.</summary>
+        Vector3 sheathWing = new Vector3(float.NaN, 0, 0);
         LineRenderer plasmaWake;
         Light plasmaLight;
         bool heatGlowOn;
@@ -293,9 +314,12 @@ namespace Kare.Space.Game
                 case SectionModel.ISS2020: return new[] { WhiteColor, PanelColor, MetalColor, SawColor };
                 case SectionModel.DragonTrunk: return new[] { WhiteColor, PanelColor, MetalColor, BlackColor };
                 case SectionModel.CrewDragon: return new[] { WhiteColor, BlackColor, MetalColor, ShieldColor };
+                // spacex_parts.py: нержавейка, плитки ТЗП / окна кольца, рули и шарниры, Raptor.
+                case SectionModel.SuperHeavy:
+                case SectionModel.Starship: return new[] { PolishedColor, TileBlackColor, MetalColor, NozzleColor };
                 // winged_parts.py: орбитеры — белые и чёрные плитки ТЗП, RCC носка и кромок, сопла.
                 case SectionModel.ShuttleOrbiter:
-                case SectionModel.Buran: return new[] { TileWhiteColor, TileBlackColor, RccColor, NozzleColor };
+                case SectionModel.Buran: return new[] { TileWhiteColor, TileBlackColor, RccColor, NozzleColor, GlassColor };
                 case SectionModel.ShuttleET:
                 case SectionModel.EnergiaCore: return new[] { FoamColor, FoamDarkColor, MetalColor, NozzleColor };
                 case SectionModel.ShuttleSRB:
@@ -335,6 +359,8 @@ namespace Kare.Space.Game
             parts.Clear();
             legs.Clear();
             wheels.Clear();
+            ResetControls();
+            ResetSpaceX();
             builtSignature = Signature();
             var secs = Vessel.Design.Sections;
             var boot = GameBootstrap.Instance;
@@ -531,6 +557,10 @@ namespace Kare.Space.Game
                 }
                 if (s.Deploy == DeployKind.Gear && boot != null && boot.GearMesh != null)
                     AddGear(go, i, s, r, len, boot.GearMesh);
+                // Рули и тормозной парашют (VesselView.Controls): у моделей орбитеров вырезаны из FBX, у пластин — поверх.
+                AddControls(go, part, i, s, craft ? CraftPalette(s.Model) : new[] { col });
+                // Опоры и решётчатые рули Falcon 9, баржа (VesselView.SpaceX).
+                AddSpaceX(go, i, s, r);
 
                 if (s.HasEngine)
                 {
@@ -615,6 +645,7 @@ namespace Kare.Space.Game
                     plume.SetActive(false);
                     glow.SetActive(false);
                     lgo.SetActive(false);
+                    if (craft && HasDraco(s)) AddDracoMirrors(part, nozzle.transform);
                 }
                 if (s.ParachuteArea > 0) AddChute(part);
                 parts.Add(part);
@@ -749,6 +780,107 @@ namespace Kare.Space.Game
             return m;
         }
 
+        /// <summary>
+        /// Крыло в плане для ударного слоя (§4.6): наибольший горизонтальный WingDef присоединённых секций — полуразмах
+        /// и станции корня передней и задней кромок от носа, в радиусах фюзеляжа. Крыло считаем треугольным: корневая
+        /// хорда 2S/b, линия 1/4 хорд корня — на WingDef.Height над низом секции (так её ставит WingMesh).
+        /// </summary>
+        bool WingPlanform(double com, double length, float r, out Vector3 wing)
+        {
+            wing = default;
+            var secs = Vessel.Design.Sections;
+            WingDef best = null;
+            int at = -1;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!Vessel.Attached[i] || secs[i].Wings == null || secs[i].IsRadial) continue;
+                foreach (var w in secs[i].Wings)
+                    if (!w.Vertical && (best == null || w.Span > best.Span)) { best = w; at = i; }
+            }
+            if (best == null || best.Span <= 0) return false;
+            double rootChord = 2 * best.Area / best.Span, bottom = baseHeight[at] - com, nose = length - com;
+            double le = (nose - (bottom + best.Height + 0.25 * rootChord)) / r;
+            double te = (nose - System.Math.Max(bottom, bottom + best.Height - 0.75 * rootChord)) / r;
+            float L = (float)(length / r);
+            float leR = Mathf.Clamp((float)le, 1, L), teR = Mathf.Clamp((float)te, leR + 0.5f, L + 0.5f);
+            // Ключ меша квантуется шагом SheathStep, чтобы дрожь расчёта не пересобирала меш каждый кадр.
+            wing = new Vector3(Mathf.Round((float)(best.Span * 0.5 / r) / SheathStep) * SheathStep,
+                               Mathf.Round(leR / SheathStep) * SheathStep, Mathf.Round(teR / SheathStep) * SheathStep);
+            return true;
+        }
+
+        /// <summary>
+        /// Оболочка крылатого борта в радиусах фюзеляжа: вдоль +Y от носа (0) к корме (−L), +X — наветренная сторона,
+        /// Z — размах. Сечение — два полуэллипса (к ветру WingSheathWind, от ветра WingSheathLee) с полушириной w(y):
+        /// у носа колпак, вдоль фюзеляжа WingSheathBody, от корня передней кромки (wing.y) — расширение до полуразмаха
+        /// у задней (wing.z), за кормой хвост WingSheathTail с яркостью в ноль (открытый край не виден).
+        /// Цвет вершин — яркость: носок 1, передние кромки WingGlowEdge, брюхо WingGlowBelly, спина WingGlowLee.
+        /// </summary>
+        static Mesh WingedSheathMesh(float L, Vector3 wing)
+        {
+            const int seg = 48, cap = 10;
+            float halfSpan = Mathf.Max(WingSheathBody, wing.x * WingSheathSpan);
+            var py = new List<float>();
+            var pw = new List<float>();
+            var ps = new List<float>();   // доля сечения от полного (колпак)
+            var pn = new List<float>();   // «носовость»: 1 в точке торможения
+            var pe = new List<float>();   // вес передней кромки
+            var pf = new List<float>();   // гашение хвоста
+            float y0 = ShockStandoff - SheathNoseDepth;
+            for (int i = 0; i <= cap; i++)
+            {
+                float phi = i * 0.5f * Mathf.PI / cap, c = Mathf.Cos(phi);
+                py.Add(y0 + SheathNoseDepth * c); pw.Add(WingSheathBody); ps.Add(Mathf.Sin(phi));
+                pn.Add(c * c); pe.Add(0); pf.Add(1);
+            }
+            float end = L + WingSheathTail;
+            int body = Mathf.Max(4, Mathf.CeilToInt((end + y0) / SheathStep));
+            for (int i = 1; i <= body; i++)
+            {
+                float d = Mathf.Lerp(-y0, end, i / (float)body);
+                float t = Mathf.Clamp01((d - wing.y) / Mathf.Max(0.5f, wing.z - wing.y));
+                py.Add(-d);
+                pw.Add(Mathf.Lerp(WingSheathBody, halfSpan, t));
+                ps.Add(1);
+                pn.Add(0);
+                // Кромка горит там, где крыло расширяется (она набегает на поток), к задней кромке гаснет.
+                pe.Add(d > wing.y ? 1 - t * t : 0);
+                pf.Add(d > L ? 1 - Mathf.SmoothStep(0, 1, (d - L) / WingSheathTail) : 1);
+            }
+            int n = py.Count;
+            var verts = new Vector3[n * seg];
+            var cols = new Color[n * seg];
+            for (int j = 0; j < n; j++)
+            for (int k = 0; k < seg; k++)
+            {
+                float th = k * 2 * Mathf.PI / seg, cs = Mathf.Cos(th), sn = Mathf.Sin(th);
+                float hx = cs >= 0 ? WingSheathWind : WingSheathLee;
+                verts[j * seg + k] = new Vector3(hx * cs * ps[j], py[j], pw[j] * sn * ps[j]);
+                // Наветренность: 1 под брюхом, 0 над спиной; кромка — край сечения (|sin| → 1).
+                float wind = 0.5f + 0.5f * cs;
+                wind *= wind;
+                float b = Mathf.Lerp(WingGlowLee, WingGlowBelly, wind);
+                float s2 = sn * sn;
+                b = Mathf.Max(b, WingGlowEdge * pe[j] * s2 * s2 * s2);
+                b = Mathf.Lerp(b, 1, pn[j] * wind);
+                cols[j * seg + k] = Color.Lerp(SheathCool, SheathHot, b) * (b * pf[j]);
+            }
+            var tris = new int[(n - 1) * seg * 6];
+            int q = 0;
+            for (int j = 0; j < n - 1; j++)
+            for (int k = 0; k < seg; k++)
+            {
+                int i0 = j * seg + k, i1 = j * seg + (k + 1) % seg, i2 = i0 + seg, i3 = i1 + seg;
+                tris[q++] = i0; tris[q++] = i2; tris[q++] = i1;
+                tris[q++] = i1; tris[q++] = i2; tris[q++] = i3;
+            }
+            // Нормали — для свечения ∝ 1/|N·V| (шейдер Cull Off, знак не важен).
+            var m = new Mesh { name = "Plasma Sheath (winged)", vertices = verts, colors = cols, triangles = tris };
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
         /// <summary>След: U — вдоль (0 у лба, горячо → красное → ноль), V — поперёк (гаусс, края в ноль).</summary>
         static Texture2D PlasmaWakeTexture()
         {
@@ -793,20 +925,40 @@ namespace Kare.Space.Game
             float front = Vector3.Dot(nose, airflow) >= 0 ? (float)(length - com) : (float)-com;
             var lead = transform.TransformPoint(0, front, 0);
             var bow = lead + airflow * (r * ShockStandoff);
-            plasma.SetPositionAndRotation(lead, Quaternion.FromToRotation(Vector3.up, airflow));
-            plasmaLight.transform.position = bow;
             float L = Mathf.Max(SheathStep, Mathf.Round((float)length / r / SheathStep) * SheathStep);
-            if (L != sheathL)
+            bool winged = WingPlanform(com, length, r, out var wing);
+            // Начало следа (wakeFrom) и отступ до него по потоку: у капсулы — от лба через весь борт и шейку, у крылатого —
+            // сразу за задней кромкой (оболочка идёт вдоль корпуса, а не вдоль потока).
+            Vector3 wakeFrom = lead;
+            float wakeStart = (float)length + r * WakeStart;
+            if (winged)
+            {
+                // Оболочка в осях корпуса от носа; +X меша — наветренная сторона: брюхо (+X борта, WingDef.Offset к −X)
+                // или спина, если поток набегает сверху. Поворот вокруг оси корпуса размах не меняет.
+                var up = transform.up;
+                var windward = Vector3.Dot(airflow, transform.right) >= 0 ? transform.right : -transform.right;
+                var noseAt = transform.TransformPoint(0, (float)(length - com), 0);
+                plasma.SetPositionAndRotation(noseAt, Quaternion.LookRotation(Vector3.Cross(windward, up), up));
+                // Свет — под брюхом у середины корпуса: там основная площадь слоя.
+                plasmaLight.transform.position = noseAt - up * ((float)length * 0.45f) + windward * (r * 2);
+                wakeFrom = transform.TransformPoint(0, (float)-com, 0) + windward * (r * WingWakeGap);
+                wakeStart = r * WingWakeGap;
+            }
+            else
+            {
+                plasma.SetPositionAndRotation(lead, Quaternion.FromToRotation(Vector3.up, airflow));
+                plasmaLight.transform.position = bow;
+            }
+            if (L != sheathL || (winged ? !wing.Equals(sheathWing) : !float.IsNaN(sheathWing.x)))
             {
                 if (sheathMf.sharedMesh != null) Destroy(sheathMf.sharedMesh);
-                sheathMf.sharedMesh = SheathMesh(L);
+                sheathMf.sharedMesh = winged ? WingedSheathMesh(L, wing) : SheathMesh(L);
                 sheathL = L;
+                sheathWing = winged ? wing : new Vector3(float.NaN, 0, 0);
             }
             sheath.localScale = Vector3.one * r;
             float flicker = Flicker(PlasmaFlicker, 17);
             var cam = Camera.main;
-            // След — от середины шейки оболочки за кормой.
-            float wakeStart = (float)length + r * WakeStart;
             float wakeLen = wakeStart + r * PlasmaWakeLength * (0.3f + 0.7f * k) * flicker;
             float wakeFade = 1;
             if (cam != null)
@@ -817,7 +969,7 @@ namespace Kare.Space.Game
                 wakeFade = 1 - axial * axial;
                 wakeFade *= wakeFade;
                 // Камера внутри «трубы» следа — укоротить ленту, чтобы её гаснущий конец был перед камерой.
-                var rel = cam.transform.position - lead;
+                var rel = cam.transform.position - wakeFrom;
                 float along = -Vector3.Dot(rel, airflow);
                 float side = (rel + airflow * along).magnitude;
                 if (along > 0 && side < r * 3)
@@ -825,10 +977,11 @@ namespace Kare.Space.Game
                 if (wakeLen < wakeStart + r * 0.5f) wakeFade = 0;
             }
             wakeLen = Mathf.Max(wakeLen, wakeStart + r * 0.5f);
-            plasmaWake.SetPosition(0, lead - airflow * wakeStart);
-            plasmaWake.SetPosition(1, lead - airflow * Mathf.Lerp(wakeStart, wakeLen, 0.25f));
-            plasmaWake.SetPosition(2, lead - airflow * wakeLen);
-            plasmaWake.widthMultiplier = r;
+            plasmaWake.SetPosition(0, wakeFrom - airflow * wakeStart);
+            plasmaWake.SetPosition(1, wakeFrom - airflow * Mathf.Lerp(wakeStart, wakeLen, 0.25f));
+            plasmaWake.SetPosition(2, wakeFrom - airflow * wakeLen);
+            // Крылатый: след во всю ширину слоя за задней кромкой, а не по диаметру фюзеляжа.
+            plasmaWake.widthMultiplier = winged ? r * Mathf.Max(1, wing.x * WingWakeWidth) : r;
             float nits = PlasmaNits * k * flicker;
             ReportPlume(nits);
             ReportPlasma(PlasmaNits * k);
@@ -862,6 +1015,7 @@ namespace Kare.Space.Game
                 case SectionModel.LMDescent: radius = 2.15f; height = 3.0f; stow = 133; return true;
                 case SectionModel.Luna17KT: radius = 1.2f; height = 1.9f; stow = 116; return true;
                 case SectionModel.Lunokhod: radius = 0.8f; height = 1.4f; stow = 162; return true;
+                case SectionModel.SoyuzPAO: radius = PanelHingeR; height = PanelHingeY; stow = PanelStow; return true;
             }
             radius = height = stow = 0;
             return false;
@@ -869,6 +1023,7 @@ namespace Kare.Space.Game
 
         void AddDeployParts(Transform model, int section, SectionDef s, GameBootstrap.DeployPart[] deploy, Color[] palette)
         {
+            if (deploy != null && s.Deploy == DeployKind.Nose) { AddNose(model, section, deploy, palette); return; }
             if (deploy == null || !DeployHinge(s.Model, out float hr, out float hh, out float stow)) return;
             foreach (var d in deploy)
             {
@@ -959,6 +1114,9 @@ namespace Kare.Space.Game
                     rr = 0.5f;
                     nr = 0.4f;
                     break;
+                case SectionModel.CrewDragon:
+                    DracoPlume(ref at, ref rr, ref nr);   // Draco на боку капсулы, не по оси сквозь багажник
+                    break;
                 case SectionModel.Buran:
                     at = new Vector3(-1.2f, 0, 0);      // ОДУ: 1,2 м к верху, ±0,95 по размаху, срез на днище (b_buran)
                     rr = 0.95f;
@@ -979,15 +1137,22 @@ namespace Kare.Space.Game
         {
             var root = new GameObject("Parachute");
             root.transform.SetParent(transform, false);
-            var canopy = new GameObject("Canopy");
-            canopy.transform.SetParent(root.transform, false);
-            canopy.AddComponent<MeshFilter>().sharedMesh = ProcMesh.Dome(ChuteDomeAngle, ChuteGores * 2, 8);
-            var mr = canopy.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = bodyMat;
-            mpb.Clear();
-            mpb.SetColor("_BaseColor", Color.white);
-            mpb.SetTexture("_BaseColorMap", GoreStripes());
-            mr.SetPropertyBlock(mpb);
+            int n = Mathf.Max(1, Vessel.Design.Sections[part.Index].ChuteCount);
+            part.Canopies = new Transform[n];
+            var dome = ProcMesh.Dome(ChuteDomeAngle, ChuteGores * 2, 8);
+            for (int k = 0; k < n; k++)
+            {
+                var canopy = new GameObject("Canopy");
+                canopy.transform.SetParent(root.transform, false);
+                canopy.AddComponent<MeshFilter>().sharedMesh = dome;
+                var mr = canopy.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = bodyMat;
+                mpb.Clear();
+                mpb.SetColor("_BaseColor", Color.white);
+                mpb.SetTexture("_BaseColorMap", GoreStripes());
+                mr.SetPropertyBlock(mpb);
+                part.Canopies[k] = canopy.transform;
+            }
 
             var lines = root.AddComponent<LineRenderer>();
             lines.sharedMaterial = bodyMat;
@@ -998,10 +1163,9 @@ namespace Kare.Space.Game
             mpb.SetColor("_BaseColor", new Color(0.85f, 0.83f, 0.78f));
             lines.SetPropertyBlock(mpb);
             // Ломаная «крепление → кромка → крепление → …»: одна линия вместо отдельной на каждую стропу.
-            lines.positionCount = ChuteGores * 2;
+            lines.positionCount = ChuteGores * 2 * n;
 
             part.Chute = root.transform;
-            part.Canopy = canopy.transform;
             part.Lines = lines;
             root.SetActive(false);
         }
@@ -1027,8 +1191,9 @@ namespace Kare.Space.Game
             for (int i = 0; i < secs.Count; i++)
             {
                 if (!v.Attached[i] || !v.ChuteDeployed[i] || v.ChuteFailed[i] || secs[i].ParachuteArea <= 0) continue;
-                float r = Mathf.Sqrt((float)secs[i].ParachuteArea / Mathf.PI);
-                reach = Mathf.Max(reach, r * (ChuteRiser + 1));
+                // Верх купола веера: стропы + свой радиус (вынос вбок высоты не добавляет). Пара: ChuteFan.
+                ChuteFan(secs[i], 0, out _, out float full, out float rise, out _);
+                reach = Mathf.Max(reach, rise + full);
             }
             return reach;
         }
@@ -1039,24 +1204,35 @@ namespace Kare.Space.Game
             bool open = Vessel.ChuteDeployed[p.Index] && !Vessel.ChuteFailed[p.Index];
             p.Chute.gameObject.SetActive(open);
             if (!open) return;
-            float full = Mathf.Sqrt((float)s.ParachuteArea / Mathf.PI);
-            float r = Mathf.Sqrt((float)(s.ParachuteArea * FlightPhysics.ChuteFraction(Vessel.ChuteOpenTime[p.Index])) / Mathf.PI);
+            int n = p.Canopies.Length;
+            float r = Mathf.Sqrt((float)(s.ParachuteArea / n * FlightPhysics.ChuteFraction(Vessel.ChuteOpenTime[p.Index])) / Mathf.PI);
             r = Mathf.Max(r, 0.3f);
+            // Вынос веера — от текущего радиуса: рифлёные купола стоят плотно и расходятся по мере наполнения.
+            ChuteFan(s, r, out _, out float full, out float rise, out float spread);
             // Выпуск: первую секунду купол вытягивается из контейнера на стропах.
-            float riser = full * ChuteRiser * Mathf.Clamp01((float)Vessel.ChuteOpenTime[p.Index] + 0.2f);
+            float riser = rise * Mathf.Clamp01((float)Vessel.ChuteOpenTime[p.Index] + 0.2f);
 
-            // Крепление — верх секции; купол против потока, с лёгким раскачиванием.
-            p.Chute.position = p.Tr.TransformPoint(0, (float)s.Length, 0);
+            // Крепление — верх секции (или сбоку под носком); купола против потока, с лёгким раскачиванием.
+            p.Chute.position = p.Tr.TransformPoint(ChuteRoot(s));
             float t = Time.time;
             var sway = Quaternion.Euler(3 * Mathf.Sin(t * 0.9f + p.Index), 0, 3 * Mathf.Sin(t * 0.7f));
             p.Chute.rotation = Quaternion.FromToRotation(Vector3.up, -airflow) * sway;
-            p.Canopy.localPosition = new Vector3(0, riser, 0);
-            p.Canopy.localScale = new Vector3(r, r, r);
-            for (int k = 0; k < ChuteGores; k++)
+            for (int c = 0; c < n; c++)
             {
-                float a = 2 * Mathf.PI * k / ChuteGores;
-                p.Lines.SetPosition(2 * k, Vector3.zero);
-                p.Lines.SetPosition(2 * k + 1, new Vector3(r * Mathf.Cos(a), riser, r * Mathf.Sin(a)));
+                float b = 2 * Mathf.PI * c / n;
+                var center = new Vector3(spread * Mathf.Cos(b), riser, spread * Mathf.Sin(b));
+                // Купол наклонён вдоль своей стропы: веер, а не ряд плоских тарелок.
+                var tilt = Quaternion.FromToRotation(Vector3.up, center.normalized);
+                p.Canopies[c].localPosition = center;
+                p.Canopies[c].localRotation = tilt;
+                p.Canopies[c].localScale = new Vector3(r, r, r);
+                for (int k = 0; k < ChuteGores; k++)
+                {
+                    float a = 2 * Mathf.PI * k / ChuteGores;
+                    int at = 2 * (c * ChuteGores + k);
+                    p.Lines.SetPosition(at, Vector3.zero);
+                    p.Lines.SetPosition(at + 1, center + tilt * new Vector3(r * Mathf.Cos(a), 0, r * Mathf.Sin(a)));
+                }
             }
         }
 
@@ -1164,7 +1340,7 @@ namespace Kare.Space.Game
                 var mats = new Material[mesh.subMeshCount];
                 for (int i = 0; i < mats.Length; i++)
                     mats[i] = palette.Length == 1 ? FinishMaterial(FinishOf(palette[0]))
-                            : i < palette.Length ? FinishMaterial(FinishOf(palette[i])) : bodyMat;
+                            : i < palette.Length ? (palette[i] == GlassColor ? GlassMaterial() : FinishMaterial(FinishOf(palette[i]))) : bodyMat;
                 mr.sharedMaterials = mats;
             }
             else mr.sharedMaterial = palette.Length > 0 ? FinishMaterial(FinishOf(palette[0])) : bodyMat;
@@ -1191,7 +1367,8 @@ namespace Kare.Space.Game
             }
         }
 
-        /// <summary>Самый яркий видимый факел за кадр, нит — SkyController поднимает по нему нижний предел EV
+        /// <summary>Самый яркий видимый факел за кадр, нит, без множителя BrightnessSettings.Plume (реальная яркость —
+        /// это значение × Plume) — SkyController поднимает по нему нижний предел EV
         /// (иначе ночью предэкспонированный факел переполняет half-буфер). Порядок LateUpdate не важен:
         /// значение живёт и следующий кадр.</summary>
         public static float PlumePeakNits => Time.frameCount - peakFrame <= 1 ? peak : 0;
@@ -1254,6 +1431,8 @@ namespace Kare.Space.Game
             var airflow = air.magnitude > 1 ? FloatingOrigin.DirToUnity(air).normalized
                                             : -FloatingOrigin.DirToUnity(Vessel.Position).normalized;
             UpdatePlasma(airflow, com, vesselLen, vesselR);
+            UpdateControls(airflow);
+            UpdateSpaceX();
             foreach (var p in parts)
             {
                 // После перестроения (§6.6) ЛМ стоит на КСМ вверх ногами: низ секции — сверху её места в пакете.
@@ -1270,7 +1449,7 @@ namespace Kare.Space.Game
                 p.Plume.gameObject.SetActive(burning);
                 p.Glow.gameObject.SetActive(burning);
                 p.PlumeLight.gameObject.SetActive(burning);
-                if (!burning) continue;
+                if (!burning) { if (p.Mirrors != null) SyncMirrors(p, false); continue; }
                 // В вакууме струя раздувается и удлиняется; яркость/длина — от дросселя (§9.5).
                 float vac = 1 - Mathf.Clamp01(pressure);
                 float spread = 1 + vac * PlumeVacuumWidth;
@@ -1284,10 +1463,12 @@ namespace Kare.Space.Game
                 float coreNits = CoreNits * bright, glowNits = GlowNits * bright / spread;
                 // Экспозиции — фактическая яркость ядра, с вакуумным множителем и без дрожания. Раньше шло CoreNits·thr:
                 // в вакууме экспозиция ставилась под ядро втрое ярче нарисованного, и всё вокруг было на 1,7 EV темнее.
-                ReportPlume(coreNits);
+                // Без ползунка «Факел»: экспозиция под него не подстраивается, и он убавляет факел относительно сцены.
+                ReportPlume(coreNits / BrightnessSettings.Plume);
                 SetPlumeColor(p.CoreR, coreNits * flicker);
                 SetPlumeColor(p.GlowR, glowNits * flicker);
                 PlumeLight(p.PlumeLight, coreNits, glowNits, coreR, p.PlumeRadius * spread, len, flicker);
+                if (p.Mirrors != null) SyncMirrors(p, true);
             }
         }
 
@@ -1302,7 +1483,7 @@ namespace Kare.Space.Game
             if (!visible) return false;
             Part best = null;
             foreach (var p in parts)
-                if (p.Plume != null && p.Throttle > 0.01f && (best == null || p.Tr.localPosition.y < best.Tr.localPosition.y))
+                if (p.Plume != null && !p.NoSmoke && p.Throttle > 0.01f && (best == null || p.Tr.localPosition.y < best.Tr.localPosition.y))
                     best = p;
             if (best == null) return false;
             pos = best.Plume.position;

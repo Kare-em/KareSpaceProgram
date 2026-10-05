@@ -18,7 +18,7 @@ namespace Kare.Space.Game
     /// </summary>
     public sealed class LaunchPadView : MonoBehaviour
     {
-        enum Kind { R7, Proton, Redstone, Atlas, Titan, Saturn }
+        enum Kind { R7, Proton, Redstone, Atlas, Titan, Saturn, Starbase }
 
         /// <summary>Полуширина бетона и проёма над газоотводом Р-7, м. Пара: связка сопел (≈ радиус днища)
         /// должна пролезать в проём — HoleHalf больше радиуса первой ступени.</summary>
@@ -44,6 +44,14 @@ namespace Kare.Space.Game
         /// <summary>Башни: центр x, z; сторона; высота над столом. Пара: PROTON_TOWER, ATLAS_TOWER, TITAN_TOWER, SATURN_TOWER.</summary>
         static readonly Vector4 ProtonTower = new Vector4(-17.5f, 0, 4.2f, 62), AtlasTower = new Vector4(-12, 0, 3, 36),
             TitanTower = new Vector4(0, 12.5f, 3, 38), SaturnTower = new Vector4(-24, 0, 12.2f, 120);
+        /// <summary>
+        /// Starbase: башня (центр x, —, сторона, высота), м — 146 м, ≈ 12 м в плане, ≈ 30 м на запад от оси стола. Палочки:
+        /// высота над столом — цапфы Super Heavy (b_super_heavy: 71 − 6 = 65 м над днищем), полуразнос — радиус 4,5 + 1 м,
+        /// вылет до x = +8 (дальний край корпуса). Проём стола — под связку 33 Raptor (радиус юбки 4,5). Пара: spacex_parts.py.
+        /// </summary>
+        static readonly Vector4 StarbaseTower = new Vector4(-30, 0, 12, 146);
+        const float StarbaseColumn = 1.4f, StarbaseBay = 9, StarbaseArmHeight = 65, StarbaseArmGap = 5.5f, StarbaseArmReach = 8,
+            StarbaseHole = 6;
         /// <summary>«Протон»: башня на фундаменте от грунта до низа каркаса (PAD_H − 0,1), апрон вокруг стола, м.</summary>
         const float PadH = 6;
         /// <summary>Saturn V: проём ML 13,7 м, низ ML над грунтом (ML_HOLE, ML_BASE) — бетон под ML до этой отметки.</summary>
@@ -150,6 +158,7 @@ namespace Kare.Space.Game
                 case Kind.Atlas: PlanAtlas(slab, pit); break;
                 case Kind.Titan: PlanTitan(slab, pit); break;
                 case Kind.Saturn: PlanSaturn(slab, pit); break;
+                case Kind.Starbase: PlanStarbase(slab, pit); break;
                 default: PlanR7(slab, pit, v, truss); break;
             }
             AddPart("Pad", slab.Build(), concreteMat, transform);
@@ -176,6 +185,7 @@ namespace Kare.Space.Game
                 case SectionModel.AtlasSustainerCentaur: return Kind.Atlas;
                 case SectionModel.TitanStage1: return Kind.Titan;
                 case SectionModel.SaturnSIC: return Kind.Saturn;
+                case SectionModel.SuperHeavy: return Kind.Starbase;
                 default: return Kind.R7;   // Спутник, Восток, «Луна»
             }
         }
@@ -284,6 +294,37 @@ namespace Kare.Space.Game
             Fixed("Pad_Saturn_ML", Vector3.zero);
             Fixed("Pad_Saturn_LUT", Vector3.zero);
             SwingArms("Pad_Arm_Heavy", ArmHeavyLen, SaturnTower, new[] { 12f, 26f, 40f, 52f, 64f, 76f, 88f, 99f, 109f });
+        }
+
+        /// <summary>
+        /// Starbase (Бока-Чика, OLP-A): бетон с проёмом под 33 Raptor и башня ловли «Mechazilla» на запад от стола со
+        /// «палочками» на высоте цапф Super Heavy. Палочки стоят сведёнными по обе стороны оси: ускоритель садится в круг
+        /// RecoveryDef.DeckRadius у центра стола (SpaceXRockets.StarbaseCatch) — и оказывается между ними, как при ловле.
+        /// </summary>
+        void PlanStarbase(MeshBuilder slab, MeshBuilder pit)
+        {
+            Deck(slab, pit, 32, StarbaseHole);
+            var tower = new MeshBuilder(ConcreteTile);
+            float x0 = StarbaseTower.x, half = StarbaseTower.z * 0.5f, h = StarbaseTower.w, c = StarbaseColumn * 0.5f;
+            // Решётчатая башня: четыре стойки и пояса через StarbaseBay — читается фермой и не стоит лишних мешей.
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    tower.Box(new Vector3(x0 + sx * half - c, 0, sz * half - c), new Vector3(x0 + sx * half + c, h, sz * half + c));
+            for (float y = StarbaseBay; y < h; y += StarbaseBay)
+            {
+                tower.Box(new Vector3(x0 - half, y - 0.4f, -half - c), new Vector3(x0 + half, y + 0.4f, -half + c));
+                tower.Box(new Vector3(x0 - half, y - 0.4f, half - c), new Vector3(x0 + half, y + 0.4f, half + c));
+                tower.Box(new Vector3(x0 - half - c, y - 0.4f, -half), new Vector3(x0 - half + c, y + 0.4f, half));
+                tower.Box(new Vector3(x0 + half - c, y - 0.4f, -half), new Vector3(x0 + half + c, y + 0.4f, half));
+            }
+            // Каретка на грани к столу и две «палочки» до дальнего края корпуса, щель между ними — Ø ускорителя с зазором.
+            float yArm = top + StarbaseArmHeight, inner = x0 + half;
+            tower.Box(new Vector3(inner, yArm - 4, -StarbaseArmGap - 2), new Vector3(inner + 2.5f, yArm + 4, StarbaseArmGap + 2));
+            for (int sz = -1; sz <= 1; sz += 2)
+                tower.Box(new Vector3(inner, yArm - 1.2f, sz * StarbaseArmGap - 0.8f), new Vector3(StarbaseArmReach, yArm + 1.2f, sz * StarbaseArmGap + 0.8f));
+            // Кран и молниеотвод на макушке.
+            tower.Box(new Vector3(x0 - 1, h, -1), new Vector3(x0 + 1, h + 9, 1));
+            AddPart("Mechazilla", tower.Build(), steel[0], transform);
         }
 
         /// <summary>Четыре прожекторные мачты на диагоналях (по 45°): ствол, голова с панелью ламп и Spot-светом,

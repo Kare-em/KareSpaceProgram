@@ -1,214 +1,253 @@
-# Грабли: ядро, физика, автопилоты
+# Pitfalls: core, physics, autopilots
 
-Читать при правке `Core/` и игровой логики полёта (`VesselView`, `FlightInput`, `FlightHud`).
+Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`, `FlightHud`).
 
-## Модель и атмосфера
-- **СА-1976 — высоты геопотенциальные**: 22 632 Па на 11 км геопотенциальных, не геометрических.
-- **Осадка на воде** — `FlightPhysics.Draft`: доля объёма m/(ρV) шара корпуса; без неё капсула лежала на глади шаром.
-- **Парашют без рифления давал 40 g** («Восток»). Рифление: 3 % площади за 1 с, держать 4 с, раскрытие 4 с
-  (`FlightPhysics.ChuteReef*`) → 8,5 g.
-- **Пакет без SAS в max-Q разваливается — это верно**: нос впереди ЦМ, α 6° при q 39 кПа → аэроразрушение;
-  SAS Prograde держит α ≤ 1° (тест `stability`). **Неуправляемой ракете нужны стабилизаторы**: «Кара-Г» без
-  `FinArea` кувыркалась (karman: q 14,7 кПа, α 16°) — с `FinArea = 3` летит.
-- **Повреждения по умолчанию выключены** (`FlightPhysics.AeroBreakup/HeatDamage/GLoadLimit`, из `GameBootstrap` и меню Esc);
-  тесты ядра включают оба — автопилоты проверяются по строгим правилам.
-- `Vessel.AngleOfAttack` — в **градусах** (Qα в панели H раньше умножался на Rad2Deg ещё раз).
-- Клавиши: W — нос к +X связанных осей, S — к −X, D — к −Z, A — к +Z; на столе X — север, Z — запад
-  (`PlaceOnSurface`), поэтому D = восток, как в KSP; камера на старте смотрит на север (восток справа).
+## Model and atmosphere
+- **ISA-1976 altitudes are geopotential**: 22,632 Pa at 11 km geopotential, not geometric.
+- **Draft in water** — `FlightPhysics.Draft`: the fraction of the hull sphere's volume m/(ρV); without it the capsule sat on the water surface like a ball.
+- **A parachute without reefing gave 40 g** (Vostok). Reefing: 3 % of the area for 1 s, hold 4 s, opening 4 s
+  (`FlightPhysics.ChuteReef*`) → 8.5 g.
+- **A stack without SAS falls apart at max-Q — this is correct**: nose ahead of the CoM, α 6° at q 39 kPa → aerodynamic breakup;
+  SAS Prograde holds α ≤ 1° (test `stability`). **An unguided rocket needs stabilizers**: "Kara-G" without
+  `FinArea` tumbled (karman: q 14.7 kPa, α 16°) — with `FinArea = 3` it flies.
+- **Damage is off by default** (`FlightPhysics.AeroBreakup/HeatDamage/GLoadLimit`, from `GameBootstrap` and the Esc menu);
+  the core tests enable both — autopilots are checked against the strict rules.
+- `Vessel.AngleOfAttack` is in **degrees** (Qα in the H panel used to be multiplied by Rad2Deg a second time).
+- Keys: W — nose to +X of the body axes, S — to −X, D — to −Z, A — to +Z; on the pad X is north, Z is west
+  (`PlaceOnSurface`), so D = east, as in KSP; at the start the camera looks north (east is on the right).
 
-## Разделение и ступени
-- **Разделение: `Vessel.Position` — ЦМ**, вид рисует секции вокруг своего ЦМ. `Split` ставил обе части в старый общий
-  ЦМ → I ступень оказывалась внутри II (сдвиг 20 м). Теперь каждая часть встаёт на свой ЦМ (+ ω×r), толчок с отдачей
-  (тест `separation`: ошибка 0,0000 м, импульс 4e-14).
-- **Цельный обтекатель «пролётный»**: толчок 0,5 м/с против ≈15 м/с² работающей II ступени — ракета проходит 13 м
-  оболочки за ≈1,3 с. Сброс раскрывает на две створки (`Vessel.FairingHalf`, ±2 м/с вбок, откид 0,2 рад/с; низ уходит
-  наружу 0,57 м/с). Отладка: `FlightDebug.Lift(alt, up)` + `Stage()`.
-- **Ближайшие точки параллельных капсул**: в `ClosestPoints` (Эриксон) при параллельных осях знаменатель → 0, бралась
-  точка на торце — импульс удара уходил во вращение, и борта после «отскока» сходились (тест `collide`: −0,75 м/с).
-  Для параллельных — середина перекрытия проекций; стало +0,05 м/с (расходятся), импульс сохранён.
-- **Боковые блоки — отдельные борта**: раздавать каждому свой ЦМ (`Layout` + `RadialOffset`) и ω×r, иначе
-  «Семёрка» теряет симметрию отрыва; импульс сверять тестом `craft` (7e-14).
-- **КТДУ взводится отделением II ступени** (`Separate(1, igniteNext)`), иначе на торможении лишний шаг.
-- **`Vessel.RemainingStats` учитывал только работающие двигатели** → заглушенная ступень перед посадкой «не имела Δv»,
-  планировщик посадки ничего не мог. Теперь: взведена + топливо + (работает или есть запуски).
-- **Со стола зажигается только одна секция** (`Ignite, 0`); связки «блок + ускорители» — секцией с `EngineCount`.
-- **Взведение ≠ зажигание**: `Separate(i, igniteNext)` только взводит следующую; без запусков (`Ignitions`) или
-  без топлива ступень пропускается, нужен запасной шаг (fallback-ступень), иначе последовательность встаёт.
-- **Правило «выгорела — отделить»** срабатывало на тормозной ступени (ретро «Меркурия»/«Джемини»): её отделяли
-  с полным топливом. Выгорание — только у ступени, которая работала.
-- **Твердотопливные верхние ступени (Juno I, «Бэби Сарджент»)** не глушатся и не перезапускаются: подъём → пассив
-  до апоцентра → кик связкой. Наведение `Guided` задирало нос на старте — `KickLoftTime` (подъём кика по времени).
-  Цель 237 км не замыкалась (−80 м/с до круговой), 200 км — орбита ✅.
-- **Луноход** (`SectionDef.Rover`): по грунту — `FlightPhysics.DriveRover`, ввод `PilotInput.x` вперёд (+Z борта),
-  `.y` поворот; любой ввод пилота снимает автопилоты (`pilot.sqrMagnitude > 0`). На грунте якорь `Recenter` —
-  точка посадки, иначе плавающее начало уводит ровер.
+## Separation and stages
+- **Separation: `Vessel.Position` is the CoM**, the view draws sections around its own CoM. `Split` put both parts at the old shared
+  CoM → stage I ended up inside stage II (20 m offset). Now each part sits at its own CoM (+ ω×r), with a kick and recoil
+  (test `separation`: error 0.0000 m, impulse 4e-14).
+- **A one-piece fairing is "pass-through"**: a 0.5 m/s kick against ≈15 m/s² of the running stage II — the rocket passes through 13 m
+  of the shell in ≈1.3 s. Jettison splits it into two halves (`Vessel.FairingHalf`, ±2 m/s sideways, tilt-out 0.2 rad/s; the bottom moves
+  outward at 0.57 m/s). Debug: `FlightDebug.Lift(alt, up)` + `Stage()`.
+- **Closest points of parallel capsules**: in `ClosestPoints` (Ericson) with parallel axes the denominator → 0, and a point
+  on the end face was taken — the collision impulse went into rotation, and the boosters converged after the "bounce" (test `collide`: −0.75 m/s).
+  For parallel axes — the middle of the projection overlap; now +0.05 m/s (they diverge), impulse conserved.
+- **Side blocks are separate boosters**: give each its own CoM (`Layout` + `RadialOffset`) and ω×r, otherwise
+  the "Semyorka" loses the symmetry of liftoff separation; check the impulse with the `craft` test (7e-14).
+- **The TDU (braking engine) is armed by the separation of stage II** (`Separate(1, igniteNext)`), otherwise there is an extra step during braking.
+- **`Vessel.RemainingStats` counted only running engines** → a shut-down stage before landing "had no Δv",
+  and the landing planner could do nothing. Now: armed + fuel + (running or has restarts).
+- **Only one section is ignited from the pad** (`Ignite, 0`); "block + boosters" bundles — a section with `EngineCount`.
+- **Arming ≠ ignition**: `Separate(i, igniteNext)` only arms the next one; without restarts (`Ignitions`) or
+  without fuel the stage is skipped, a spare step (fallback stage) is needed, otherwise the sequence stalls.
+- **The "burned out — separate" rule** fired on the braking stage (retro of "Mercury"/"Gemini"): it was separated
+  with full tanks. Burnout applies only to a stage that has been running.
+- **Solid-fuel upper stages (Juno I, "Baby Sergeant")** cannot be shut down or restarted: ascent → coast
+  to apocenter → kick with the cluster. `Guided` steering pitched the nose up at launch — `KickLoftTime` (time-based kick lift).
+  The 237 km target did not close (−80 m/s short of circular), 200 km — orbit ✅.
+- **Lunokhod** (`SectionDef.Rover`): on the ground — `FlightPhysics.DriveRover`, input `PilotInput.x` forward (+Z of the craft),
+  `.y` turn; any pilot input cancels the autopilots (`pilot.sqrMagnitude > 0`). On the ground the `Recenter` anchor is the
+  landing point, otherwise the floating origin carries the rover away.
 
-## Рельсы и автопилоты
-- **После смены SOI на рельсах пересчитывать `WarpLimitTime`** (`AdvanceRails`), иначе ускорение перепрыгивает момент
-  зажигания, спланированный уже в сфере Луны.
-- **Автопилот узла жёг запуски**: флаг `started` ставить в начале `Update`, иначе каждый цикл ullage считался новым зажиганием.
-- **Облёт обратной стороны Луны (farside)** попадал в темноту: нужны окно старта по плоскости (`LaunchWindow`) +
-  ограничение времени перелёта `maxTransfer` 2,5 сут.
-- **Посадка на Луну**: минимальная тяга КТДУ (25 % от 16 кН) больше лунного веса — зависнуть нельзя. Схема: прогноз RK2
-  (шаг 0,5 с) + бисекция момента зажигания так, чтобы скорость 40 м/с наступала на «воротах» ≈136 м; дальше терминальный
-  закон постоянного торможения 6 м/с², последние 3 м — свободное падение (касание 3,3 м/с). Зажигание на 51 км при
-  2485 м/с, остаток 717 кг.
-- **Ворота посадки по тяге** (`GateAltitudeFor`): слабый DPS LM (aMax ≈ 5,3 против 6 + 1,62 потребных) не держал
-  ворота 136 м — удар 17–19 м/с с 3,9 т топлива. Замедление = min(6, 0,6·(aMax − g)) → ворота LM ≈ 370 м, касание мягкое.
-- **Торможение на пролётной (гиперболической) траектории**: борт ещё поднимается — прогноз немонотонен по газу,
-  бисекция выбирала 10 % и «Сервейор» уходил до 172 км. Пока `r·v > 0` — полный газ.
-- **Длинный прожиг (разгон к Луне, LOI) по неподвижному направлению терял до 60 м/с** (апогей 227–323 тыс. км вместо
-  380): прожиг > 2 % периода ведётся в осях текущей орбиты с отсечкой по энергии (`NodeAutopilot`). Остаточный промах —
-  коррекцией на трассе (тест: допуск 300 км по перицентру).
-- **Взлёт LM с Луны по земной программе тангажа** сжигал весь APS: без атмосферы — сразу `Guided`.
-- **`Ascend` возвращает true и при выработке топлива** — проверять орбиту, а не флаг.
-- **Freedom 7 (Редстоун)**: вертикальный подъём давал апогей 385 км и 14 g на спуске (гибель). Наклон 10° +
-  `LimitAoA` (развал на α 9°) + отсечка по апогею 180 км → 181 км и 11,1 g коротким пиком.
-- **Тесты рулят через `SasHold`**: `FlightControl.Update` обнуляет `TorqueCommand` каждый шаг.
-- **Перелёт к Луне: `TransferPlanner.Miss` — сближение без притяжения Луны, а не перицентр.** Прицельные 1847 км
-  при v∞ ≈ 1 км/с фокусируются в удар (прогноз Pe −1488 км, apollo8). `LunarAutopilot.PlanToPeriapsis` подбирает
-  прицельную дальность b = rp·√(1+2μ/(rp·v∞²)) по прогнозу `PatchedConics.Predict` (ему нужен `node.Remaining`).
-  Состояние в `PlanIntercept` берётся на момент t0 — переносить по орбите, иначе ошибка в сотни км.
-- **Итерация прицельного b по прогнозу не сходится** (ManeuverAutoPlan, 03.10.2026): b 4211 → Pe 518 км, b 3718 → −200 км —
-  сторона облёта перескакивает. Рабочее: один `PlanIntercept`, затем спуск по (прогрейд, нормаль) прямо по
-  `PatchedConics.Predict` до |Pe − цель| < 50 км: 91 км за 580 мс. Шаг 0,5 м/с (1 м/с ≈ 1000 км перицентра у Луны).
-- **Автопилот миссии под ускорением**: физика допустима до ×10 (`MaxPhysicsWarp`), дальше — рельсы с лимитом
-  `WarpLimit` до ближайшего события (узел, SOI, вход в атмосферу). apollo8 без рук: 9640 кадров, максимум ×100000.
-- **Торможение у Луны ~800 м/с идёт минуты и опускает перицентр**: 34 × 109 км вместо 110 × 110. Доводка
-  `Trim` двумя импульсами в апсидах → 109,8 × 110,4 км.
-- **Окололунная орбита «Аполлона» ретроградная (i 176°).** Взлёт LM на восток (азимут 90) дал i 4° — плоскость
-  КСМ разошлась на 172°, сближение min 90 км. Одного азимута мало: наведение берёт направление по горизонтальной
-  скорости, а на старте это вращение Луны (+4,6 м/с на восток) — с азимутом −90° вышла та же i 4,29°. Решение —
-  `AscentAutopilot.AimAtPlane`: тяга по недобору до круговой в плоскости цели → i 163,21° при КСМ 163,20°.
-- **Автопилот стыковки без узла (фаза Plan) не блокировал рельсы**: планирует он только в физике, на ×6 не вызвался
-  ни разу — двое суток впустую. `Universe.RailsBlocker` → «планируется сближение». После — причал за 2,6 ч, Δv 38 м/с.
+## Rails and autopilots
+- **After an SOI change on rails recompute `WarpLimitTime`** (`AdvanceRails`), otherwise time warp jumps over the moment
+  of ignition planned already in the Moon's sphere.
+- **The node autopilot burned through restarts**: set the `started` flag at the start of `Update`, otherwise each ullage cycle counted as a new ignition.
+- **The farside flyby of the Moon (farside)** ended up in darkness: needs a launch window by plane (`LaunchWindow`) +
+  a transfer time limit `maxTransfer` of 2.5 days.
+- **Landing on the Moon**: the minimum TDU thrust (25 % of 16 kN) exceeds the lunar weight — hovering is impossible. Scheme: RK2 prediction
+  (step 0.5 s) + bisection of the ignition moment so that a speed of 40 m/s is reached at the "gate" ≈136 m; then a terminal
+  constant-deceleration law of 6 m/s², the last 3 m — free fall (touchdown 3.3 m/s). Ignition at 51 km at
+  2485 m/s, 717 kg left.
+- **Landing gate by thrust** (`GateAltitudeFor`): the weak LM DPS (aMax ≈ 5.3 vs 6 + 1.62 required) did not hold the
+  136 m gate — impact of 17–19 m/s with 3.9 t of propellant. Deceleration = min(6, 0.6·(aMax − g)) → LM gate ≈ 370 m, soft touchdown.
+- **Braking on a flyby (hyperbolic) trajectory**: the craft is still climbing — the prediction is non-monotonic in throttle,
+  bisection picked 10 % and "Surveyor" went up to 172 km. While `r·v > 0` — full throttle.
+- **A long burn (translunar injection, LOI) along a fixed direction lost up to 60 m/s** (apogee 227–323 thousand km instead of
+  380): a burn > 2 % of the period is flown in the axes of the current orbit with an energy cutoff (`NodeAutopilot`). The residual miss is fixed
+  by a mid-course correction (test: tolerance 300 km on periapsis).
+- **LM liftoff from the Moon with the Earth pitch program** burned the entire APS: without an atmosphere — go straight to `Guided`.
+- **`Ascend` returns true even when the fuel runs out** — check the orbit, not the flag.
+- **Freedom 7 (Redstone)**: vertical ascent gave an apogee of 385 km and 14 g on descent (death). Tilt of 10° +
+  `LimitAoA` (breakup at α 9°) + apogee cutoff at 180 km → 181 km and 11.1 g as a short peak.
+- **Tests steer via `SasHold`**: `FlightControl.Update` zeroes `TorqueCommand` every step.
+- **Transfer to the Moon: `TransferPlanner.Miss` is the approach without the Moon's gravity, not the periapsis.** An aim distance of 1847 km
+  at v∞ ≈ 1 km/s focuses into an impact (predicted Pe −1488 km, apollo8). `LunarAutopilot.PlanToPeriapsis` selects
+  the aim distance b = rp·√(1+2μ/(rp·v∞²)) from the `PatchedConics.Predict` prediction (it needs `node.Remaining`).
+  The state in `PlanIntercept` is taken at time t0 — propagate it along the orbit, otherwise an error of hundreds of km.
+- **Iterating the aim b by the prediction does not converge** (ManeuverAutoPlan, 03.10.2026): b 4211 → Pe 518 km, b 3718 → −200 km —
+  the flyby side flips. What works: one `PlanIntercept`, then a descent over (prograde, normal) directly on
+  `PatchedConics.Predict` until |Pe − target| < 50 km: 91 km in 580 ms. Step 0.5 m/s (1 m/s ≈ 1000 km of periapsis at the Moon).
+- **Mission autopilot under time warp**: physics is allowed up to ×10 (`MaxPhysicsWarp`), beyond that — rails with the
+  `WarpLimit` limit up to the nearest event (node, SOI, atmosphere entry). apollo8 hands-free: 9640 frames, maximum ×100000.
+- **Braking at the Moon of ~800 m/s takes minutes and lowers the periapsis**: 34 × 109 km instead of 110 × 110. Fine-tuning
+  `Trim` with two impulses at the apsides → 109.8 × 110.4 km.
+- **The Apollo lunar orbit is retrograde (i 176°).** LM liftoff to the east (azimuth 90) gave i 4° — the CSM plane
+  was off by 172°, rendezvous min 90 km. An azimuth alone is not enough: guidance takes the direction from the horizontal
+  velocity, and at launch this is the Moon's rotation (+4.6 m/s to the east) — with azimuth −90° the same i 4.29° resulted. The solution is
+  `AscentAutopilot.AimAtPlane`: thrust by the shortfall to circular in the target plane → i 163.21° with the CSM at 163.20°.
+- **The docking autopilot without a node (Plan phase) did not block rails**: it plans only in physics, and at ×6 it was never
+  called — two days wasted. `Universe.RailsBlocker` → "rendezvous being planned". After that — docking in 2.6 h, Δv 38 m/s.
 
-## Подсказки
-- После приводнения `Splashed` ≠ `Landed`: без отдельного выхода в `FlightHud.Tutor` снова «2. Вертикальный подъём».
-- В шрифте HUD нет ⌫ — подписи клавиш писать словами («Bksp»).
-- **Ullage ждал вечно** (02.10.2026): порог осадки топлива `FlightPhysics.SettleAccel` был 0,05 м/с², а РСУ полного
-  пакета ≈ 13 кН на 500 т = 0,026 м/с² — топливо не оседало, после чита «Над Луной 15 км» автопилот посадки ждал до
-  удара. Порог 0,01 (как у реальных РДТТ осадки S-IVB / Блока Д: 0,01–0,1). Тест `moondrop` (с 03.10 — только станция Е-6, см. «Трап лунохода и Р-7»): садится 3,3 м/с.
-- **Тутор «отсечка → импульс в апоцентре» заводил в тупик**: у Блока Е, Agena и др. одно зажигание — после отсечки
-  довыведение невозможно. Отсечка подсказывается только при `CanIgnite`, иначе «Довыведение» без выключения
-  (закон `AscentAutopilot.GuidedSin` / `CircularizeSin` — общий с автопилотом).
+## Hints
+- After splashdown `Splashed` ≠ `Landed`: without a separate branch in `FlightHud.Tutor` it again says "2. Vertical ascent".
+- The HUD font has no ⌫ — write key labels in words ("Bksp").
+- **Ullage waited forever** (02.10.2026): the fuel settling threshold `FlightPhysics.SettleAccel` was 0.05 m/s², while the RCS of the full
+  stack is ≈ 13 kN on 500 t = 0.026 m/s² — the fuel did not settle, after the "Above the Moon 15 km" cheat the landing autopilot waited until
+  impact. Threshold 0.01 (like real settling solid motors of the S-IVB / Block D: 0.01–0.1). Test `moondrop` (since 03.10 — only the E-6 station, see "Lunokhod ramp and R-7"): lands at 3.3 m/s.
+- **The "cutoff → impulse at apocenter" tutorial led to a dead end**: Block E, Agena and others have a single ignition — after cutoff
+  orbit insertion is impossible. The cutoff is hinted only if `CanIgnite`, otherwise "Insertion" without shutdown
+  (law `AscentAutopilot.GuidedSin` / `CircularizeSin` — shared with the autopilot).
 
-- **Мелкие коррекции не исполняются**: `NodeAutopilot` закрывает манёвр при остатке < 0,1 м/с, а коррекция перигея с
-  края сферы Луны — доли м/с на километры. Решение (`MissionAutopilot.FixPerigee`): коррекция на выходе из SOI + поздняя
-  за `LateFixLead` = 3 ч до перигея (там 1 км перигея ≈ 0,1–0,3 м/с), манёвры < `MinFixDv` = 0,1 не ставить.
-- **Коридор входа «Аполлона» узкий**: перигей 45,9 км → вход −6,85°, 8,0 g — живы; 41,1 км → −7,02°, 9,2 g дольше 10 с —
-  экипаж погиб. Отсюда `ReturnTolerance` 1,5 км (было 5). auto_apollo11 после правки: 47,7 км, −6,78°, 8,4 g, приводнение 6,2 м/с.
-- **`Await` вместо `WaitUntil` в пассивном полёте** перелетал на ~11,6 сут (ждал событие, которое уже прошло). Для
-  выдержек по времени — только `WaitUntil`. После отстыковки `Flipped` остаётся true — проверять `Attached && Flipped`.
+- **Small corrections are not executed**: `NodeAutopilot` closes a maneuver when the remainder is < 0.1 m/s, and a perigee correction from
+  the edge of the Moon's sphere is fractions of m/s over kilometers. Solution (`MissionAutopilot.FixPerigee`): a correction at SOI exit + a late one
+  `LateFixLead` = 3 h before perigee (there 1 km of perigee ≈ 0.1–0.3 m/s), do not place maneuvers < `MinFixDv` = 0.1.
+- **The Apollo entry corridor is narrow**: perigee 45.9 km → entry −6.85°, 8.0 g — alive; 41.1 km → −7.02°, 9.2 g for longer than 10 s —
+  the crew died. Hence `ReturnTolerance` 1.5 km (was 5). auto_apollo11 after the fix: 47.7 km, −6.78°, 8.4 g, splashdown 6.2 m/s.
+- **`Await` instead of `WaitUntil` in passive flight** overshot by ~11.6 days (waited for an event that had already passed). For
+  time-based holds — only `WaitUntil`. After undocking `Flipped` stays true — check `Attached && Flipped`.
 
-## Подвеска, луноход, автопилот миссии (03.10.2026)
-- **Подвеска опор/колёс — `Vessel.Suspension` поверх якоря** (`FlightPhysics.StepSuspension`): 1,5 Гц, ζ 0,6, ход 0,5 м.
-  Касание отдаёт вертикальную скорость в `SuspensionRate`; перепад рельефа под луноходом — в `Suspension`. Явная схема
-  устойчива только при ω·dt ≪ 1 — на ω·dt > 0,5 (большой шаг) подвеска обнуляется, иначе разнос.
-- **Съезд лунохода — профиль трапа, а не телепорт.** Раньше после отделения на грунте якорь лунохода стоял на настиле КТ, а
-  первый шаг `DriveRover` ставил его на рельеф — прыжок на 2,3 м. Теперь `Vessel.RampDeck` (высота настила, считается в
-  `Recenter` при отделении) и `RampTravel`: высоты осей берутся по профилю трапа (`FlightPhysics.RampHeight`), поворот закрыт
-  до схода обеих осей. Тест `luna17`: настил 2,34 м, съезд 6,1 м за 11 с, макс. шаг высоты 3,2 см.
-  Настил 2,34 м, а не 1,9 (высота КТ): посадочный offset `CheckContact` = Com·cos + Radius·sin — при наклоне на касании
-  ступень Ø 4 м «висит» на кромке на ~0,4 м.
-- **Автопилот миссии (Y) снимается только Y**: `Universe` не сбрасывает его по `PilotInput` (`Mission == null` в условии),
-  а `FlightInput` при нём глотает руль/газ/ступени и пишет подсказку. M и ускорение `. , /` работают.
-- **«Луна-17» садится с орбиты, а не напрямую** (`MissionDef.LunarOrbit/LunarPerilune`, `MissionAutopilot.LunarOrbitFirst`):
-  85×85 км → перицентр 19 км → посадка. Прямой спуск верен только для «Луны-9» и «Сервейера-1».
-  Грабля: проверка «уже сели» — `V.IsLanded && V.Body == moon`; голое `!V.IsLanded` на старте с Земли пропускало весь перелёт
-  (auto_luna17: 3 кадра и «миссия на Земле»).
+## Suspension, lunokhod, mission autopilot (03.10.2026)
+- **Landing leg/wheel suspension — `Vessel.Suspension` on top of the anchor** (`FlightPhysics.StepSuspension`): 1.5 Hz, ζ 0.6, travel 0.5 m.
+  Touchdown passes the vertical velocity into `SuspensionRate`; terrain height differences under the lunokhod go into `Suspension`. The explicit scheme
+  is stable only when ω·dt ≪ 1 — at ω·dt > 0.5 (large step) the suspension is zeroed, otherwise it blows up.
+- **Lunokhod rollout is a ramp profile, not a teleport.** Previously, after separation on the ground the lunokhod's anchor stood on the landing-stage deck, and the
+  first `DriveRover` step put it on the terrain — a 2.3 m jump. Now `Vessel.RampDeck` (deck height, computed in
+  `Recenter` at separation) and `RampTravel`: axle heights are taken from the ramp profile (`FlightPhysics.RampHeight`), turning is locked
+  until both axles are off. Test `luna17`: deck 2.34 m, rollout 6.1 m in 11 s, max height step 3.2 cm.
+  Deck 2.34 m, not 1.9 (landing-stage height): the landing offset of `CheckContact` = Com·cos + Radius·sin — with a tilt at touchdown
+  the Ø 4 m stage "hangs" on the edge by ~0.4 m.
+- **The mission autopilot (Y) is cancelled only by Y**: `Universe` does not reset it on `PilotInput` (`Mission == null` in the condition),
+  and `FlightInput` swallows steering/throttle/stages while it is on and prints a hint. M and time warp `. , /` work.
+- **"Luna-17" lands from orbit, not directly** (`MissionDef.LunarOrbit/LunarPerilune`, `MissionAutopilot.LunarOrbitFirst`):
+  85×85 km → periapsis 19 km → landing. A direct descent is correct only for "Luna-9" and "Surveyor-1".
+  Pitfall: the "already landed" check is `V.IsLanded && V.Body == moon`; a bare `!V.IsLanded` when starting from Earth skipped the entire transfer
+  (auto_luna17: 3 frames and "mission on Earth").
 
-## Трап лунохода и Р-7 (03.10.2026)
-- **На трапе луноход разворачивало поперёк**: наклон корпуса на рельсе 30° давал ложное рыскание при проекции носа на
-  плоскость горизонта. Курс восстанавливается точным обратным поворотом: `FromToRotation(v.GroundUp, up) * нос`, затем
-  проекция. На трапе `turn = 0` — разворот закрыт до схода обеих осей (`luna17`: 9 ok).
-- **Р-7 боковыми блоками** — радиальная группа (`R7Boosters`, RadialCount 4, RadialParent 0), а не нижняя секция, как у
-  Atlas. Порядок: `Ignite(1)` + `Ignite(0, withPrevious)` → `Separate(1)` по выработке боковых (`NextDropsSpentRadial`) →
-  `Separate(0, igniteNext)`. «Спутник» без III ступени: блок А на конце работы 10,2 g (РД-108 не дросселируется, ПН 84 кг) —
-  исторично, пилотируемому «Востоку» не грозит (блок Е).
-- **Тест `separation` не знал боковых обломков**: сверял позицию обломка по оси пакета и падал ровно на RadialOffset
-  (2,965 м). Обломок радиальной группы ищется по имени проекта (`RadialPiece` даёт Name = имя группы), сверяются осевая
-  ошибка и боковое отстояние = RadialOffset.
-- **Аэродинамика пакета по maxR**: `MassProperties.maxRadius` включает RadialOffset боковых блоков (Р-7: 4,3 м), и
-  лоб π·R², плечо носа 2R и бок L·2R считались цилиндром Ø8,6 м — «Молния» ломалась на T+61 (q 30 кПа, α 8°).
-  Теперь `FlightPhysics.AeroAreas`: корпус — `HullRadius`, боковые блоки — свои торцы, сбоку видно не больше двух.
-  maxR остался только для касания грунта и осадки. Без радиальных групп площади прежние.
-- **Пакет Р-7 на Луну не сажается** (чит «15 км» + автопилот): РД-107/108/0110 не дросселируются и не перезапускаются,
-  тяга 5–10 лунных весов — на терминальном участке глохнут, ступени сбрасываются, удар 17 м/с. Это физика, не баг:
-  тест `moondrop` сажает станцию Е-6, сбросив всё под ней.
-- **Разгон к Луне блоком Л шёл «коротким» законом**: `NodeAutopilot.Plan` строился в первый тик, пока активен блок И
-  без запусков (BurnTime = ∞) → energyMode выключен навсегда; после сброса блока план не пересчитывался.
-  Апоцентр 271 тыс. км вместо 364, коррекция не спасала. Теперь при ∞ план сбрасывается и строится заново (luna9 ✅).
-- **Погибший активный борт замирает в невращающихся осях**, а взрыв/обломки `BlastEffects` стоят в осях тела —
-  камера «улетала» от места гибели на ≈ 400 м/с (вращение Земли). `Universe.PinWreck` крепит место гибели к телу
-  (`Vessel.WreckLocal`, по `Body.Orientation` того же кадра, что и взрыв) и ведёт его вместе с телом (03.10.2026).
+## Lunokhod ramp and R-7 (03.10.2026)
+- **On the ramp the lunokhod was turned sideways**: the 30° hull tilt on the rail gave a false yaw when projecting the nose onto
+  the horizon plane. The heading is restored by an exact inverse rotation: `FromToRotation(v.GroundUp, up) * nose`, then
+  projection. On the ramp `turn = 0` — turning is locked until both axles are off (`luna17`: 9 ok).
+- **R-7 with side blocks** is a radial group (`R7Boosters`, RadialCount 4, RadialParent 0), not a lower section as with
+  Atlas. Order: `Ignite(1)` + `Ignite(0, withPrevious)` → `Separate(1)` when the side blocks are spent (`NextDropsSpentRadial`) →
+  `Separate(0, igniteNext)`. "Sputnik" without a stage III: block A at end of burn 10.2 g (RD-108 cannot throttle, payload 84 kg) —
+  historical, the crewed "Vostok" is not threatened (block E).
+- **The `separation` test did not know about side debris**: it compared the debris position along the stack axis and failed by exactly RadialOffset
+  (2.965 m). Debris of a radial group is looked up by project name (`RadialPiece` gives Name = group name), the axial
+  error and the lateral offset = RadialOffset are compared.
+- **Stack aerodynamics by maxR**: `MassProperties.maxRadius` includes the RadialOffset of the side blocks (R-7: 4.3 m),
+  and the frontal area π·R², the nose arm 2R and the side L·2R were computed as a Ø8.6 m cylinder — "Molniya" broke up at T+61 (q 30 kPa, α 8°).
+  Now `FlightPhysics.AeroAreas`: the hull uses `HullRadius`, the side blocks use their own end faces, no more than two are visible from the side.
+  maxR remains only for ground contact and draft. Without radial groups the areas are as before.
+- **The R-7 stack does not land on the Moon** (the "15 km" cheat + autopilot): RD-107/108/0110 cannot throttle or restart,
+  thrust is 5–10 lunar weights — on the terminal leg they flame out, the stages are dropped, impact 17 m/s. This is physics, not a bug:
+  the `moondrop` test lands the E-6 station after dropping everything below it.
+- **Translunar injection by the Block L ran on the "short" law**: `NodeAutopilot.Plan` was built on the first tick, while Block I is active
+  without restarts (BurnTime = ∞) → energyMode is off forever; after the block was dropped the plan was not rebuilt.
+  Apocenter 271 thousand km instead of 364, correction did not save it. Now on ∞ the plan is reset and rebuilt (luna9 ✅).
+- **A dead active craft freezes in the non-rotating axes**, while the explosion/debris of `BlastEffects` stand in the body axes —
+  the camera "flew away" from the death site at ≈ 400 m/s (Earth's rotation). `Universe.PinWreck` attaches the death site to the body
+  (`Vessel.WreckLocal`, by `Body.Orientation` of the same frame as the explosion) and carries it along with the body (03.10.2026).
 
-## Реальные карты высот (04.10.2026)
-- **`TerrainSettings.Amplitude` — не только масштаб шума, но и граница «выше любых гор»**: CheckContact (1,5·A),
-  `LandingAutopilot.PredictGate` (1,5·A + 100), `RailsFloorRadius` (1,5·A + 2 км). С картой Олимп 21,2 км при
-  прежних A = 7 км у Марса (граница 10,5 км) касание на склоне не проверялось бы. `ApplyHeightMap` ставит
-  A = MaxWithDetail/1,5; поменял карту или DetailGain — граница пересчитается сама.
-- **Карты высот — до первого `Terrain.Height`**: котловина космодрома кеширует `BasinDrop` в статическом `Terrain.Sites`
-  на всю сессию. Задать карту после — площадка выровнена по старому рельефу.
-- **Маска EarthLand считает морской лёд Арктики сушей**: подъём «низин суши ниже 0» до +1 м без отсечки по широте
-  поднимал 5,97 % текселей (Северный Ледовитый океан); с |широта| < 60° — 0,13 % (Каттара, Прикаспий, польдеры).
-- **ETOPO 2022 «surface» даёт дно озёр, а не их зеркало**: Каспий −667 м (вода по маске — остаётся морем), Байкал,
-  Ладога и Великие озёра — сухие котловины. Через OPeNDAP строка 0 — юг (lat[0] = −89,99), переворачивать.
-- **0,1° мало для площадок на косе — «мыс Канаверал на воде»** (05.10.2026): билинейная глобальной карты в LC-39A
-  −4,0 м, в SLF −0,2 м (тексель 11 км смешивает косу с океаном и лагуной). Подъём суши `landW` вокруг площадки (до 9 км)
-  поднимал всё в радиусе до ≥ 3 м — площадка стояла на «острове» среди моря. Теперь вставки ETOPO 2022 15″ (≈460 м)
-  1,5°×1,5° вокруг всех земных площадок и полос (`Data/EarthPatches.bytes`, 6 вставок 360×360, 1,56 МБ,
-  `bake-dem.py patches`): сырой рельеф 39A +2,3 м, SLF +1,1 м, океан в 4 км к востоку −6 м → вода; край вставки
-  (смешивание `DemPatch.FadeDeg` 0,2°) — перепад ≤ 2,8 м на 200 м. Во вставке `landW` выключен, а выравнивание не
-  тянет воду глубже `Terrain.PatchSeaCut` (−2 м) дальше `PatchPadCore` (300 м) от стола.
-- **ETOPO 15″ у берега даёт −1 м на суше** (сшивка суши и батиметрии): в 1–2 км к Ю/В от 39A сырые −0,7…−1,3 м.
-  Поэтому тест `patches` проверяет сушу по итоговому `Terrain.Height` (≥ 1,0 м), а не по сырому рельефу.
-  `bake-dem.py` печатает в консоль ″ — без `PYTHONIOENCODING=utf-8` падает на cp1251.
-- **Шум мелкого рельефа на Луне**: уклон на базе 20 м — средний 4,3°, максимум 39° (20 000 точек); посадки
-  luna9/surveyor1/luna17/apollo11/moondrop садятся 3,3–3,5 м/с, как и на процедурном (3,3–3,4).
-- **Эпоха рельсов в `AdvancePhysics`** (04.10.2026): борт вне физики сходил на рельсы с `Position` начала кадра, а
-  эпоха орбиты бралась `Time` — уже конца кадра. Отошедший борт перескакивал на кадр вперёд по орбите: расстыковка на
-  300 км, кадр 0,1 с — цель в 773 м (7,73 км/с × 0,1) и «уходит» на 1,2 м/с вместо 0,3; повторная стыковка 404 с.
-  Теперь `MovePassive(..., since: t0)` → `EnterRails(v, epoch)`: 21 м за 10 с, стыковка 24 с. Тест `undock`.
-- **`Split(mask, dv)` — скорость отходящей части, не расхождение**: остаток получает отдачу dv·md/mv, расхождение
-  dv·m/mv. Полная S-IVB с ЛМ (120 т) от КСМ (30 т) расходилась на 1,6 м/с вместо 0,3 — `Vessel.Undock` пересчитывает dv.
-- **Станция — секция того же проекта** (04.10.2026, `StationMissions.cs`): `CanDock` требует `a.Design == t.Design`,
-  поэтому МКС — последняя секция ракеты «Союза»/«Драгона»; `StationSetup.Place` отрезает её в отдельный борт на круговой
-  орбите, плоскость которой проходит над стартом на северном витке через `StationLaunchDelay` после старта.
-- **`StageUntil` и неприменимые шаги**: смотрит на сырой индекс `Sequence`, а `Undock` до стыковки неприменим и
-  пропускается — ступень «проскакивала» дальше. В скрипте станции — `StageBefore(idx)` по `NextApplicable`.
-- **Остаток `RcsTranslate` после захвата**: `Universe.CheckDocking` гасит `Docking`, но не команду РСУ, а тяга РСУ связки —
-  сумма по секциям (с МКС 2·10^5 Н). За 10 мин в связке «Драгон»+МКС разгонялись на ~120 м/с (420×420 → 419×862 км),
-  на сходе вход −2,66° и гибель экипажа 9,3 g. Исправлено 04.10 в `CheckDocking`: после `host.Dock` команда РСУ обоих бортов обнуляется.
-- **Шаг `Undock` против клавиши V**: шаг толкает отходящую станцию на UndockPush с отдачей кораблю 0,3·M/m — от МКС 420 т
-  «Драгону» 11 т +10 м/с (апогей +40 км). Скрипт расстыковывает `Universe.Undock()` (поправка по массам).
-- **Баллистический вход: перегрузка от угла на 140 км** (капсулы без подъёмной силы): −1,10° → 8,6 g («Восход-2»),
-  −1,30° → 11,1 g (0,5 с выше 9 g), −1,37° → 8,3 g у «Драгона» (DragScale 1,3), −1,42° → 11,2 g, −2,66° → 9,3 g 10 с = гибель.
-  Перицентр схода с НОО — `StationEntryPerigee` 50 км (с 30 км у «Союза» было 11,2 g).
-- **«Фридом-7»: гибель „при касании“ в ядре воспроизводится только перегрузкой** (05.10.2026). Ядро сажает капсулу мягко во всех
-  вариантах: программа тангажа и отсечка на 181 км → приводнение 6,9 м/с (lat 28,40 lon −76,00, глубина −5 км);
-  вертикально без программы → апогей 387 км, суша у Канаверала h 7,4 м, 1,7–6,9 м/с; взвод купола поздно
-  (3 км / 2 км / 1,2 км / 0,8 км при 135–155 м/с) и уставка 1 км — тоже цел; ×1 и ×10, урон вкл/выкл.
-  «Редстоун» отходит на 10 м и падает раньше капсулы (630–740 м/с), столкновений нет. Единственная гибель —
-  вертикальный полёт с правилом перегрузки: вход с 387 км даёт пик 21 g (> CrewGLimit 9 g дольше 10 с),
-  `CrewLost` ставится на входе, а провал «Экипаж погиб от перегрузки» `MissionTracker` пишет только на касании.
-  Признак: в логе есть «Экипаж погиб: перегрузка …», нет «Удар о поверхность». Регрессия — `freedom7` проверяет
-  цел/Splashed/купол/касание < CrashSpeed.
+## Real height maps (04.10.2026)
+- **`TerrainSettings.Amplitude` is not only the noise scale but also the "above any mountains" bound**: CheckContact (1.5·A),
+  `LandingAutopilot.PredictGate` (1.5·A + 100), `RailsFloorRadius` (1.5·A + 2 km). With the Olympus map of 21.2 km and
+  the former A = 7 km for Mars (bound 10.5 km), touchdown on a slope would not have been checked. `ApplyHeightMap` sets
+  A = MaxWithDetail/1.5; if you change the map or DetailGain — the bound is recomputed automatically.
+- **Height maps — before the first `Terrain.Height`**: the spaceport basin caches `BasinDrop` in the static `Terrain.Sites`
+  for the whole session. Setting a map afterwards — the site is leveled to the old terrain.
+- **The EarthLand mask counts Arctic sea ice as land**: raising "land lowlands below 0" to +1 m without a latitude cutoff
+  raised 5.97 % of texels (Arctic Ocean); with |latitude| < 60° — 0.13 % (Qattara, Caspian lowland, polders).
+- **ETOPO 2022 "surface" gives lake bottoms, not their surface**: Caspian −667 m (water by mask — stays a sea), Baikal,
+  Ladoga and the Great Lakes — dry basins. Via OPeNDAP row 0 is south (lat[0] = −89.99), flip it.
+- **0.1° is too coarse for sites on a spit — "Cape Canaveral on water"** (05.10.2026): bilinear sampling of the global map at LC-39A
+  −4.0 m, at SLF −0.2 m (an 11 km texel blends the spit with the ocean and the lagoon). Raising land `landW` around the site (up to 9 km)
+  lifted everything within a radius to ≥ 3 m — the site stood on an "island" in the middle of the sea. Now inserts of ETOPO 2022 15″ (≈460 m)
+  1.5°×1.5° around all Earth sites and runways (`Data/EarthPatches.bytes`, 6 inserts of 360×360, 1.56 MB,
+  `bake-dem.py patches`): raw terrain 39A +2.3 m, SLF +1.1 m, ocean 4 km to the east −6 m → water; insert edge
+  (blending `DemPatch.FadeDeg` 0.2°) — a drop of ≤ 2.8 m per 200 m. Inside an insert `landW` is off, and leveling does not
+  pull water deeper than `Terrain.PatchSeaCut` (−2 m) farther than `PatchPadCore` (300 m) from the pad.
+- **ETOPO 15″ near the coast gives −1 m on land** (stitching of land and bathymetry): 1–2 km S/E of 39A the raw values are −0.7…−1.3 m.
+  So the `patches` test checks land by the final `Terrain.Height` (≥ 1.0 m), not by the raw terrain.
+  `bake-dem.py` prints ″ to the console — without `PYTHONIOENCODING=utf-8` it crashes on cp1251.
+- **Fine terrain noise on the Moon**: slope over a 20 m baseline — mean 4.3°, maximum 39° (20,000 points); landings of
+  luna9/surveyor1/luna17/apollo11/moondrop touch down at 3.3–3.5 m/s, same as on procedural terrain (3.3–3.4).
+- **Rails epoch in `AdvancePhysics`** (04.10.2026): a craft outside physics went onto rails with the `Position` of the frame start, while
+  the orbit epoch was taken from `Time` — already the end of the frame. The departed craft jumped a frame ahead along the orbit: undocking at
+  300 km, frame 0.1 s — the target at 773 m (7.73 km/s × 0.1) and "drifts away" at 1.2 m/s instead of 0.3; re-docking 404 s.
+  Now `MovePassive(..., since: t0)` → `EnterRails(v, epoch)`: 21 m in 10 s, docking 24 s. Test `undock`.
+- **`Split(mask, dv)` is the velocity of the departing part, not the separation rate**: the remainder gets recoil dv·md/mv, the separation rate is
+  dv·m/mv. A full S-IVB with the LM (120 t) from the CSM (30 t) separated at 1.6 m/s instead of 0.3 — `Vessel.Undock` recomputes dv.
+- **A station is a section of the same design** (04.10.2026, `StationMissions.cs`): `CanDock` requires `a.Design == t.Design`,
+  so the ISS is the last section of the "Soyuz"/"Dragon" rocket; `StationSetup.Place` cuts it off into a separate craft in a circular
+  orbit whose plane passes over the launch site on the northbound pass `StationLaunchDelay` after launch.
+- **`StageUntil` and inapplicable steps**: it looks at the raw `Sequence` index, while `Undock` is inapplicable before docking and
+  is skipped — the stage "slipped" further. In the station script — `StageBefore(idx)` by `NextApplicable`.
+- **Leftover `RcsTranslate` after capture**: `Universe.CheckDocking` clears `Docking` but not the RCS command, and the RCS thrust of the stack is
+  the sum over sections (with the ISS 2·10^5 N). In 10 min the "Dragon"+ISS stack accelerated by ~120 m/s (420×420 → 419×862 km),
+  on deorbit entry −2.66° and crew death at 9.3 g. Fixed 04.10 in `CheckDocking`: after `host.Dock` the RCS command of both craft is zeroed.
+- **The `Undock` step vs the V key**: the step pushes the departing station with UndockPush with recoil to the ship of 0.3·M/m — from the 420 t ISS
+  the 11 t "Dragon" gets +10 m/s (apogee +40 km). The script undocks with `Universe.Undock()` (mass-corrected).
+- **Ballistic entry: g-load from the angle at 140 km** (capsules without lift): −1.10° → 8.6 g ("Voskhod-2"),
+  −1.30° → 11.1 g (0.5 s above 9 g), −1.37° → 8.3 g for "Dragon" (DragScale 1.3), −1.42° → 11.2 g, −2.66° → 9.3 g for 10 s = death.
+  Deorbit perigee from LEO — `StationEntryPerigee` 50 km (with 30 km for "Soyuz" it was 11.2 g).
+- **"Freedom 7": death "at touchdown" in the core is reproduced only by g-load** (05.10.2026). The core lands the capsule softly in all
+  variants: pitch program and cutoff at 181 km → splashdown 6.9 m/s (lat 28.40 lon −76.00, depth −5 km);
+  vertical without a program → apogee 387 km, land at Canaveral h 7.4 m, 1.7–6.9 m/s; late chute arming
+  (3 km / 2 km / 1.2 km / 0.8 km at 135–155 m/s) and a 1 km setpoint — also intact; ×1 and ×10, damage on/off.
+  "Redstone" separates by 10 m and falls before the capsule (630–740 m/s), no collisions. The only death is
+  vertical flight with the g-load rule: entry from 387 km gives a peak of 21 g (> CrewGLimit 9 g for longer than 10 s),
+  `CrewLost` is set at entry, while the "Crew died of g-load" failure is written by `MissionTracker` only at touchdown.
+  Symptom: the log has "Crew died: g-load …" and no "Surface impact". Regression — `freedom7` checks
+  intact/Splashed/chute/touchdown < CrashSpeed.
 
-## Крылатые аппараты и параметрические детали (05.10.2026, `Aerodynamics.cs`, `MissionAutopilot.Winged.cs`, `PartCatalog.Resolve`)
-- **Кадр автопилота без `WarpLimit` прыгает на ×1e7**: шаг на рельсах без ограничения проскочил 277 ч и вход в атмосферу.
-  Крылатый автопилот ставит предел ускорения до входа так же, как капсульные (`Universe.WarpLimitTime`).
-- **Равновесное планирование по инерциальной скорости врёт на +350 м/с** (вращение Земли): равновесие считать по скорости
-  относительно атмосферы. Равновесное планирование «в лоб» давало 5,3 g и 3,7 км/с у полосы; слежение за программой
-  торможения (опорное сопротивление, `MaxRefDrag` 12 м/с²) — 3,0 g. `MaxRefDrag` 20 → нырок 3,5 g.
-- **Качество на α 18° против 11°**: на гиперзвуке L/D выше на большом α (линейная часть CN мала, растёт sin²α) — вход
-  держать на 40°, на дозвуке переходить к α ~10° (максимум L/D).
-- **QLimit 20 кПа → перелёт полосы на 15 км**; 30 кПа (полоса QBand 10 кПа) — посадка в створе. `FlareSinkGain` 0,5 →
-  касание 3,9 м/с, 1,0 → 1,7 м/с (STS-1 118 м/с по полосе, «Буран» 105 м/с).
-- **`Aerodynamics.CollectPanels` требует `Vessel.MassProperties` до вызова**: без него NullReference в `SectionBottom`
-  (layoutBuf пуст). Тесты конструктора зовут `v.MassProperties(out _, out _, out _, out _)` первым.
-- **Размеры детали — только через `PartCatalog.Resolve(CraftPart)`**: `Get(id)` отдаёт каталожную деталь, и топливо бака
-  Length 10 считается как у 4-метрового. Радиальные группы — строковые id без параметров (`Get`). Кеш Resolve — по
-  `ParamKey()`; в UI значение округляется к шагу Range, иначе 0,1+0,2 плодит ключи.
-- **Проверка стыков диаметров**: основание обтекателя шире ступени — штатно («Семёрка» Ø2 → Ø3,7, «Кара-1» Ø3,7 → Ø5),
-  иначе в пресетах ложные предупреждения. Допуск 0,05 м < шага диаметра 0,1 м.
+## Winged vehicles and parametric parts (05.10.2026, `Aerodynamics.cs`, `MissionAutopilot.Winged.cs`, `PartCatalog.Resolve`)
+- **An autopilot frame without `WarpLimit` jumps to ×1e7**: an unrestricted step on rails skipped 277 h and the atmosphere entry.
+  The winged autopilot sets a warp limit before entry the same way as the capsule ones (`Universe.WarpLimitTime`).
+- **Equilibrium glide by inertial speed lies by +350 m/s** (Earth's rotation): compute the equilibrium from the speed
+  relative to the atmosphere. Straight-on equilibrium glide gave 5.3 g and 3.7 km/s at the runway; tracking the deceleration
+  program (reference drag, `MaxRefDrag` 12 m/s²) — 3.0 g. `MaxRefDrag` 20 → a dive of 3.5 g.
+- **Lift-to-drag at α 18° vs 11°**: at hypersonic speeds L/D is higher at large α (the linear part of CN is small, sin²α grows) — hold entry
+  at 40°, and at subsonic speeds switch to α ~10° (maximum L/D).
+- **QLimit 20 kPa → overshoot of the runway by 15 km**; 30 kPa (runway QBand 10 kPa) — landing in the approach corridor. `FlareSinkGain` 0.5 →
+  touchdown 3.9 m/s, 1.0 → 1.7 m/s (STS-1 118 m/s along the runway, "Buran" 105 m/s).
+- **`Aerodynamics.CollectPanels` requires `Vessel.MassProperties` before the call**: without it NullReference in `SectionBottom`
+  (layoutBuf is empty). The constructor tests call `v.MassProperties(out _, out _, out _, out _)` first.
+- **Part dimensions — only via `PartCatalog.Resolve(CraftPart)`**: `Get(id)` returns the catalog part, and the propellant of a tank with
+  Length 10 is computed as for a 4-meter one. Radial groups are string ids without parameters (`Get`). The Resolve cache is keyed by
+  `ParamKey()`; in the UI the value is rounded to the Range step, otherwise 0.1+0.2 breeds keys.
+- **Diameter junction check**: a fairing base wider than the stage is normal ("Semyorka" Ø2 → Ø3.7, "Kara-1" Ø3.7 → Ø5),
+  otherwise the presets produce false warnings. Tolerance 0.05 m < the diameter step of 0.1 m.
+
+
+## Control surfaces and drag chute (05.10.2026, `Aerodynamics.ControlSurface`, `FlightPhysics.StepRollout`)
+- Deflection signs derived from r × F in body axes (Attitude is already in Unity axes, Cross is the same in the core and Unity — no mirroring):
+  τz > 0 (nose to −X, "up") ⇔ elevon trailing edge to −X; τy > 0 ⇔ trailing edge of the +Z wing up, −Z down; τx > 0 ⇔ rudder edge to +Z.
+- The actuator rate limit exists only in the view: introduced into physics, it would lag the command of autopilots tuned without it.
+- The flap is `WingPanel.Trim` with ControlArea and zero area: it does not change passive aerodynamics, is not part of `ControlAuthority`
+  (otherwise the controller would spend it as a rudder), the moment comes only from `PitchTrim · TrimAuthority`. auto_sts1/auto_buran ✅ after introduction.
+- The drag chute is a craft state (`Vessel.DragChute`), not the `ChuteDeployed` arrays of the capsule ones: those are driven by input by altitude
+  and the camera's ChuteReach, the rollout is foreign to them.
+
+## Nose cap, panels, deployables by phase (05.10.2026, `Vessel.SetNose/DeployPanels`)
+- **A closed nose cap blocks docking**: `Universe.CheckDocking` requires `Vessel.PortOpen` on both. Whoever approaches the port
+  opens it themselves: `DockingAutopilot` (SetNose(true)), manual docking Tab, the mission autopilot; closing — the "Deorbit"
+  phase. Symptom of a forgotten call — auto_crew_dragon hangs in "Rendezvous" 0.1 m from the port.
+- **`StepDeploy` runs only in physics.** On rails `Deployed[]` stays put: panels that deploy "on a timer" will not
+  deploy on rails until warp is reset.
+- **The solar array deployment condition is "engines silent", not "everything below is separated".** For "Ranger-7" the "Agena" stays
+  attached to the end — by the old condition the panels never deployed; `PanelsReady` = `!AnyEngineRunning`.
+- Mission test names are `auto_<id>` (`auto_crew_dragon`, `auto_soyuz_tm31`, `auto_ranger7`); `crew_dragon` without the prefix
+  gives "0 ok" silently.
+- **Pitch sign of the keys:** W — nose toward the belly (`FlightControl`: torque.z = −input.x), while `PitchTrim > 0` is nose up.
+  So the Alt+S trimmer gives "+", Alt+W — "−"; on rollout the rudder also has a minus (`ControlDeflection.x = −PilotInput.y`),
+  otherwise the rudder on the ground deflects mirrored to flight.
+
+## Booster landing and Starship (05.10.2026)
+- **SECO overshoot:** check the cut-off condition (target perigee reached) every physics step, not once per autopilot tick —
+  otherwise the high-thrust ship overshoots the target orbit between checks. Without deep throttling, MECO comes early.
+- **Engines have no deep throttle (MinThrottle 0.4):** 3 Raptor even at minimum lift the empty Starship (it climbed 2.3 → 4.1 km
+  after the flop). Fix: flop on `BurnEngines = 3`, then shut down to `LandingEngines = 1` once speed < 60 m/s.
+- **Tail-first drag of Super Heavy is weak:** without an entry burn it reaches 12 km (`IgnitionCeiling`) at ≈ 1250 m/s and crashes
+  (Reserve 340 t → 68 m/s, 450 t → 97 m/s). Fix: `EntryDv = 600`, `Reserve = 600 t` → caught at 2.5 m/s with 15 t left.
+- **A far recovery target makes ZEM steer sideways:** a placeholder target 2956 km away turned the landing burn into a lateral burn
+  and the ship crashed. Put `TargetLat/Lon` at the natural fall point (measured from the test), not at a nominal place.
+  Perigee pair: `ShipPerigee` 50 km dropped the ship on Madagascar (49°E), 70 km — on the target.
+- **Belly entry vs. QAlpha breakup:** `FlightPhysics` exempts `RecoveryDef.BellyFlop` sections from the QAlpha limit (90° AoA is the
+  design); the tower catch exempts stowed legs from the "landed without legs" crash check (`CaughtByTower`).
+- **F9 legs in FBX:** baked legs/fins in `Falcon9_S1.fbx` cannot move — they are generated by `VesselView.SpaceX` instead
+  (`F9_BAKED_DEPLOY = False` in station_parts.py; pair of constants `F9*`).

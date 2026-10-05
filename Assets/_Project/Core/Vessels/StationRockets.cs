@@ -90,6 +90,8 @@ namespace Kare.Space.Core
                     // СКД перезапускается десятки раз: импульсы сближения, коррекции, тормозной (§6.6).
                     Engine = new EngineDef { Name = "СКД", ThrustVac = 3.09e3, ThrustSL = 2e3, IspVac = 302, Ignitions = 40 },
                     EngineCount = 1, Length = 2.26, Diameter = 2.72, RcsTorque = 1.5e3, MaxHeatFlux = 2e5, Model = SectionModel.SoyuzPAO,
+                    // Две панели СБ (по 4 створки) сложены вдоль корабля под обтекателем, раскрываются после отделения от блока И.
+                    Deploy = DeployKind.Panels,
                 },
                 new SectionDef
                 {
@@ -137,7 +139,9 @@ namespace Kare.Space.Core
         /// I ступень: 9 × Merlin 1D (845/914 кН, УИ 282/311 с), 25,6 т сухих, 395,7 т топлива.
         /// II ступень: Merlin 1D Vacuum 981 кН, УИ 348 с, 3,9 т + 92,7 т. Dragon ~12 т: капсула 7,7 т + 2,56 т топлива
         /// (Draco 8 × 400 Н на манёвры; SuperDraco САС здесь не нужны), негерметичный «багажник» 1,8 т.
-        /// Возвратную посадку I ступени автопилот не ведёт: частные автопилоты работают только с активным бортом.
+        /// I ступень возвращается (§6.9): MECO с запасом SpaceXRockets.Falcon9Reserve, после отделения её ведёт фоновый
+        /// BoosterLandingAutopilot на баржу OCISLY (SpaceXRockets.Ocisly). Азотная РСУ — RcsTorque: переворот ≈ 30 с
+        /// при инерции пустой ступени ≈ 9·10⁶ кг·м². Merlin — 4 запуска: старт, (разворотный), входной, посадочный.
         /// </summary>
         public static VesselDesign FalconCrewDragon()
         {
@@ -145,8 +149,10 @@ namespace Kare.Space.Core
             d.Sections.Add(new SectionDef
             {
                 Name = "Falcon 9: I ступень", Kind = SectionKind.Stage, DryMass = 25600, Propellant = 395700,
-                Engine = new EngineDef { Name = "Merlin 1D", ThrustVac = 914e3, ThrustSL = 845e3, IspVac = 311, MinThrottle = 0.4, GimbalDeg = 5, Ignitions = 3 },
-                EngineCount = 9, Length = 41.2, Diameter = 3.66, MaxHeatFlux = 2e5, Model = SectionModel.Falcon9S1,
+                Engine = new EngineDef { Name = "Merlin 1D", ThrustVac = 914e3, ThrustSL = 845e3, IspVac = 311, MinThrottle = 0.4, GimbalDeg = 5, Ignitions = 4 },
+                // MaxHeatFlux выше «голого бака» 2e5: днище с теплозащитой, вход двигателями вперёд (Falcon9Reserve).
+                EngineCount = 9, Length = 41.2, Diameter = 3.66, MaxHeatFlux = 4e5, Model = SectionModel.Falcon9S1,
+                RcsTorque = SpaceXRockets.Falcon9RcsTorque, Deploy = DeployKind.Legs, Recovery = SpaceXRockets.Ocisly(),
             });
             d.Sections.Add(new SectionDef
             {
@@ -162,10 +168,13 @@ namespace Kare.Space.Core
             d.Sections.Add(new SectionDef
             {
                 // Купола 4 × Ø35 м; 2000 м² — приводнение ~7 м/с при ~9,6 т (как у настоящего, 16 миль/ч). Пара: ParachuteArea ↔ масса.
+                // Стропы выходят из отсека сбоку под носовым обтекателем (ChuteOffset 0,9 м — между шарниром и осью): капсула
+                // висит наклонно. Узел — под откидным обтекателем (DeployKind.Nose): открывают перед стыковкой.
                 Name = "Crew Dragon «Индевор»", Kind = SectionKind.Capsule, DryMass = 7700, Propellant = 2560,
                 Engine = new EngineDef { Name = "Draco", ThrustVac = 400, ThrustSL = 300, IspVac = 300, Ignitions = 100 },
                 EngineCount = 8, Length = 4.4, Diameter = 4.0, RcsTorque = 2e3, ParachuteArea = 2000, DragScale = 1.3,
                 MaxHeatFlux = 8e6, Crew = 2, DockingPort = true, Model = SectionModel.CrewDragon,
+                Deploy = DeployKind.Nose, ChuteCount = 4, ChuteOffset = 0.9,
             });
             d.Sections.Add(new SectionDef
             {

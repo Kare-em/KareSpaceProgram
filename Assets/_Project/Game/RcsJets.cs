@@ -19,7 +19,7 @@ namespace Kare.Space.Game
         /// Пара: у «Аполлона» СМ 4·10³ и КМ 2·10³ — блоки на обоих, у состыкованной МКС (5·10⁴) — только станция.</summary>
         const double ShownShare = 0.3;
         /// <summary>Блоков сопел по окружности и сдвиг от оси +X, °: четыре «квада», как на СМ «Аполлона»/ПАО «Союза».</summary>
-        const int Quads = 4;
+        const int QuadCount = 4;
         const float QuadPhaseDeg = 45;
         /// <summary>Длина струи, м: доля радиуса секции в пределах [Min, Max]. В пустоте видимое ядро струи
         /// холодного газа/гиперголика ≈ 1–2 м, дальше расширение делает её прозрачной.</summary>
@@ -63,6 +63,8 @@ namespace Kare.Space.Game
         double[] baseHeight;
         readonly List<Nozzle> nozzles = new List<Nozzle>();
         readonly Dictionary<int, Transform> anchors = new Dictionary<int, Transform>();
+        /// <summary>Смещение якоря секции от оси вида (орбитер сбоку бака).</summary>
+        readonly Dictionary<int, Vector3> offsets = new Dictionary<int, Vector3>();
 
         static Material jetMat;
         static Mesh jetMesh;
@@ -102,6 +104,7 @@ namespace Kare.Space.Game
             if (root != null) Destroy(root.gameObject);
             nozzles.Clear();
             anchors.Clear();
+            offsets.Clear();
             builtSignature = Signature();
             var v = view.Vessel;
             baseHeight = new double[v.Design.Sections.Count];
@@ -120,25 +123,17 @@ namespace Kare.Space.Game
                 var anchor = new GameObject(s.Name).transform;
                 anchor.SetParent(root, false);
                 anchors[i] = anchor;
-                float len = (float)s.Length, r = (float)s.Radius;
-                // Высота блоков и радиус обшивки там: у ступеней и отсеков — у верхнего торца (квады СМ «Аполлона»,
-                // ПАО «Союза»), у конуса капсулы — на середине образующей, у шара — на экваторе.
-                float y, rr;
-                if (s.Kind == SectionKind.Capsule && s.Sphere) { y = len * 0.5f; rr = r; }
-                else if (s.Kind == SectionKind.Capsule) { y = len * 0.55f; rr = r * (1 - 0.65f * 0.55f); }
-                else { y = Mathf.Max(len * 0.5f, len - Mathf.Min(0.15f * len, 0.7f)); rr = r; }
-                float jet = Mathf.Clamp(r * LengthPerRadius, LengthMin, LengthMax);
-                for (int q = 0; q < Quads; q++)
-                {
-                    float a = (q * 360f / Quads + QuadPhaseDeg) * Mathf.Deg2Rad;
-                    var n = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
-                    var t = new Vector3(-Mathf.Sin(a), 0, Mathf.Cos(a));
-                    var center = n * (rr + jet * NozzleStandoff) + Vector3.up * y;
-                    foreach (var ex in new[] { Vector3.up, Vector3.down, t, -t })
+                // Орбитер на баке стоит сбоку от оси — там же, где его ставит вид (VesselView: Part.Radial).
+                offsets[i] = s.Beside && i > 0 && v.Attached[0] && !secs[0].IsRadial
+                    ? new Vector3(-(float)s.BesideOffset, 0, 0) : Vector3.zero;
+                float jet = Mathf.Clamp((float)s.Radius * LengthPerRadius, LengthMin, LengthMax);
+                foreach (var c in Clusters(s))
+                    foreach (var ex in c.Ex)
                     {
                         var go = new GameObject("Jet");
                         go.transform.SetParent(anchor, false);
-                        var pos = center + ex * (jet * NozzleStandoff);
+                        // Срез чуть над обшивкой (Out), соседние сопла блока разнесены по направлению выхлопа.
+                        var pos = c.Pos + c.Out * (jet * NozzleStandoff) + ex * (jet * NozzleStandoff);
                         go.transform.localPosition = pos;
                         // Меш струи — вниз от нуля: −Y поворачиваем в направление выхлопа.
                         go.transform.localRotation = Quaternion.FromToRotation(Vector3.down, ex);
@@ -150,14 +145,138 @@ namespace Kare.Space.Game
                         mr.enabled = false;
                         nozzles.Add(new Nozzle { T = go.transform, R = mr, Section = i, Pos = pos, Exhaust = ex, Length = jet, Seed = nozzles.Count * 1.37f });
                     }
-                }
             }
         }
+
+        /// <summary>Блок сопел: точка на обшивке в осях секции (y от днища), нормаль наружу, направления выхлопа.</summary>
+        struct Cluster
+        {
+            public Vector3 Pos, Out;
+            public Vector3[] Ex;
+        }
+
+        /// <summary>Четыре «квада» по окружности (СМ «Аполлона», ДПО «Союза», Draco): у каждого вверх, вниз и по
+        /// касательной в обе стороны. Радиальную тягу дают касательные соседних квадов.</summary>
+        static IEnumerable<Cluster> Quads(float y, float r, float az0)
+        {
+            for (int q = 0; q < QuadCount; q++)
+            {
+                float a = (az0 + q * 360f / QuadCount) * Mathf.Deg2Rad;
+                var n = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                var t = new Vector3(-Mathf.Sin(a), 0, Mathf.Cos(a));
+                yield return new Cluster { Pos = n * r + Vector3.up * y, Out = n, Ex = new[] { Vector3.up, Vector3.down, t, -t } };
+            }
+        }
+
+        /// <summary>Блок на боку несимметричного корабля (шаттл, «Буран»): наружу и, если задано, вдоль оси.</summary>
+        static Cluster Side(float x, float y, float z, Vector3 outward, Vector3 axial) => new Cluster
+        {
+            Pos = new Vector3(x, y, z), Out = outward,
+            Ex = axial == Vector3.zero ? new[] { outward } : new[] { outward, axial },
+        };
+
+        /// <summary>
+        /// Где стоят сопла РСУ (§4.9): у известных моделей — по чертежу (Tools/blender/*_parts.py и замер вершин FBX
+        /// 05.10.2026), у прочих — четыре квада на обшивке по реальному радиусу меша на высоте блока. Раньше квады у
+        /// всех стояли на радиусе секции — у конических капсул и узких отсеков струи били из воздуха.
+        /// </summary>
+        static IEnumerable<Cluster> Clusters(SectionDef s)
+        {
+            float len = (float)s.Length, r = (float)s.Radius;
+            Vector3 up = Vector3.up, down = Vector3.down, px = Vector3.right, mx = Vector3.left, pz = Vector3.forward, mz = Vector3.back;
+            switch (s.Model)
+            {
+                case SectionModel.SoyuzPAO:      // блоки ДПО на юбке ПАО (b_soyuz_pao: 1,41 м на высоте 0,2)
+                    return Quads(0.2f, 1.41f, 45);
+                case SectionModel.CrewDragon:    // Draco на стенке капсулы над SuperDraco. Пара: VesselView.DracoY, DracoR
+                    return Quads(2.85f, 1.36f, 45);
+                case SectionModel.ApolloSM:      // квады 0,35–1,25 м ниже стыка с КМ, вынос до 2,46 м (замер Apollo_SM)
+                    return Quads(len - 0.8f, 2.4f, 0);
+                case SectionModel.Mercury:       // шейка капсулы над конусом (Mercury_Capsule: r 0,32 на 2,3 м)
+                    return Quads(2.3f, 0.33f, 45);
+                case SectionModel.Gemini:        // носовой отсек RCS (Gemini_Capsule: r ≈ 0,72 на 2,6–2,7 м)
+                    return Quads(2.65f, 0.73f, 45);
+                case SectionModel.GeminiAdapter: // OAMS на юбке переходника (конус 1,45 → 1,2 м)
+                    return Quads(1.15f, 1.33f, 45);
+                case SectionModel.ShuttleOrbiter:
+                    // Оси вида: −X — верх (киль), +X — брюхо, нос +Y (b_shuttle, x Blender = −x вида).
+                    // Носовой блок FRCS — бока, верх и брюхо носа; кормовые ARCS — на гондолах OMS.
+                    return new[]
+                    {
+                        Side(0.5f, 34.6f, 1.7f, pz, up), Side(0.5f, 34.6f, -1.7f, mz, up),
+                        Side(-1.0f, 34.6f, 0, mx, up), Side(1.9f, 34.0f, 0, px, Vector3.zero),
+                        Side(-1.6f, 4.0f, 3.0f, pz, down), Side(-1.6f, 4.0f, -3.0f, mz, down),
+                        Side(-2.7f, 4.0f, 1.9f, mx, Vector3.zero), Side(-2.7f, 4.0f, -1.9f, mx, Vector3.zero),
+                    };
+                case SectionModel.Buran:
+                    // b_buran: кормовые блоки ориентации по бокам у хвоста, носовые — по бокам и сверху носа.
+                    return new[]
+                    {
+                        Side(0.55f, 33.8f, 1.9f, pz, up), Side(0.55f, 33.8f, -1.9f, mz, up),
+                        Side(-1.4f, 33.8f, 0, mx, up),
+                        Side(-1.6f, 2.3f, 2.9f, pz, down), Side(-1.6f, 2.3f, -2.9f, mz, down),
+                        Side(-2.3f, 2.3f, 2.55f, mx, Vector3.zero), Side(-2.3f, 2.3f, -2.55f, mx, Vector3.zero),
+                    };
+            }
+            // Прочие: у ступеней и отсеков — у верхнего торца, у конуса капсулы — на середине образующей, у шара — экватор.
+            float y;
+            if (s.Kind == SectionKind.Capsule) y = len * (s.Sphere ? 0.5f : 0.55f);
+            else y = Mathf.Max(len * 0.5f, len - Mathf.Min(0.15f * len, 0.7f));
+            float fallback = s.Kind == SectionKind.Capsule && !s.Sphere ? r * (1 - 0.65f * 0.55f) : r;
+            return Quads(y, SurfaceRadius(s, y, fallback), QuadPhaseDeg);
+        }
+
+        /// <summary>
+        /// Радиус обшивки модели аппарата на высоте y (м, от днища секции): кольца вершин ближайших сечений ниже и
+        /// выше, с интерполяцией (у тел вращения вершины лежат кольцами профиля). Меш FBX без Read/Write не читается
+        /// ни в билде, ни в Play редактора («Not allowed to access vertices») — тогда запасной радиус (процедурные
+        /// корпуса и так цилиндры радиуса секции).
+        /// </summary>
+        static float SurfaceRadius(SectionDef s, float y, float fallback)
+        {
+            var boot = GameBootstrap.Instance;
+            var mesh = boot != null ? boot.CraftMeshFor(s.Model) : null;
+            if (mesh == null || !mesh.isReadable) return fallback;
+            if (!meshVerts.TryGetValue(mesh, out var verts)) meshVerts[mesh] = verts = mesh.vertices;
+            var b = mesh.bounds;
+            // Начало модели у верха (СМ «Аполлона») — вид ставит её на длину секции. Пара: VesselView.CraftTopOriginShare.
+            float shift = b.max.y < 0.5f * b.size.y ? (float)s.Length : 0;
+            float yl = float.MinValue, yu = float.MaxValue;
+            foreach (var p in verts)
+            {
+                float py = p.y + shift;
+                if (py <= y && py > yl) yl = py;
+                if (py >= y && py < yu) yu = py;
+            }
+            if (yl == float.MinValue || yu == float.MaxValue) return fallback;
+            float rl = 0, ru = 0;
+            foreach (var p in verts)
+            {
+                float py = p.y + shift, pr = new Vector2(p.x, p.z).magnitude;
+                if (Mathf.Abs(py - yl) < RingBand) rl = Mathf.Max(rl, pr);
+                if (Mathf.Abs(py - yu) < RingBand) ru = Mathf.Max(ru, pr);
+            }
+            float rr = Mathf.Lerp(rl, ru, yu > yl ? (y - yl) / (yu - yl) : 0);
+            return rr > MinSurfaceR ? rr : fallback;
+        }
+
+        /// <summary>Толщина «кольца» вершин, м — тоньше шага профиля моделей (≥ 5 см); меньше MinSurfaceR —
+        /// на этой высоте только ось (стыковочный штырь), берём запасной радиус.</summary>
+        const float RingBand = 0.02f, MinSurfaceR = 0.05f;
+        static readonly Dictionary<Mesh, Vector3[]> meshVerts = new Dictionary<Mesh, Vector3[]>();
 
         static bool Shown(Vessel v, int i)
         {
             var s = v.Design.Sections[i];
-            return v.Attached[i] && !v.IsEnclosed(i) && !s.IsRadial && s.Kind != SectionKind.Fairing && s.RcsTorque > 0;
+            if (!v.Attached[i] || v.IsEnclosed(i) || s.IsRadial || s.Kind == SectionKind.Fairing || s.RcsTorque <= 0) return false;
+            // Капсула при своём сервисном отсеке молчит: ориентацию держат квады СМ «Аполлона» / OAMS «Джемини»,
+            // РСУ спуска оживает после разделения. Иначе струи шли ещё и из КМ, у которого их в полёте нет.
+            var host = s.Model == SectionModel.ApolloCM ? SectionModel.ApolloSM
+                     : s.Model == SectionModel.Gemini ? SectionModel.GeminiAdapter : SectionModel.None;
+            if (host != SectionModel.None)
+                for (int j = 0; j < v.Attached.Length; j++)
+                    if (v.Attached[j] && v.Design.Sections[j].Model == host) return false;
+            return true;
         }
 
         /// <summary>
@@ -220,7 +339,7 @@ namespace Kare.Space.Game
                 int i = kv.Key;
                 bool flip = v.Flipped[i];
                 float lift = flip ? (float)v.Design.Sections[i].Length : 0;
-                kv.Value.localPosition = new Vector3(0, (float)(baseHeight[i] - com) + lift, 0);
+                kv.Value.localPosition = offsets[i] + new Vector3(0, (float)(baseHeight[i] - com) + lift, 0);
                 kv.Value.localRotation = flip ? Quaternion.Euler(180, 0, 0) * yaw : yaw;
             }
 

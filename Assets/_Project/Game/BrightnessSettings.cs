@@ -3,19 +3,24 @@ using UnityEngine;
 namespace Kare.Space.Game
 {
     /// <summary>
-    /// Настройки яркости игрока (меню Esc, GDD §9.3): общая яркость кадра — компенсация экспозиции в EV — и отдельный
-    /// множитель яркости факела. Лежат в PlayerPrefs и переживают перезапуск и перезагрузку сцены; значения читаются
-    /// лениво, чтобы статик не зависел от порядка Awake. Применяют: SkyController (компенсация и пределы EV),
-    /// VesselView (нит и сила света факела).
+    /// Настройки яркости игрока (меню Esc, GDD §9.3): общая яркость кадра — компенсация экспозиции в EV, отдельный
+    /// множитель яркости факела и подсветка ландшафта ночью. Лежат в PlayerPrefs и переживают перезапуск и перезагрузку
+    /// сцены; значения читаются лениво, чтобы статик не зависел от порядка Awake. Применяют: SkyController (компенсация
+    /// и пределы EV), VesselView (нит и сила света факела), NightLight (подсветка грунта).
     /// </summary>
     public static class BrightnessSettings
     {
-        /// <summary>Пределы ползунков. ±2 EV — вчетверо темнее/ярче: больше автоэкспозиция всё равно съедает, меньше
-        /// не хватает на тёмный монитор. Факел 0,25…1,5 — ниже гасить смысла нет, выше пересвет (CoreNits уже белый).</summary>
-        public const float EvMin = -2, EvMax = 2, PlumeMin = 0.25f, PlumeMax = 1.5f;
-        const string EvKey = "kare.brightness.ev", PlumeKey = "kare.brightness.plume";
+        /// <summary>Пределы ползунков. ±5 EV — в 32 раза темнее/ярче: компенсация сдвигает и пределы EV
+        /// (SkyController), поэтому работает и ночью с факелом. Факел ×0,05…4 (ползунок логарифмический): экспозиция под
+        /// множитель не подстраивается — при 0,05 ядро ночью ≈ белого (PlumeNightWhite 16), при 4 — в 64 раза выше.
+        /// Ночь — доля белого у грунта с альбедо 0,2 при текущей экспозиции (NightLight): 0 — только физичный свет.</summary>
+        public const float EvMin = -5, EvMax = 5, PlumeMin = 0.05f, PlumeMax = 4f, NightMin = 0, NightMax = 0.4f;
+        /// <summary>0,07 — столько даёт свечение неба (NightLight.SkyglowLux 0,02 лк) при EvMin −6: обычная ночь не
+        /// меняется, а при факеле или прожекторах грунт остаётся таким же различимым. Пара: SkyController.EvMin.</summary>
+        const float NightDefault = 0.07f;
+        const string EvKey = "kare.brightness.ev", PlumeKey = "kare.brightness.plume", NightKey = "kare.brightness.night";
 
-        static float ev = float.NaN, plume = float.NaN;
+        static float ev = float.NaN, plume = float.NaN, night = float.NaN;
 
         /// <summary>Компенсация экспозиции, EV: плюс — ярче.</summary>
         public static float Ev
@@ -44,6 +49,21 @@ namespace Kare.Space.Game
             {
                 plume = Mathf.Clamp(value, PlumeMin, PlumeMax);
                 PlayerPrefs.SetFloat(PlumeKey, plume);
+            }
+        }
+
+        /// <summary>Подсветка ландшафта ночью: доля белого у грунта при текущей экспозиции.</summary>
+        public static float Night
+        {
+            get
+            {
+                if (float.IsNaN(night)) night = Mathf.Clamp(PlayerPrefs.GetFloat(NightKey, NightDefault), NightMin, NightMax);
+                return night;
+            }
+            set
+            {
+                night = Mathf.Clamp(value, NightMin, NightMax);
+                PlayerPrefs.SetFloat(NightKey, night);
             }
         }
 

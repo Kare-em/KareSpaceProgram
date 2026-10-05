@@ -84,6 +84,7 @@ namespace Kare.Space.Core
             if (!V.IsLanded && Perigee(V) > V.Body.Radius + V.Body.AtmosphereTop)
             {
                 Phase = "Сход с орбиты";
+                V.SetNose(false); // обтекатель узла закрывают перед тормозным импульсом — иначе узел сгорит на входе
                 if (!HasArmedEngine(V)) StageUntil(StageActionType.Ignite);
                 if (!HasArmedEngine(V) && V.NextStageLabel != null) u.Stage();
                 var v = V;

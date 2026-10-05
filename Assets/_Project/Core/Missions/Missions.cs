@@ -483,6 +483,7 @@ namespace Kare.Space.Core
 
             AddModern(list); // после «Аполлона» — StationMissions.cs
             AddWinged(list); // крылатые: STS-1, «Буран» — WingedMissions.cs
+            AddSpaceX(list); // Starship IFT-5 — SpaceXMissions.cs
             return list;
         }
     }

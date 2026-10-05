@@ -1,209 +1,241 @@
-# Грабли: MCP, редактор Unity, правка файлов
+# Pitfalls: MCP, the Unity editor, file editing
 
-Читать перед работой через MCP, отладкой в Play и массовой правкой файлов.
+Read before working through MCP, debugging in Play, and bulk file edits.
 
 ## MCP
-- **С 04.10.2026 транспорт stdio, пакет и сервер v10.3.0.** Unity слушает мост на 6400 (`~/.unity-mcp/unity-mcp-status-*.json`,
-  `last_heartbeat`), `EditorPrefs MCPForUnity.UseHttpTransport = false`. Сервер — `uvx --from mcpforunityserver==<версия>
-  mcp-for-unity --transport stdio` в `.mcp.json` (UnityMCP) и в `%APPDATA%/Claude/claude_desktop_config.json` (unityMCP).
-  **Обновление**: `manage_packages add_package` с git-URL `...#vX.Y.Z` (~16 с, без ошибок консоли) + версия сервера в обоих
-  конфигах; новый сервер подхватывается только новой сессией. Проверка без сессии — stdio-клиент в скретчпаде
-  (initialize → initialized → tools/list → tools/call `execute_code`): 04.10 — 48 тулов, ответ «10.3.0».
-  Последняя версия: `git ls-remote --tags https://github.com/CoplayDev/unity-mcp.git | sort -V`, PyPI `mcpforunityserver`.
-- Ниже про HTTP/8767 — старый режим (процесс `mcp-for-unity.exe --transport http` может висеть с прошлого запуска).
-- `.mcp.json` → `http://127.0.0.1:8767/mcp`. Car_Train занимает 8765 — порт хранится в EditorPrefs на всю машину,
-  поэтому `McpPortPin.cs` перезаписывает его при загрузке редактора.
-- Проверка: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8767/mcp` → 406 = сервер жив.
-  Если сервер жив, а сессия пишет ECONNREFUSED — переподключить через /mcp (сессия стартовала раньше редактора).
-- **Скрин `manage_camera screenshot`** пишет только внутрь проекта: `output_folder: "Temp/Shots"`.
-- **Компиляция**: `refresh_unity` compile=request, mode=force, scope=all; бывает «idle» без сборки — проверять появление
-  нового типа/поля через `execute_code`, при необходимости повторить.
-- **`execute_code` без `action:"execute"` падает**; codedom (C# 6, без `dynamic`) — без `StringBuilder.Append` цепочкой,
-  собирать строку через `+`. `Object` там неоднозначен (System/UnityEngine) — писать `UnityEngine.Object`;
-  тел списком у `Universe` нет — брать `u.System.Get("moon")`.
-- `read_console types` — списком.
-- **PNG больше ~1,4 МБ не доходит через `SendUserFile` до удалённого зрителя** (таймаут, 03.10.2026) — в
-  десктопе файл виден. Для телефона ужимать (JPEG/половина Full HD).
-- **Порт 8767 отвечает 406 и при закрытом редакторе** — это жив Python-сервер `mcp-for-unity.exe`, а не Unity.
-  Признак: тулы возвращают `no_unity_session`. Проверять `tasklist | grep Unity.exe`; запуск —
-  `"/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Unity.exe" -projectPath <проект> &`.
-- **Добавление `com.unity.modules.nvidia` не перекомпилировало DLL пакета HDRP** (02.10.2026): в asmdef HDRP
-  `ENABLE_NVIDIA_MODULE` уже есть, а `Library/ScriptAssemblies/Unity.RenderPipelines.HighDefinition.Runtime.dll`
-  остаётся вчерашним → `DLSSDetected = false` на RTX. Признак: IL `DLSSPass.SetupFeature` = 2 байта (рефлексией,
-  `GetMethodBody().GetILAsByteArray()`), в ссылках сборки нет NVIDIA. Лечит
-  `CompilationPipeline.RequestScriptCompilation(RequestScriptCompilationOptions.CleanBuildCache)` (~13 с перезагрузки).
+- **Since 04.10.2026 the transport is stdio, package and server v10.3.0.** Unity listens for the bridge on 6400 (`~/.unity-mcp/unity-mcp-status-*.json`,
+  `last_heartbeat`), `EditorPrefs MCPForUnity.UseHttpTransport = false`. The server is `uvx --from mcpforunityserver==<version>
+  mcp-for-unity --transport stdio` in `.mcp.json` (UnityMCP) and in `%APPDATA%/Claude/claude_desktop_config.json` (unityMCP).
+  **Updating**: `manage_packages add_package` with a git URL `...#vX.Y.Z` (~16 s, no console errors) + the server version in both
+  configs; the new server is picked up only by a new session. Check without a session: a stdio client in the scratchpad
+  (initialize → initialized → tools/list → tools/call `execute_code`): 04.10 — 48 tools, response "10.3.0".
+  Latest version: `git ls-remote --tags https://github.com/CoplayDev/unity-mcp.git | sort -V`, PyPI `mcpforunityserver`.
+- Everything below about HTTP/8767 is the old mode (the `mcp-for-unity.exe --transport http` process may linger from a previous launch).
+- `.mcp.json` → `http://127.0.0.1:8767/mcp`. Car_Train occupies 8765 — the port is stored in EditorPrefs machine-wide,
+  so `McpPortPin.cs` overwrites it when the editor loads.
+- Check: `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8767/mcp` → 406 = server is alive.
+  If the server is alive but the session reports ECONNREFUSED — reconnect via /mcp (the session started before the editor).
+- **The `manage_camera screenshot` screenshot** writes only inside the project: `output_folder: "Temp/Shots"`.
+- **Compilation**: `refresh_unity` compile=request, mode=force, scope=all; sometimes it stays "idle" with no build — check that
+  the new type/field appears via `execute_code`, repeat if necessary.
+- **`execute_code` without `action:"execute"` fails**; codedom (C# 6, no `dynamic`) — no chained `StringBuilder.Append`,
+  build the string with `+`. `Object` is ambiguous there (System/UnityEngine) — write `UnityEngine.Object`;
+  `Universe` has no list of bodies — use `u.System.Get("moon")`.
+- `read_console types` — as a list.
+- **A PNG larger than ~1.4 MB does not reach a remote viewer via `SendUserFile`** (timeout, 03.10.2026) — it is visible
+  on the desktop. For a phone, shrink it (JPEG/half of Full HD).
+- **Port 8767 answers 406 even with the editor closed** — that is the Python server `mcp-for-unity.exe` alive, not Unity.
+  Symptom: tools return `no_unity_session`. Check `tasklist | grep Unity.exe`; launch —
+  `"/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Unity.exe" -projectPath <project> &`.
+- **Adding `com.unity.modules.nvidia` did not recompile the HDRP package DLL** (02.10.2026): the HDRP asmdef
+  already has `ENABLE_NVIDIA_MODULE`, but `Library/ScriptAssemblies/Unity.RenderPipelines.HighDefinition.Runtime.dll`
+  stays yesterday's → `DLSSDetected = false` on an RTX. Symptom: the IL of `DLSSPass.SetupFeature` = 2 bytes (via reflection,
+  `GetMethodBody().GetILAsByteArray()`), no NVIDIA in the assembly references. Fixed by
+  `CompilationPipeline.RequestScriptCompilation(RequestScriptCompilationOptions.CleanBuildCache)` (~13 s reload).
 
-## Отладка в Play
-- `execute_code` → `Kare.Space.EditorTools.FlightDebug` через рефлексию (`Reentry(alt, speed, γ°)`, `Stage`, `Status`,
-  `Lift(alt, up)`); ускорение — `Time.timeScale`; поля `FlightCamera.Yaw/Pitch/Distance` публичные (Yaw от севера).
-- **Телепорт борта**: сначала `v.Situation = Flying` (иначе `UpdateLandedPose` вернёт на стол), и пауза
-  `manage_editor pause` — переключатель: второй вызов снимает паузу.
-- **Кадр любого аппарата без полёта** (03.10.2026): в редакторе `GameBootstrap.MissionId = "<id>"` → play →
-  `var u = GameBootstrap.U; u.Teleport(u.System.Get("moon"), 15e3, false);` + `u.Stage()` до нужного набора
-  (`u.Active.Attached`), `Throttle = 0`. После stop вернуть `MissionId = "vostok"`. Секции под обтекателем
-  (`Vessel.IsEnclosed`) не рисуются — LM на столе не виден, это не баг.
-- **Смена миссии в Play** (03.10.2026): `GameBootstrap.NextMissionId = "apollo11"; SceneManager.LoadScene(0)` —
-  `execute_code` отвечает таймаутом, но сцена грузится; проверять следующим вызовом. Правка `.cs` во время Play →
-  перезагрузка домена → поток NRE из `GameBootstrap` и `no_unity_session`: остановить `manage_editor stop`, очистить консоль.
+## Debugging in Play
+- `execute_code` → `Kare.Space.EditorTools.FlightDebug` via reflection (`Reentry(alt, speed, γ°)`, `Stage`, `Status`,
+  `Lift(alt, up)`); acceleration — `Time.timeScale`; the fields `FlightCamera.Yaw/Pitch/Distance` are public (Yaw from north).
+- **Teleporting a vessel**: first `v.Situation = Flying` (otherwise `UpdateLandedPose` returns it to the pad), and pause
+  with `manage_editor pause` — it is a toggle: the second call releases the pause.
+- **A frame of any vehicle without flying** (03.10.2026): in the editor `GameBootstrap.MissionId = "<id>"` → play →
+  `var u = GameBootstrap.U; u.Teleport(u.System.Get("moon"), 15e3, false);` + `u.Stage()` until the desired set
+  (`u.Active.Attached`), `Throttle = 0`. After stop, restore `MissionId = "vostok"`. Sections under the fairing
+  (`Vessel.IsEnclosed`) are not drawn — the LM is not visible on the pad, this is not a bug.
+- **Changing the mission in Play** (03.10.2026): `GameBootstrap.NextMissionId = "apollo11"; SceneManager.LoadScene(0)` —
+  `execute_code` answers with a timeout, but the scene loads; check with the next call. Editing a `.cs` during Play →
+  domain reload: a stream of NREs from `GameBootstrap` and `no_unity_session`: stop with `manage_editor stop`, clear the console.
+- **Winged entry from a teleport** (05.10.2026): `Reentry(...)` + `new MissionAutopilot` on sts1 starts the *ascent* (OMS burns to orbit)
+  — first set `Tracker.Done[<Orbit objective>] = true`, then `WingedGuidance` takes over at α 40°. The mission sets warp ×10 itself and
+  `AutoWarp = false` does not stop it: from 120 km peak heat passes in ~20 s real time (missed once, the orbiter flew 2000 s and crashed
+  11 000 km short of Edwards). For a plasma frame start at 78 km, 7300 m/s, γ −0.6° and shoot right away (0.3 MW/m², `Pitch = -25` shows the belly).
+- **`Mission.Status` freezes during docking** ("Манёвр: осталось 0,1 м/с" for the whole transfer) — the live text is `u.Docking.Status`.
 
-## Правка файлов (Windows, Git Bash)
-- Длинный Python в heredoc Bash падает — писать скрипт в файл (скретчпад) и запускать `python файл`.
-- Замены через Python: `io.open(..., newline='')`, assert на число вхождений. **Концы строк разные**: `.cs` игрового
-  слоя и ядра (VesselView, LaunchPadView, VesselDesign, FlightSceneBuilder) — LF, не CRLF; определять по файлу.
-- `sed -i '<N>r кусок'` после любой `Edit` того же файла — номер строки уже сдвинут (вставка попала внутрь
-  doc-комментария, 02.10.2026). Вставлять Python-заменой по точной строке-якорю.
-- `perl -i` на файлах с кириллицей не использовать — портит кодировку.
-- Якорь Python-замены должен быть уникален: одинаковые строки в соседних пресетах (Karman/Freedom 7) дают
-  count=2 — брать якорь с соседней уникальной строкой.
-- `sed` со вставкой `\r\n` в LF-файл (FlightSceneBuilder) даёт смешанные концы строк — сначала определить EOL файла.
+## Editing files (Windows, Git Bash)
+- A long Python in a Bash heredoc fails — write the script to a file (scratchpad) and run `python file`.
+- Replacements via Python: `io.open(..., newline='')`, assert on the number of occurrences. **Line endings differ**: the `.cs` files of the game
+  layer and the core (VesselView, LaunchPadView, VesselDesign, FlightSceneBuilder) are LF, not CRLF; determine it per file.
+- `sed -i '<N>r chunk'` after any `Edit` of the same file — the line number has already shifted (the insertion landed inside a
+  doc comment, 02.10.2026). Insert via a Python replacement on an exact anchor line.
+- Do not use `perl -i` on files with Cyrillic — it corrupts the encoding.
+- The anchor of a Python replacement must be unique: identical lines in neighbouring presets (Karman/Freedom 7) give
+  count=2 — take an anchor that includes the neighbouring unique line.
+- `sed` inserting `\r\n` into an LF file (FlightSceneBuilder) yields mixed line endings — determine the file's EOL first.
 
-## Blender MCP (лоу-поли детали)
-- Сервер: `.mcp.json` → `uvx --python 3.12 blender-mcp` (ahujasid), аддон `blender_mcp_addon.py` v1.8 в
-  `%APPDATA%/Blender Foundation/Blender/5.2/scripts/addons`, Blender 5.2 в `C:/Program Files/Blender Foundation/Blender 5.2`.
-  В Blender: N-панель → BlenderMCP → Connect (сокет 9876). Проверка с машины:
-  `timeout 40 uvx --offline --python 3.12 blender-mcp < /dev/null` → в логе «Successfully connected to Blender on startup».
-- Инструменты появляются только в сессии, начатой ПОСЛЕ правки `.mcp.json` (и после одобрения проектного сервера);
-  02.10.2026 сервер и сокет были живы, а в текущей сессии тулов `blender` не было.
-- Экспорт: `Assets/_Project/Models/<деталь>.fbx`, метры, Apply Transform; ось ракеты в Blender +Z → в Unity +Y
-  (нос борта) — подтверждено на 11 деталях 02.10.2026. Параметры `export_scene.fbx`: `bake_space_transform=True,
+## Blender MCP (low-poly parts)
+- Server: `.mcp.json` → `uvx --python 3.12 blender-mcp` (ahujasid), addon `blender_mcp_addon.py` v1.8 in
+  `%APPDATA%/Blender Foundation/Blender/5.2/scripts/addons`, Blender 5.2 in `C:/Program Files/Blender Foundation/Blender 5.2`.
+  In Blender: N-panel → BlenderMCP → Connect (socket 9876). Check from the machine:
+  `timeout 40 uvx --offline --python 3.12 blender-mcp < /dev/null` → the log shows "Successfully connected to Blender on startup".
+- Tools appear only in a session started AFTER editing `.mcp.json` (and after approving the project server);
+  on 02.10.2026 the server and socket were alive, yet the current session had no `blender` tools.
+- Export: `Assets/_Project/Models/<part>.fbx`, metres, Apply Transform; the rocket axis in Blender +Z → in Unity +Y
+  (vessel nose) — confirmed on 11 parts on 02.10.2026. `export_scene.fbx` parameters: `bake_space_transform=True,
   apply_scale_options='FBX_SCALE_ALL', axis_forward='-Z', axis_up='Y', object_types={'MESH'}, use_selection=True`.
-  Без них импорт давал fileScale 0,01, поворот 270° и масштаб 100. Начало модели (днище/верх/шарнир) и габарит — в константах
-  `VesselView`/`LaunchPadView` и в Tooltip полей `GameBootstrap`; поменял модель — сверь bounds (`mesh.bounds`).
-- **В FBX несколько субмешей** (по материалу Blender): `sharedMaterials` — массив длиной `subMeshCount`,
-  иначе рисуется только первый субмеш.
-- **`manage_camera screenshot` пишет в `Assets/Screenshots/`** (`output_folder` игнорирует, `screenshot_file_name`
-  принимает) — после съёмки файл и `Assets/Screenshots(.meta)` удалить. `camera: "<имя>"` снимает без OnGUI-HUD.
-  Его «верх» — мировой Y, а местная вертикаль в сцене наклонена (P со SwapYZ + плавающее начало) — кадр завален.
-  Рабочий кадр (HDRP, 02.10.2026): клон `boot.Camera`, выключить все MonoBehaviour кроме `HDAdditionalCameraData`,
-  удалить AudioListener, `targetTexture` = RT 1920×1080, `enabled = false`; `rotation = LookRotation(цель − поз,
-  vessel.up)`, 12× `cam.Render()` (догоняет автоэкспозиция) → `ReadPixels` → PNG в скретчпад. Файлов в Assets нет.
-- **Демо-борт рядом с основным** (показ деталей): `new Vessel(VesselPresets.ById("vostok"))` (у `VesselDesign`
-  нет `ById`) + обязательно `Body/Position/Attitude` от активного — иначе NRE в `FloatingOrigin.WorldP` при
-  `VesselView.Init`; виду `enabled = false`, позицию ставить руками.
-- **Тест у тела: телепорт ниже ~1 км = удар** — `Teleport(Луна, 200 м)` + отстрел ступеней дал «удар 103 м/с»
-  и `Alive = false` (вид перестаёт перестраиваться). Брать 15 км, как чит в Esc.
+  Without them the import gave fileScale 0.01, a 270° rotation and scale 100. The model origin (bottom/top/hinge) and dimensions are in the constants of
+  `VesselView`/`LaunchPadView` and in the Tooltips of `GameBootstrap` fields; if you change the model, re-check bounds (`mesh.bounds`).
+- **An FBX has several submeshes** (by Blender material): `sharedMaterials` is an array of length `subMeshCount`,
+  otherwise only the first submesh is drawn.
+- **`manage_camera screenshot` writes to `Assets/Screenshots/`** (ignores `output_folder`, accepts `screenshot_file_name`)
+  — after shooting, delete the file and `Assets/Screenshots(.meta)`. `camera: "<name>"` shoots without the OnGUI HUD.
+  Its "up" is world Y, while the local vertical in the scene is tilted (P with SwapYZ + floating origin) — the frame comes out tilted.
+  Working frame (HDRP, 02.10.2026): a clone of `boot.Camera`, disable all MonoBehaviours except `HDAdditionalCameraData`,
+  remove the AudioListener, `targetTexture` = RT 1920×1080, `enabled = false`; `rotation = LookRotation(target − pos,
+  vessel.up)`, 12× `cam.Render()` (auto-exposure catches up) → `ReadPixels` → PNG into the scratchpad. No files in Assets.
+- **Demo vessel next to the main one** (showing parts): `new Vessel(VesselPresets.ById("vostok"))` (`VesselDesign`
+  has no `ById`) + you must set `Body/Position/Attitude` from the active one — otherwise an NRE in `FloatingOrigin.WorldP` during
+  `VesselView.Init`; set the view's `enabled = false`, set the position by hand.
+- **Test near a body: teleporting below ~1 km = impact** — `Teleport(Moon, 200 m)` + jettisoning stages gave "impact 103 m/s"
+  and `Alive = false` (the view stops rebuilding). Use 15 km, like the cheat in Esc.
 
-## Как вызывать UnityMCP, если тулов нет в сессии
-- 03.10.2026: редактор в HTTP-режиме — stdio-тулы `unityMCP` отвечают «No Unity Editor instances found» (порт 6400 не
-  слушается, это нормально), а HTTP-коннектор сессии — ECONNREFUSED, если стартовал раньше сервера. Рабочий путь —
-  HTTP JSON-RPC клиент (`python mcp.py <тул> <json|файл.json>` в скретчпаде: initialize → initialized → tools/call,
-  `mcp-session-id`, SSE `data:`). Аргументы с C#-кодом — файлом JSON, иначе кавычки ломаются в bash.
-- `RenderProbe.Shot` (cam.Render в RT) в Play даёт чёрный кадр и EV NaN — снимать `manage_camera screenshot`
-  (`output_folder: Temp/Shots`), яркость считать PIL по уменьшенной копии.
-- Ночь для замеров: Play → `u.SetWarp(6)` на столе (×10⁴) → ждать `u.Time` +50 000 с (≈02:30 местного на Байконуре) → `SetWarp(0)`.
-- 02.10.2026: в сессии два набора тулов — `UnityMCP` (заглавные) отвечает `no_unity_session`, рабочий —
-  `unityMCP` (строчные, stdio). Ресурсов у него нет (`editor/state` не читается) — состояние узнавать `execute_code`.
-  Сразу после `play` — доменная перезагрузка, «No Unity Editor instances found»/таймаут: просто повторить вызов.
-- 02.10.2026: после /mcp и одобрения тулы `UnityMCP` в сессии так и не появились, а сервер на 8767 жив.
-  Обход — HTTP-клиент JSON-RPC (`initialize` → `notifications/initialized` → `tools/call`, заголовок
-  `mcp-session-id`, ответ SSE `data:`); C# — через `execute_code`. Скрипт ~50 строк, писать в скретчпад.
-- Правка, упавшая с «файл занят» при открытом Unity, — разовая блокировка импорта: перезапустить оставшиеся замены.
-  Python `io.open(p,'w')` при этом даёт `OSError [Errno 22] Invalid argument` (02.10.2026 — дважды подряд на
-  GameBootstrap.cs, и с абсолютным, и с относительным путём); тул `Edit` в ту же минуту писал без ошибки — им и править.
-- **Установка Blender MCP перезаписала `.mcp.json`** — `UnityMCP` пропал из файла. Вернул руками, но сессия,
-  стартовавшая без него, сервер не видит (`session_connectors_status` — только `blender`). Лечится только
-  пользователем: /mcp → одобрить UnityMCP, или новая сессия. После установки любого MCP — сверить `.mcp.json`.
-- **FBX из Blender → Unity: оси (−x, z, −y)** (03.10.2026 замер `mesh.bounds` у Pad_Atlas): модель повёрнута на 180° вокруг Y.
-  Чтобы Blender-x остался востоком, а y — севером в базисе стола, у дочернего узла `localRotation = Euler(0,180,0)`;
-  тогда Blender (x,y,z) → стол (x, z, y). Масштаб по длине (Blender y) = `localScale.z`.
-- **`remove_doubles` склеивает заглушки слотов материалов**: неиспользуемый слот FBX Unity схлопывает, субмеши
-  съезжают. Заглушки каждого слота — в разных местах; проверка после сборки: `slots == [0,1,2,3]` у всех Pad_*.
-- **`get_viewport_screenshot` в Blender отдаёт старый кадр после смены вида через bpy**; надёжно — рендер Workbench
-  из служебной камеры. `hide_set` скрывает только во вьюпорте, для рендера ещё `hide_render = True`.
-- Namespace `execute_blender_code` между вызовами не сохраняется — в каждом вызове `exec(open(...).read())`.
-- **`PlayerPrefs` в инициализаторе поля MonoBehaviour** → UnityException (вызов из конструктора). Читать лениво
-  (`DetailSettings.Level`) или в `Awake`; в `MapView` буфер пустой и ресайзится в `Draw`.
-- **`Destroy` чужой текстуры** («Destroying object UnityWhite is not allowed»): при перестройке LOD освобождать только своё —
-  `BodyRenderer.Own/Free` с HashSet, плейсхолдер `Texture2D.whiteTexture` и ассеты не трогать.
-- **Долгий `execute_code` (генерация уровня «Ультра» ~70 с) отваливается по таймауту MCP**, а Unity доделывает работу.
-  Результат — `Debug.Log` и потом `read_console`, а не return.
+## How to call UnityMCP when the tools are not in the session
+- 03.10.2026: the editor is in HTTP mode — the stdio tools of `unityMCP` answer "No Unity Editor instances found" (port 6400 is not
+  listened on, this is normal), and the session's HTTP connector gives ECONNREFUSED if it started before the server. The working path is an
+  HTTP JSON-RPC client (`python mcp.py <tool> <json|file.json>` in the scratchpad: initialize → initialized → tools/call,
+  `mcp-session-id`, SSE `data:`). Arguments containing C# code go as a JSON file, otherwise quotes break in bash.
+- `RenderProbe.Shot` (cam.Render into an RT) in Play gives a black frame and EV NaN — shoot with `manage_camera screenshot`
+  (`output_folder: Temp/Shots`), compute brightness with PIL on a downscaled copy.
+- Night for measurements: Play → `u.SetWarp(6)` on the pad (×10⁴) → wait for `u.Time` +50 000 s (≈02:30 local time at Baikonur) → `SetWarp(0)`.
+- 02.10.2026: the session has two tool sets — `UnityMCP` (capitalised) answers `no_unity_session`, the working one is
+  `unityMCP` (lowercase, stdio). It has no resources (`editor/state` cannot be read) — get state via `execute_code`.
+  Right after `play` there is a domain reload, "No Unity Editor instances found"/timeout: just repeat the call.
+- 02.10.2026: after /mcp and approval, the `UnityMCP` tools never appeared in the session, while the server on 8767 is alive.
+  Workaround — a JSON-RPC HTTP client (`initialize` → `notifications/initialized` → `tools/call`, header
+  `mcp-session-id`, SSE response `data:`); C# via `execute_code`. A script of ~50 lines, write it to the scratchpad.
+- An edit that failed with "file in use" while Unity is open is a one-off import lock: rerun the remaining replacements.
+  Python `io.open(p,'w')` then gives `OSError [Errno 22] Invalid argument` (02.10.2026 — twice in a row on
+  GameBootstrap.cs, with both an absolute and a relative path); the `Edit` tool wrote without error in that same minute — edit with it.
+- **Installing Blender MCP overwrote `.mcp.json`** — `UnityMCP` vanished from the file. Restored by hand, but a session
+  that started without it does not see the server (`session_connectors_status` — only `blender`). Only the user can fix it:
+  /mcp → approve UnityMCP, or a new session. After installing any MCP, check `.mcp.json`.
+- **FBX from Blender → Unity: axes (−x, z, −y)** (03.10.2026 measured `mesh.bounds` of Pad_Atlas): the model is rotated 180° around Y.
+  For Blender-x to remain east and y north in the pad basis, the child node gets `localRotation = Euler(0,180,0)`;
+  then Blender (x,y,z) → pad (x, z, y). Scale along the length (Blender y) = `localScale.z`.
+- **`remove_doubles` merges the material-slot placeholders**: Unity collapses an unused FBX slot, the submeshes
+  shift. The placeholders of each slot are in different places; check after building: `slots == [0,1,2,3]` for all Pad_*.
+- **`get_viewport_screenshot` in Blender returns a stale frame after changing the view via bpy**; reliable — a Workbench render
+  from a service camera. `hide_set` hides only in the viewport, for rendering also set `hide_render = True`.
+- The `execute_blender_code` namespace is not preserved between calls — in each call use `exec(open(...).read())`.
+- **`PlayerPrefs` in a MonoBehaviour field initializer** → UnityException (call from a constructor). Read lazily
+  (`DetailSettings.Level`) or in `Awake`; in `MapView` the buffer is empty and is resized in `Draw`.
+- **`Destroy` of someone else's texture** ("Destroying object UnityWhite is not allowed"): when rebuilding LODs free only your own —
+  `BodyRenderer.Own/Free` with a HashSet, do not touch the placeholder `Texture2D.whiteTexture` and assets.
+- **A long `execute_code` (generating the "Ultra" level ~70 s) drops on the MCP timeout**, while Unity finishes the work.
+  The result is `Debug.Log` and then `read_console`, not a return value.
 
-- **Перекомпиляция во время Play → NRE каждый кадр** (`GameBootstrap.Update`): перезагрузка домена обнуляет несериализуемые
-  поля, `Awake` не повторяется. В `Update` стоит проверка с предупреждением; в EditorPrefs `ScriptCompilationDuringPlay` = 1
-  («перекомпилировать после выхода из Play», было −1). Перед правкой кода — `manage_editor stop`.
-- **Bash `cat > файл` без heredoc/ввода висит вечно**, ожидая stdin (повис запуск редактора). Всем командам MCP/Blender —
-  `< /dev/null` и `timeout`.
-- **Blender без MCP-аддона**: `"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" -b Tools/blender/parts.blend
-  --python скрипт.py < /dev/null`; экспорт — `hulls_lib.export(name)` (sys.path на `Tools/blender`), перед сохранением
-  `preferences.filepaths.save_version = 0`, иначе рядом появляется `parts.blend1`.
+- **Recompiling during Play → NRE every frame** (`GameBootstrap.Update`): the domain reload zeroes non-serialized
+  fields, `Awake` does not repeat. `Update` has a check with a warning; in EditorPrefs `ScriptCompilationDuringPlay` = 1
+  ("recompile after exiting Play", was −1). Before editing code — `manage_editor stop`.
+- **Bash `cat > file` with no heredoc/input hangs forever** waiting for stdin (the editor launch hung). For all MCP/Blender commands use
+  `< /dev/null` and `timeout`.
+- **Blender without the MCP addon**: `"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" -b Tools/blender/parts.blend
+  --python script.py < /dev/null`; export — `hulls_lib.export(name)` (sys.path to `Tools/blender`), before saving
+  `preferences.filepaths.save_version = 0`, otherwise `parts.blend1` appears next to it.
 
-## Blender без MCP-вывода (03.10.2026)
-- **`execute_blender_code` выполняет, но `print` не возвращает** — проверять геометрию нечем. Рабочий путь — headless:
+## Blender without MCP output (03.10.2026)
+- **`execute_blender_code` executes but does not return `print`** — there is no way to check geometry. The working path is headless:
   `"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" -b Tools/blender/parts.blend --python script.py < /dev/null`
-  и grep по префиксу в print. Экспорт — `hulls_lib.export(name)` (добавить `Tools/blender` в `sys.path`), перед сохранением
-  `preferences.filepaths.save_version = 0` (иначе плодится `.blend1`), после — удалить `Tools/blender/__pycache__`.
-- **`o.dimensions` после `bm.to_mesh` в фоне не обновляется** — габарит проверять по вершинам или реимпортом FBX.
+  and grep by a prefix in print. Export — `hulls_lib.export(name)` (add `Tools/blender` to `sys.path`), before saving
+  `preferences.filepaths.save_version = 0` (otherwise `.blend1` files multiply), afterwards delete `Tools/blender/__pycache__`.
+- **`o.dimensions` is not updated after `bm.to_mesh` in the background** — check the size from vertices or by re-importing the FBX.
 
-## Раскладное: опоры и трапы отдельными FBX (03.10.2026)
-- **Опоры «Сервейора»/LM и трапы КТ вынесены из корпусов** скриптом `Tools/blender/split_deploy.py` (разовый: повторно
-  на уже разрезанном parts.blend деталей не найдёт). Острова меша → группа по ближайшему азимуту опоры → объект
-  `<Корпус>_Leg_<k>` / `Luna17_Ramp_<k>` в координатах корпуса; FBX `Surveyor_Legs`, `LM_Legs`, `Luna17_Ramps` — по
-  объекту на опору. Итог разреза: Surveyor 3×124 верш., LM 4 опоры (az 90 — 570 верш. с лестницей, прочие 314), КТ 2×72.
-- **У LM площадка у люка (z > 3,05) — тоже остров с r > 2,4**: без отсечки по высоте уезжает в опору. Лестница — на
-  передней опоре (az 90), поэтому опоры не клонировать с одной, а резать каждую.
-- **Трапы КТ резали колёса лунохода**: в модели «Лунохода» база была 2,2 м (колёса до ±1,36), а сложенный трап
-  стоит на r 1,17–1,2. Колёса пересажены на реальную базу 1,7 м (оси ±0,2833/±0,85, край ±1,105 — пара
-  `FlightPhysics.RoverHalfBase` 0,85), трап сложен на 116° вместо 120° (верх на 4° наружу, r ≈ 1,4 < обтекатель 2,05).
-- **Крышка лунохода — отдельный FBX** `Lunokhod_Lid` (`Tools/blender/lunokhod_lid.py`, разовый: на уже разрезанном
-  parts.blend крышку не найдёт): острова z ≥ 1,33 / уходящие вперёд y < −0,85. Модель — в открытом положении,
-  шарнир r 0,8 h 1,4, закрыта при 162° (`VesselView.DeployHinge`). Антенны, торчавшие над крышкой, сдвинуты к
-  переду (y > 0,64), иначе закрытая крышка шла сквозь них.
-- **Направление шарнира — по стопе, не по центру детали**: подкосы «Сервейора» уводят центр bounds на ~10° от оси опоры.
-  FlightSceneBuilder берёт центр вершин в полосе 0,3 м над низом детали (`DeployFootBand`).
-- **Шарниры (`VesselView.DeployHinge`) — пара с parts.blend**: радиус/высота оси = верх стойки (Surveyor 0,6/0,9, LM
-  2,15/3,0, кромка настила КТ 1,2/1,9; меши: Surveyor y≤0,93, LM r≥2,07 y≤3,04, трап z≥1,17 y≤1,94). Правишь модель —
-  сверяй. Слоты материалов детали ищутся по имени материала в корпусе.
-- **`execute_code` через mcp.py: экранированный перевод строки (обратный слэш + n) в C#-строке приходит настоящим
-  переводом** → «Newline in constant». Разделители в выводе — `" ### "`.
+## Deployables: legs and ramps as separate FBXs (03.10.2026)
+- **The legs of Surveyor/LM and the CT ramps were separated from the hulls** by the script `Tools/blender/split_deploy.py` (one-off: run again
+  on an already-split parts.blend it will find no parts). Mesh islands → grouped by the nearest leg azimuth → object
+  `<Hull>_Leg_<k>` / `Luna17_Ramp_<k>` in hull coordinates; FBXs `Surveyor_Legs`, `LM_Legs`, `Luna17_Ramps` — one
+  object per leg. Result of the split: Surveyor 3×124 vert., LM 4 legs (az 90 — 570 vert. with the ladder, the others 314), CT 2×72.
+- **On the LM the platform at the hatch (z > 3.05) is also an island with r > 2.4**: without a height cutoff it goes off into a leg. The ladder is on the
+  front leg (az 90), so do not clone the legs from one, cut each.
+- **The CT ramps were cut by the Lunokhod wheels**: in the "Lunokhod" model the base was 2.2 m (wheels out to ±1.36), while the folded ramp
+  sits at r 1.17–1.2. The wheels were moved to the real base of 1.7 m (axes ±0.2833/±0.85, edge ±1.105 — a pair with
+  `FlightPhysics.RoverHalfBase` 0.85), the ramp is folded at 116° instead of 120° (top 4° outward, r ≈ 1.4 < fairing 2.05).
+- **The Lunokhod lid is a separate FBX** `Lunokhod_Lid` (`Tools/blender/lunokhod_lid.py`, one-off: it will not find the lid on an already-split
+  parts.blend): islands z ≥ 1.33 / extending forward y < −0.85. The model is in the open position,
+  hinge r 0.8 h 1.4, closed at 162° (`VesselView.DeployHinge`). Antennas that stuck out above the lid were moved
+  forward (y > 0.64), otherwise the closed lid went through them.
+- **The hinge direction is taken from the foot, not the part centre**: the Surveyor's struts move the bounds centre ~10° away from the leg axis.
+  FlightSceneBuilder takes the centre of vertices in a 0.3 m band above the bottom of the part (`DeployFootBand`).
+- **Hinges (`VesselView.DeployHinge`) are a pair with parts.blend**: the axis radius/height = top of the strut (Surveyor 0.6/0.9, LM
+  2.15/3.0, CT deck edge 1.2/1.9; meshes: Surveyor y≤0.93, LM r≥2.07 y≤3.04, ramp z≥1.17 y≤1.94). If you change the model,
+  re-check. A part's material slots are looked up by material name in the hull.
+- **`execute_code` via mcp.py: an escaped newline (backslash + n) in a C# string arrives as a real
+  newline** → "Newline in constant". Separators in the output — `" ### "`.
 
-## Колёса лунохода и Play (03.10.2026)
-- **Колёса — `Tools/blender/lunokhod_wheels.py`** (разовый, после `lunokhod_lid.py`): острова меша в габарите колеса
-  (|x| 0,70–0,90, z 0–0,51, оси y ±0,283/±0,845) → `Lunokhod_Wheel_0..7`. Пивот — центр bounds меша
-  (`FlightSceneBuilder.DeployParts(wheels: true)`), вид крутит узел вокруг X модели.
-- **Пока пользователь в Play, компиляция отложена**: `Kare/Build Flight Scene` падает «cannot be used during play mode», а
-  `execute_code` не видит новых членов (`WheelsFor`). Play не останавливать — дождаться выхода, потом собрать сцену.
-- **Новые карты/ассеты не видны в Play** — сцена не пересобрана после добавления (`BodyRenderer.Maps`, `SaturnRing`
-  назначает только `Kare/Build Flight Scene`). Признак: GUID текстуры (из `.meta`) не встречается в `Flight.unity`.
-- **VFX Graph через MCP не собрать**: `manage_vfx` создаёт `.vfx` только из шаблона и крутит exposed-параметры, а у
-  шаблонов их 0, узлы не редактируются. Эффекты — кодом (billboard'ы) или чужими Shuriken-префабами.
-- **Паки из Asset Store проверять на конвейер**: Rainy VFX (материал `Default-Particle`, `Legacy Shaders/Particles`) и
-  AQUAS-Lite (`CGPROGRAM`, built-in RP) в HDRP не рендерятся; README Rainy описывает файлы, которых в паке нет.
-  AQUAS_Lite_Reflection.cs ломал компиляцию всего проекта (`GetInstanceID` в 6000.6 — ошибка CS0619) → заменён на
-  `GetHashCode()`. Проверка: шейдер материала из префаба через `execute_code` (`r.sharedMaterial.shader.name`).
-- **`execute_code` в редакторе вне Play не вызывает `Awake`** у `AddComponent` (компонент без `[ExecuteInEditMode]`):
-  все поля пустые. Проверка синтеза/инициализации — `GetMethod("Awake", NonPublic|Instance).Invoke(c, null)`.
-- **Скриншот `manage_camera` кладёт png в `Assets/Screenshots`** (+ .meta) — после проверки удалить, это не ассет проекта.
+## Lunokhod wheels and Play (03.10.2026)
+- **The wheels are `Tools/blender/lunokhod_wheels.py`** (one-off, after `lunokhod_lid.py`): mesh islands within the wheel envelope
+  (|x| 0.70–0.90, z 0–0.51, axes y ±0.283/±0.845) → `Lunokhod_Wheel_0..7`. The pivot is the centre of the mesh bounds
+  (`FlightSceneBuilder.DeployParts(wheels: true)`), the view rotates the node around the model's X.
+- **While the user is in Play, compilation is deferred**: `Kare/Build Flight Scene` fails with "cannot be used during play mode", and
+  `execute_code` does not see new members (`WheelsFor`). Do not stop Play — wait for the exit, then build the scene.
+- **New maps/assets are not visible in Play** — the scene was not rebuilt after the addition (`BodyRenderer.Maps`, `SaturnRing`
+  are assigned only by `Kare/Build Flight Scene`). Symptom: the texture GUID (from `.meta`) does not occur in `Flight.unity`.
+- **VFX Graph cannot be built via MCP**: `manage_vfx` creates `.vfx` only from a template and tweaks exposed parameters, while the
+  templates have 0 of them, nodes cannot be edited. Effects — in code (billboards) or with third-party Shuriken prefabs.
+- **Check Asset Store packs for the render pipeline**: Rainy VFX (material `Default-Particle`, `Legacy Shaders/Particles`) and
+  AQUAS-Lite (`CGPROGRAM`, built-in RP) do not render in HDRP; Rainy's README describes files that are not in the pack.
+  AQUAS_Lite_Reflection.cs broke compilation of the whole project (`GetInstanceID` in 6000.6 — error CS0619) → replaced with
+  `GetHashCode()`. Check: the shader of a prefab's material via `execute_code` (`r.sharedMaterial.shader.name`).
+- **`execute_code` in the editor outside Play does not call `Awake`** on `AddComponent` (a component without `[ExecuteInEditMode]`):
+  all fields are empty. To check synthesis/initialisation — `GetMethod("Awake", NonPublic|Instance).Invoke(c, null)`.
+- **The `manage_camera` screenshot puts a png into `Assets/Screenshots`** (+ .meta) — delete it after checking, it is not a project asset.
 
-## IMGUI: щелчок «сквозь» панели и имена в partial (05.10.2026)
-- **Выбор детали в 3D ведётся в `Update`, а он идёт раньше `OnGUI`**: на момент щелчка IMGUI ещё не знает, что мышь
-  над панелью, а панели без кнопок (`FlightHud.Fill`) событие не съедают. Решение — `HudHits`: прямоугольники панелей
-  пишутся в Repaint и проверяются в следующем `Update`, плюс `GUIUtility.hotControl != 0` пока кнопка зажата
-  (нажатие поймала кнопка/поле). Щелчок — сдвиг < 6 px и < 0,6 с, иначе это вращение камеры.
-- **В статическом классе поле и метод с одним именем — CS0102** (`Color Fuel` и `void Fuel(...)` в `StageTable`):
-  ошибка одного файла валит сборку всей Assembly-CSharp у всех параллельных агентов — новые файлы с общими
-  именами проверять `refresh_unity` сразу, а не в конце.
-- **Текстура после `Apply(false, true)` нечитаемая** — `GetPixels` в `execute_code` падает (`MissionSketch`).
-  Проверять так: `Graphics.Blit` в `RenderTexture` → `ReadPixels` → PNG в `Temp/Shots` (кадр выйдет перевёрнутым по Y).
-- **IMGUI-hover через MCP не навести** — мыши нет. Подсказку «?» таблицы миссий открывать в Play полем
-  `MissionPicker.DebugTipId = "apollo11"` (+ `PauseMenu.IsOpen` рефлексией, `MissionPicker.Open = true`); после — сбросить.
-- **Вход в Play из MCP рвёт мост на ~20–30 с** (domain reload): `execute_code` сразу после `play` отвечает
-  «No Unity Editor instances found» — подождать и повторить, не перезапускать Play.
-- **`execute_code` компилирует CodeDom (C# 6)**: `Object.FindFirstObjectByType<GameBootstrap>()` не собирается («`Object` ambiguous», игровые типы не видны). Работает: тип через `AppDomain...GetAssemblies()` → `GetType("Kare.Space.Game.GameBootstrap")`, `UnityEngine.Object.FindFirstObjectByType(t)`, поле рефлексией. Так снимаются скрины разных миссий: `MissionId` в памяти → `EditorApplication.EnterPlaymode()`, сцену НЕ сохранять (после Stop — `OpenScene` заново, проверено 05.10: вернулся `vostok`).
-- **Полные имена игровых типов в `execute_code` (CodeDom) видны** (05.10.2026): `Kare.Space.Game.GameBootstrap.U.Active`,
-  `Kare.Space.Core.FlightPhysics.PlaceOnSurface(...)` собираются без рефлексии; `QuaternionD.Inverse` — свойство, не метод.
-  Вершины FBX-деталей (не Read/Write) `mesh.vertices` не отдаёт — читать `Mesh.AcquireReadOnlyMeshData(m)[0].GetVertices(NativeArray)`.
-  Длинный замер повторять `execute_code action=replay index=N` (индекс — из `get_history`), а не пересылать код.
-  Кадр без смаза после телепорта: снять паузу, через `EditorApplication.update` выждать ~40 кадров и поставить `isPaused`.
-- **`execute_code` сразу после `refresh_unity`/компиляции может упасть по таймауту MCP, но доработать** (05.10.2026):
-  запекание иконок (~34 с) вернуло timeout, а PNG записались (время файла 10:22:29 при часах 10:22:51). Проверять результат
-  по времени файлов/`isCompiling`, а не перезапускать вслепую.
+## IMGUI: clicking "through" panels and names in partials (05.10.2026)
+- **Picking a part in 3D happens in `Update`, which runs before `OnGUI`**: at the moment of the click IMGUI does not yet know the mouse is
+  over a panel, and panels without buttons (`FlightHud.Fill`) do not consume the event. The solution — `HudHits`: rectangles of the panels
+  are written in Repaint and checked in the next `Update`, plus `GUIUtility.hotControl != 0` while a button is held
+  (the press was caught by a button/field). A click = movement < 6 px and < 0.6 s, otherwise it is camera rotation.
+- **In a static class a field and a method with the same name give CS0102** (`Color Fuel` and `void Fuel(...)` in `StageTable`):
+  an error in one file breaks the build of the whole Assembly-CSharp for all parallel agents — check new files with common
+  names with `refresh_unity` immediately, not at the end.
+- **A texture after `Apply(false, true)` is unreadable** — `GetPixels` in `execute_code` fails (`MissionSketch`).
+  Check it like this: `Graphics.Blit` into a `RenderTexture` → `ReadPixels` → PNG in `Temp/Shots` (the frame comes out flipped in Y).
+- **IMGUI hover cannot be triggered via MCP** — there is no mouse. Open the "?" tooltip of the mission table in Play via the field
+  `MissionPicker.DebugTipId = "apollo11"` (+ `PauseMenu.IsOpen` via reflection, `MissionPicker.Open = true`); reset afterwards.
+- **Entering Play from MCP breaks the bridge for ~20–30 s** (domain reload): `execute_code` right after `play` answers
+  "No Unity Editor instances found" — wait and repeat, do not restart Play.
+- **`execute_code` compiles with CodeDom (C# 6)**: `Object.FindFirstObjectByType<GameBootstrap>()` does not build ("`Object` ambiguous", game types not visible). What works: get the type via `AppDomain...GetAssemblies()` → `GetType("Kare.Space.Game.GameBootstrap")`, `UnityEngine.Object.FindFirstObjectByType(t)`, the field via reflection. This is how screenshots of different missions are taken: `MissionId` in memory → `EditorApplication.EnterPlaymode()`, do NOT save the scene (after Stop — `OpenScene` again, verified 05.10: `vostok` came back).
+- **Full names of game types in `execute_code` (CodeDom) are visible** (05.10.2026): `Kare.Space.Game.GameBootstrap.U.Active`,
+  `Kare.Space.Core.FlightPhysics.PlaceOnSurface(...)` compile without reflection; `QuaternionD.Inverse` is a property, not a method.
+  The vertices of FBX parts (not Read/Write) are not returned by `mesh.vertices` — read `Mesh.AcquireReadOnlyMeshData(m)[0].GetVertices(NativeArray)`.
+  Repeat a long measurement with `execute_code action=replay index=N` (the index is from `get_history`) instead of resending the code.
+  A frame without motion blur after a teleport: release the pause, wait ~40 frames via `EditorApplication.update` and set `isPaused`.
+- **`execute_code` right after `refresh_unity`/compilation may fail on the MCP timeout yet still finish** (05.10.2026):
+  baking icons (~34 s) returned a timeout, but the PNGs were written (file time 10:22:29 with the clock at 10:22:51). Check the result
+  by file times/`isCompiling`, do not restart blindly.
 
-## Крылатые FBX и скриншоты Flight (05.10.2026, `Tools/blender/winged_parts.py`)
-- Патч-скрипт с кириллицей и кавычками в Bash heredoc падает «unexpected EOF while looking for matching `''» — писать
-  скрипт тулом Write в скретчпад и запускать `python файл.py`.
-- Живой сервер Unity — `mcp__unityMCP__*` (строчные); `mcp__UnityMCP__*` отвечает `no_unity_session`.
-- `manage_camera screenshot` с `view_position`/`view_rotation` в Flight во время Play даёт кадр «в упор в столб»
-  (2 из 2 попыток на buran, хотя борт в (0,0,0) и FOV 60), с `view_target` — завал горизонта (берётся мировой up).
-  Надёжно: снимать без позиции — `camera:"Main Camera"`, кадр игровой камеры, она уже держит борт на столе.
-- Миссию для скриншота менять рефлексией `GameBootstrap.MissionId` без сохранения сцены; после Stop — `OpenScene`
-  заново (вернулось `vostok`, `isDirty=False`).
+## Winged FBXs and Flight screenshots (05.10.2026, `Tools/blender/winged_parts.py`)
+- A patch script with Cyrillic and quotes in a Bash heredoc fails with "unexpected EOF while looking for matching `''" — write the
+  script with the Write tool into the scratchpad and run `python file.py`.
+- The live Unity server is `mcp__unityMCP__*` (lowercase); `mcp__UnityMCP__*` answers `no_unity_session`.
+- `manage_camera screenshot` with `view_position`/`view_rotation` in Flight during Play gives a frame "point-blank into a pillar"
+  (2 out of 2 attempts on buran, although the vessel is at (0,0,0) and FOV 60), with `view_target` — a tilted horizon (world up is used).
+  Reliable: shoot without a position — `camera:"Main Camera"`, the game camera's frame, it already holds the vessel on the pad.
+- Change the mission for a screenshot via reflection on `GameBootstrap.MissionId` without saving the scene; after Stop — `OpenScene`
+  again (`vostok` came back, `isDirty=False`).
+
+## Cutouts and the fifth slot in winged_parts.py (05.10.2026)
+- A non-convex fin outline (cutout for the rudder) is an ngon: the Unity FBX import fans it and closes the cutout. `cut_fin()` triangulates
+  the faces in Blender (`bmesh.ops.triangulate`, ear-clipping preserves non-convexity). The wing `wing()` already triangulates top/bottom.
+- The fifth slot (`Glass`) is for orbiters only: `main()` temporarily extends the global `SLOTS` from hulls_lib; the others have 4 slots,
+  otherwise the CraftPalette palettes shift. Faces are sorted by slot — the glass is the last submesh.
+- Running one model without saving parts.blend (parallel agents): a runner with `exec(src.split('if __name__ == "__main__"')[0])`
+  + `main(only=[...])` + `sheet(...)`. Do not write `cat > file` without a heredoc in Bash — it hangs on stdin until the timeout.
+
+## Deployables of station vessels and checking without Unity (05.10.2026)
+- **A deployable part is a split copy of the object, not a separate build.** `FlightSceneBuilder.DeployParts` matches
+  slots by the NAMES of the hull's materials; a separately built mesh gets its own materials — and the palette shifts.
+  `Tools/blender/split_station.py`: rebuilds Crew_Dragon/Soyuz_PAO from `station_parts.py`, carries away islands (nose cone —
+  min z > 3.07; panels — |x| > 1.5) into `Crew_Dragon_Nose.fbx` / `Soyuz_PAO_Panels.fbx`. The island must not touch the
+  hull (the nose cone starts from 3.08 above the deck at 3.06).
+- **Compilation in Play is deferred** (`ScriptCompilationDuringPlay` = 1): while another agent is in Play, `isCompiling` = true,
+  and the new code is not loaded. Checking without Unity: copy `Kare.Space.Core/Game.csproj` into the scratchpad, replace the explicit `<Compile>`
+  with the glob `Assets/_Project/<folder>/**/*.cs` (generated csproj files do not see new files — error
+  "SpaceXRockets does not exist"), make paths absolute, `dotnet build` from Unity's DotNetSdk — 5 s, errors the same as Unity's.
+- **Line endings in the working copy differ** (autocrlf): some files are LF, others CRLF, a single file may have both.
+  The edit script determines `nl` per file; `sed -i` does not damage an LF file.
+- **A long heredoc in Bash gets truncated** ("unexpected EOF while looking for matching"), and `\` inside a python heredoc
+  collapses. Scripts longer than ~50 lines — Write into the scratchpad, then `python file`.
+- **Changing the mission in Play via MCP:** `GameBootstrap.NextMissionId = "sts1"` before `isPlaying = true` is reset by the
+  domain reload (vostok remains), and `SceneManager.LoadScene` from execute_code breaks the bridge for a minute. What works is
+  `PauseMenu.SelectMission("sts1")` via reflection already in Play (verified 05.10: mission sts1, 7 rudders on "Columbia").
+  In codedom execute_code write `UnityEngine.Object.Find…` (plain `Object` is ambiguous), without `$"…"`.

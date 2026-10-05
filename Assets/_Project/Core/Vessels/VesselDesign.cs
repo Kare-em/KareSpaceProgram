@@ -39,8 +39,12 @@ namespace Kare.Space.Core
     /// орбите, «Сервейор» — после отделения от «Центавра» (под обтекателем сложены); Ramps — трапы схода лунохода
     /// с КТ «Луны-17», откидываются только на грунте; Lid — крышка лунохода с солнечной батареей: на грунте
     /// открывается и закрывается (луноход закрывал её на лунную ночь). Опоры КТ и Е-6 неподвижные — None.
+    /// Nose — носовой обтекатель стыковочного узла (Crew Dragon): откидывается перед стыковкой, закрывается перед
+    /// входом; закрытый узел не стыкуется (Universe.CheckDocking). Panels — солнечные батареи: раскрываются один раз,
+    /// только вне обтекателя (Vessel.IsEnclosed); автопилот миссии раскрывает их после отделения от носителя.
+    /// Только в конец: значения пишутся в сцену и конструктор числами.
     /// </summary>
-    public enum DeployKind { None, Legs, PyroLegs, Ramps, Lid, Gear }
+    public enum DeployKind { None, Legs, PyroLegs, Ramps, Lid, Gear, Nose, Panels }
 
     /// <summary>Деталь вида секции из Tools/blender. Физики не касается: ядро о мешах не знает, только об имени детали.</summary>
     public enum SectionModel
@@ -59,6 +63,8 @@ namespace Kare.Space.Core
         R7BlockI, VoskhodAirlock, SoyuzPAO, SoyuzSA, SoyuzBO, SoyuzShroud, ISS2000, ISS2020, Falcon9S1, Falcon9S2, DragonTrunk, CrewDragon,
         // Крылатые системы (Tools/blender/winged_parts.py): орбитер «Шаттла», ET, SRB, «Буран», блоки Ц и А «Энергии».
         ShuttleOrbiter, ShuttleET, ShuttleSRB, Buran, EnergiaCore, EnergiaBlockA,
+        // SpaceX (Tools/blender/spacex_parts.py): Super Heavy, Starship, кольцо горячего разделения.
+        SuperHeavy, Starship, HotStageRing,
     }
 
     public enum SectionKind
@@ -91,6 +97,22 @@ namespace Kare.Space.Core
         public double FinArea;
         /// <summary>Площадь купола, м² (0 — парашюта нет).</summary>
         public double ParachuteArea;
+        /// <summary>
+        /// Тормозной парашют пробега по полосе, м² суммарно на DragChuteCount куполов (§4.6): «Шаттл» с STS-49 — Ø12,2 м
+        /// ≈ 117 м², «Буран» — 3 купола. Ведёт Vessel.DragChute, сила — FlightPhysics.StepRollout.
+        /// </summary>
+        public double DragChuteArea;
+        public int DragChuteCount = 1;
+        /// <summary>Выход строп тормозного парашюта в осях секции, м (вид: VesselView.Controls).</summary>
+        public Vector3d DragChuteMount;
+        /// <summary>
+        /// Куполов в связке (вид, §4.8): ParachuteArea делится между ними поровну, физика считает одну площадь. 0/1 — один.
+        /// У Crew Dragon четыре основных Ø35 м, у «Аполлона» — три.
+        /// </summary>
+        public int ChuteCount;
+        /// <summary>Корень строп смещён от оси секции вбок (к +X вида), м: у Crew Dragon стропы выходят из отсека сбоку
+        /// под носовым обтекателем. Только вид: момент от смещения ядро не считает.</summary>
+        public double ChuteOffset;
         /// <summary>
         /// Высота ввода парашюта по барометру, м (§4.8); 0 — штатная FlightPhysics.ChuteDeployAltitude. В полёте её правит
         /// игрок окном детали (Vessel.ChuteAltitude), сюда пишет конструктор.
@@ -154,6 +176,8 @@ namespace Kare.Space.Core
         /// <summary>Центр масс секции — доля длины от низа (0,5 — однородный цилиндр). У орбитера ≈0,35: двигатели и крыло
         /// в хвосте. Пара: фокус крыла (WingDef.Height) ставится на 0,5–1 м позади этой точки — запас устойчивости.</summary>
         public double ComFraction = 0.5;
+        /// <summary>Возвращаемая ступень (§6.9): запас топлива и цель посадки; null — одноразовая.</summary>
+        public RecoveryDef Recovery;
 
         public double Mass => DryMass + Propellant;
         public double Radius => Diameter * 0.5;
@@ -571,7 +595,7 @@ namespace Kare.Space.Core
                 case "surveyor": return AtlasCentaurSurveyor();
                 case "apollo8": return SaturnApollo8();
                 case "apollo11": return SaturnApollo11();
-                default: return ModernById(id) ?? WingedById(id) ?? Kara1Heavy(); // после «Аполлона» — StationRockets.cs, крылатые — WingedRockets.cs
+                default: return ModernById(id) ?? WingedById(id) ?? SpaceXById(id) ?? Kara1Heavy(); // после «Аполлона» — StationRockets.cs, крылатые — WingedRockets.cs
             }
         }
     }

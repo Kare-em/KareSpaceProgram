@@ -61,6 +61,27 @@ namespace Kare.Space.Core
         public LunarAutopilot Lunar;
         /// <summary>Автопилот «миссия целиком» (Y): сценарий поверх частных автопилотов, сам ведёт ускорение.</summary>
         public MissionAutopilot Mission;
+        /// <summary>
+        /// Фоновые автопилоты возвращаемых ступеней (§6.9): работают для любого борта, не только активного. Пока хоть
+        /// один ведёт ступень, она под полной физикой, а рельсы закрыты (RailsBlocker). Завершённые остаются — итог посадки.
+        /// </summary>
+        public readonly List<BoosterLandingAutopilot> Recoveries = new List<BoosterLandingAutopilot>();
+
+        /// <summary>Пилот возврата этого борта, если он ещё ведёт его.</summary>
+        public BoosterLandingAutopilot RecoveryOf(Vessel v)
+        {
+            foreach (var p in Recoveries) if (p.Vessel == v && p.Running) return p;
+            return null;
+        }
+
+        bool AnyRecovery
+        {
+            get
+            {
+                foreach (var p in Recoveries) if (p.Running) return true;
+                return false;
+            }
+        }
 
         /// <summary>Автопилот сам ведёт ускорение времени (настройка игрока; в тестах ядра по умолчанию выключено —
         /// там ускорение задаёт сценарий). Ручные «.» и «,» ставят его на паузу до конца работы автопилотов, «/» на ×1 — снимает паузу.</summary>
@@ -213,6 +234,8 @@ namespace Kare.Space.Core
                 d.NoCollideUntil = Time + CollisionGrace;
                 d.Event += OnVesselEvent;
                 Vessels.Add(d);
+                var pilot = BoosterLandingAutopilot.TryStart(d);
+                if (pilot != null) Recoveries.Add(pilot);
             }
             for (int i = -1; i < parts.Count; i++)
                 for (int j = i + 1; j < parts.Count; j++)
@@ -332,6 +355,8 @@ namespace Kare.Space.Core
         {
             if (v == null || !v.Alive) return null;
             if (v.AnyEngineRunning) return "работает двигатель";
+            // Ступень на возврате (§6.9) живёт только в физике — рельсы закрыты для всех, пока она не села.
+            if (AnyRecovery) return "посадка ступени";
             if (v.RcsForward > 0 || v.RcsTranslate.sqrMagnitude > 0) return "работает РСУ";
             if (v == Active && (Docking != null && Docking.Close || Lunar != null && Lunar.Close)) return "идёт стыковка";
             // Без узла автопилот стыковки ещё не спланировал перелёт, а планирует он только в физике: на рельсах
@@ -388,6 +413,12 @@ namespace Kare.Space.Core
                 Mission = null;
                 Post("Автопилот отключён: ручное управление");
             }
+            if (Active != null && Active.PilotInput.sqrMagnitude > 1e-6 && RecoveryOf(Active) is BoosterLandingAutopilot rp)
+            {
+                rp.Abort("ручное управление");
+                Active.EngineLimit = 0;
+                Post("Автопилот посадки ступени отключён: ручное управление");
+            }
 
             if (rails)
             {
@@ -432,11 +463,14 @@ namespace Kare.Space.Core
             double h = dt / n;
             var physics = new List<Vessel>();
             var passive = PassivePhysicsSet();
+            // Погибшая ступень из физики выпадает (v.Alive) — её пилот сам не узнает, а рельсы держал бы закрытыми вечно.
+            foreach (var p in Recoveries)
+                if (p.Running && !p.Vessel.Alive) p.Abort(p.Vessel.DestroyReason ?? "потеряна");
             for (int s = 0; s < n; s++)
             {
                 physics.Clear();
                 foreach (var v in Vessels)
-                    if (v.Alive && (v == Active || passive.Contains(v) && NeedsPassivePhysics(v))) physics.Add(v);
+                    if (v.Alive && (v == Active || passive.Contains(v) && NeedsPassivePhysics(v) || RecoveryOf(v) != null)) physics.Add(v);
 
                 foreach (var v in physics)
                 {
@@ -444,6 +478,8 @@ namespace Kare.Space.Core
                     FlightControl.Update(v, Time);
                 }
                 RunAutopilots(h);
+                foreach (var p in Recoveries)
+                    if (p.Running && physics.Contains(p.Vessel)) p.Update(Time, h);
                 foreach (var v in physics) FlightPhysics.Step(v, Time, h);
                 Time += h;
                 foreach (var v in physics) CheckSoi(v);
@@ -708,11 +744,12 @@ namespace Kare.Space.Core
         void CheckDocking()
         {
             var a = Active;
-            if (a == null || !a.Alive || a.IsLanded || !a.HasFreePort) return;
+            // Узел под носовым обтекателем (Crew Dragon, DeployKind.Nose) не стыкуется, пока обтекатель не откинут.
+            if (a == null || !a.Alive || a.IsLanded || !a.HasFreePort || !a.PortOpen) return;
             var pa = a.Position + a.NoseP * a.PortHeight();
             foreach (var t in Vessels)
             {
-                if (!CanDock(a, t) || Fresh(a, t)) continue;
+                if (!CanDock(a, t) || Fresh(a, t) || !t.PortOpen) continue;
                 var pt = t.Position + t.NoseP * t.PortHeight();
                 if (Vector3d.Distance(pa, pt) > DockCaptureRange) continue;
                 if ((a.Velocity - t.Velocity).magnitude > DockMaxSpeed) continue;

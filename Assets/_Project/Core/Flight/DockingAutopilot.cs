@@ -58,6 +58,8 @@ namespace Kare.Space.Core
         public AutopilotRequest Update(Vessel v, double t, double dt)
         {
             if (Docked) return AutopilotRequest.Finished;
+            // Узел под носовым обтекателем — откинуть сразу: за сближение (минуты) привод успевает (FlightPhysics.NoseDeployTime).
+            v.SetNose(true);
             if (!Universe.CanDock(v, Target))
             {
                 Stop(v);

@@ -1,435 +1,435 @@
-# Kare Space Program — дизайн-документ (GDD)
+# Kare Space Program — Game Design Document (GDD)
 
-> Версия 0.1 (черновик) · 2026-10-01 · M0 «ядро симуляции» в работе.
-> Платформа: Windows PC (x64), Unity 6000.6.3f1, HDRP, C#.
-> Старт игры: 4 окт 1957, 19:28:34 UTC, Байконур, «Гагаринский старт» (45,920° с.ш., 63,342° в.д.).
-> Комментарии в коде ссылаются на разделы этого файла (например, «см. GDD §2») — номера и названия §1–§12 не менять.
+> Version 0.1 (draft) · 2026-10-01 · M0 "simulation core" in progress.
+> Platform: Windows PC (x64), Unity 6000.6.3f1, HDRP, C#.
+> Game start: 4 Oct 1957, 19:28:34 UTC, Baikonur, "Gagarin's Start" (45.920° N, 63.342° E).
+> Code comments refer to sections of this file (e.g. "see GDD §2") — do not change the numbers and titles of §1–§12.
 
-Содержание: §1 Концепция · §2 Масштаб и точность · §3 Время · §4 Полётная физика · §5 Корабли · §6 Уникальные механики · §7 Миссии · §8 Прогрессия · §9 Графика · §10 Управление · §11 Дорожная карта · §12 Риски.
-> Источники данных: JPL (Standish) и Schlyter (эфемериды), IAU WGCCRE (вращение), USSA76 (атмосфера), WGS84 (фигура Земли), NASA Standard Breakup Model (мусор); текстуры — NASA, public domain, загрузка только с согласия владельца проекта.
+Contents: §1 Concept · §2 Scale and precision · §3 Time · §4 Flight physics · §5 Vessels · §6 Unique mechanics · §7 Missions · §8 Progression · §9 Graphics · §10 Controls · §11 Roadmap · §12 Risks.
+> Data sources: JPL (Standish) and Schlyter (ephemerides), IAU WGCCRE (rotation), USSA76 (atmosphere), WGS84 (Earth figure), NASA Standard Breakup Model (debris); textures — NASA, public domain, downloaded only with the project owner's consent.
 
-Все числа в документе — проектные значения для старта балансировки, если прямо не сказано «реальное». Реальные данные помечены «реал.».
+All numbers in this document are project values for the start of balancing unless explicitly marked "real". Real data is marked "real.".
 
-## §1 Концепция и столпы
+## §1 Concept and pillars
 
-### §1.1 Суть игры
-Kare Space Program — космический симулятор в духе Kerbal Space Program, но в реальном масштабе 1:1 реальной Солнечной системы. Игрок — руководитель космической программы: от первого спутника в 1957 г. до миссий к спутникам Юпитера и Сатурна. Земля имеет радиус 6378 км, а не 600 км, поэтому орбитальная скорость 7,8 км/с и Δv до орбиты ≈ 9,3–9,5 км/с — не абстракция, а то, что нужно рассчитать.
+### §1.1 The essence of the game
+Kare Space Program is a space simulator in the spirit of Kerbal Space Program, but at a true 1:1 scale of the real Solar System. The player is the head of a space program: from the first satellite in 1957 to missions to the moons of Jupiter and Saturn. Earth has a radius of 6378 km, not 600 km, so the orbital speed of 7.8 km/s and the Δv to orbit of ≈ 9.3–9.5 km/s are not an abstraction but something you have to calculate.
 
-Игра идёт на фоне реального календаря. История движется по расписанию (Спутник, Гагарин, Леонов, Луна-9, Аполлон-11…), и каждая миссия — это гонка: успел раньше исторической даты или нет.
+The game runs against the real calendar. History moves on schedule (Sputnik, Gagarin, Leonov, Luna 9, Apollo 11…), and every mission is a race: did you make it before the historical date or not.
 
-### §1.2 Столпы
-| Столп | Что значит на практике |
+### §1.2 Pillars
+| Pillar | What it means in practice |
 |---|---|
-| Реальный масштаб без «игрушечных» уменьшений | Размеры, массы, Δv, время перелёта — настоящие. Перелёт на Марс ≈ 8–9 мес. |
-| Календарь решает | Стартовые и межпланетные окна, исторический соперник, эры технологий привязаны к датам. |
-| Физика вместо скриптов | Радиационные пояса, плазменная блокировка, задержка света, мусор — следствия модели, а не скриптовые события. |
-| Программа, а не одна ракета | Бюджет, наука, престиж, многоразовость, надёжность двигателей, налёт. |
-| Реализм — по желанию | Упрощённые режимы (§8.5), автопилот выведения, обучение — вход для новичков без потери глубины. |
-| Читаемые данные | Карта, порк-чоп диаграммы, HUD: игрок видит числа, на которых принимает решения. |
+| Real scale with no "toy" shrinking | Sizes, masses, Δv, transit times are real. A trip to Mars ≈ 8–9 months. |
+| The calendar decides | Launch and interplanetary windows, the historical rival, technology eras are tied to dates. |
+| Physics instead of scripts | Radiation belts, plasma blackout, light delay, debris are consequences of the model, not scripted events. |
+| A program, not a single rocket | Budget, science, prestige, reusability, engine reliability, flight hours. |
+| Realism by choice | Simplified modes (§8.5), ascent autopilot, tutorial — an entry point for newcomers without losing depth. |
+| Readable data | Map, porkchop plots, HUD: the player sees the numbers on which decisions are made. |
 
-### §1.3 Игровой цикл
-1. Планирование: выбрать миссию, найти окно (порк-чоп), оценить бюджет и риск.
-2. Проектирование: собрать ракету/зонд (до M3 — готовые «Кара-1» и зонды из каталога).
-3. Запуск и выведение: физический режим, RK4 0,02 с (§4), автопилот или ручное управление.
-4. Полёт на рельсах: ускорение времени, манёвры по карте, программы бортового компьютера.
-5. Результат: наука (канал передачи), престиж, деньги, возврат ступеней.
-6. Развитие: техдерево, смена эры, следующая миссия; параллельно идёт календарь соперника.
+### §1.3 Game loop
+1. Planning: choose a mission, find a window (porkchop), estimate budget and risk.
+2. Design: build a rocket/probe (until M3 — the ready-made "Kara-1" and probes from the catalog).
+3. Launch and ascent: physics mode, RK4 0.02 s (§4), autopilot or manual control.
+4. On-rails flight: time acceleration, maneuvers on the map, onboard computer programs.
+5. Result: science (transmission channel), prestige, money, stage recovery.
+6. Development: tech tree, era change, next mission; meanwhile the rival's calendar keeps running.
 
-### §1.4 Аудитория и платформа
-- Игрок, знакомый с KSP/Orbiter, и новичок, которому интересна реальная космонавтика; для второго есть обучение, автопилот и упрощённые режимы.
-- Только ПК. Целевые характеристики (уточнить замерами в M1): 4+ ядра CPU, 16 ГБ ОЗУ, GPU с 6–8 ГБ видеопамяти, 60 к/с в 1080p на пресете High на уровне RTX 3060.
-- Управление — клавиатура и мышь; геймпад не планируется в v1.
+### §1.4 Audience and platform
+- A player familiar with KSP/Orbiter, and a newcomer interested in real spaceflight; the latter gets a tutorial, autopilot and simplified modes.
+- PC only. Target specs (to be refined by measurements in M1): 4+ CPU cores, 16 GB RAM, GPU with 6–8 GB VRAM, 60 fps at 1080p on the High preset at RTX 3060 level.
+- Controls — keyboard and mouse; no gamepad planned in v1.
 
-### §1.5 Чего в игре нет (границы объёма)
-- N-body для кораблей: только patched conics (точки Лагранжа и низкоэнергетические трассы не воспроизводятся; см. §2.5, §12).
-- Мультиплеер, VR, мобильные платформы.
-- Деформация и разрушение конструкции по методу конечных элементов; разрушение — по порогам (§4.7).
-- Погода и ветер до M6; затем — простая модель ветра у Земли.
-- Моддинг как цель; но данные (миссии, детали, история) хранятся в открытом JSON.
+### §1.5 What is not in the game (scope boundaries)
+- N-body for vessels: only patched conics (Lagrange points and low-energy trajectories are not reproduced; see §2.5, §12).
+- Multiplayer, VR, mobile platforms.
+- Structure deformation and destruction by the finite element method; destruction — by thresholds (§4.7).
+- Weather and wind until M6; after that — a simple wind model near Earth.
+- Modding as a goal; but data (missions, parts, history) is stored in open JSON.
 
-## §2 Масштаб и точность (ключевое решение)
+## §2 Scale and precision (the key decision)
 
-Реальная Солнечная система 1:1 — решение, на котором стоит вся архитектура. Современные ПК это тянут при соблюдении пяти правил: double везде в симуляции, floating origin, планеты «на рельсах» по аналитическим эфемеридам, корабль — patched conics, рендер со сжатием расстояния и чанковым рельефом.
+The real Solar System at 1:1 is the decision the whole architecture stands on. Modern PCs can handle it if five rules are followed: double everywhere in the simulation, floating origin, planets "on rails" via analytic ephemerides, vessels as patched conics, rendering with distance compression and chunked terrain.
 
-### §2.1 Проблема точности
-Шаг представимых чисел (ulp) при удалении от начала координат:
+### §2.1 The precision problem
+The step between representable numbers (ulp) at a distance from the origin:
 
-| Расстояние | float (24 бита) | double (53 бита) |
+| Distance | float (24 bits) | double (53 bits) |
 |---|---|---|
-| 1 км | 0,06 мм | 0,1 пм |
-| 100 км | 8 мм | 15 пм |
-| 6378 км (радиус Земли) | 0,5 м | 1 нм |
-| 384 400 км (Луна) | 32 м | 60 нм |
-| 1 а.е. (1,496·10¹¹ м) | 16 км | 30 мкм |
-| 30 а.е. (Нептун) | 524 км | 1 мм |
+| 1 km | 0.06 mm | 0.1 pm |
+| 100 km | 8 mm | 15 pm |
+| 6378 km (Earth radius) | 0.5 m | 1 nm |
+| 384 400 km (Moon) | 32 m | 60 nm |
+| 1 AU (1.496·10¹¹ m) | 16 km | 30 µm |
+| 30 AU (Neptune) | 524 km | 1 mm |
 
-Float на расстоянии Луны дробит пространство крупнее самого корабля, на 1 а.е. — крупнее орбитальной станции. Время в float тоже непригодно: секунды от J2000 в 1957 г. — около −1,33·10⁹ с, шаг float там 128 с, у double — 0,24 мкс.
+At the Moon's distance float chops space into pieces larger than the vessel itself, at 1 AU — larger than an orbital station. Time in float is also unusable: seconds from J2000 in 1957 are about −1.33·10⁹ s, the float step there is 128 s, for double — 0.24 µs.
 
-Правила: (1) вся симуляция, орбиты и эфемериды — в double (`Vector3d`, `QuaternionD`, время — double секунд); (2) float появляется только на последнем шаге — перед передачей позиции в Unity, и только в виде малой разности относительно текущего начала (§2.6); (3) PhysX для полёта не используется (§4), поэтому дрожание от больших координат касается только рендера.
+Rules: (1) the entire simulation, orbits and ephemerides — in double (`Vector3d`, `QuaternionD`, time — double seconds); (2) float appears only at the last step — before handing the position to Unity, and only as a small difference relative to the current origin (§2.6); (3) PhysX is not used for flight (§4), so jitter from large coordinates affects only rendering.
 
-### §2.2 Системы координат и единицы
-- Единицы СИ: метры, секунды, килограммы, ньютоны, радианы внутри (градусы — только в UI и данных).
-- Базовая инерциальная система — эклиптика J2000, правая: X — на точку весеннего равноденствия, Z — на северный полюс эклиптики, Y = Z × X. Все эфемериды, орбиты и положения хранятся в ней.
-- Системы вторичные: родительская инерциальная (начало в центре тела SOI, оси параллельны эклиптике), связанная с телом (вращается по модели IAU, §2.4), топоцентрическая ENU площадки (старт и посадка).
-- Unity — левая система с осью Y вверх. Перестановка осей y↔z переводит правую эклиптику в левую Unity: `Unity = (X, Z, Y)`; перестановка двух осей меняет хиральность, поэтому мир не получается зеркальным. Преобразование делается в единственном месте (класс-адаптер), кватернионы и матрицы — там же; это известное место ошибок (§12).
-- Игровое время — double секунд от J2000.0 (§3.1). Стартовая эпоха: −1 333 038 686 с (4 окт 1957 19:28:34, без поправки ΔT).
+### §2.2 Coordinate systems and units
+- SI units: meters, seconds, kilograms, newtons, radians internally (degrees — only in UI and data).
+- The base inertial frame — the J2000 ecliptic, right-handed: X — toward the vernal equinox, Z — toward the north ecliptic pole, Y = Z × X. All ephemerides, orbits and positions are stored in it.
+- Secondary frames: parent inertial (origin at the center of the SOI body, axes parallel to the ecliptic), body-fixed (rotates per the IAU model, §2.4), topocentric ENU of the site (launch and landing).
+- Unity is a left-handed system with the Y axis up. Swapping the y↔z axes turns the right-handed ecliptic into Unity's left-handed one: `Unity = (X, Z, Y)`; swapping two axes flips handedness, so the world does not come out mirrored. The conversion is done in a single place (an adapter class), quaternions and matrices are there too; this is a known source of errors (§12).
+- Game time — double seconds from J2000.0 (§3.1). Start epoch: −1 333 038 686 s (4 Oct 1957 19:28:34, without the ΔT correction).
 
-### §2.3 Эфемериды: тела на кеплеровых рельсах
-Положение любого тела — аналитическая функция времени, а не результат интегрирования: нет накопления ошибки, можно прыгнуть в любую дату, ускорение времени ничего не стоит, расчёт детерминирован.
+### §2.3 Ephemerides: bodies on Keplerian rails
+The position of any body is an analytic function of time, not the result of integration: no error accumulation, you can jump to any date, time acceleration costs nothing, the computation is deterministic.
 
-Планеты — элементы JPL (Standish, «Keplerian Elements for Approximate Positions of the Major Planets»): большая полуось, эксцентриситет, наклонение, средняя долгота, долгота перицентра, долгота восходящего узла на эпоху J2000 плюс вековые скорости на юлианское столетие.
+Planets — JPL elements (Standish, "Keplerian Elements for Approximate Positions of the Major Planets"): semi-major axis, eccentricity, inclination, mean longitude, longitude of perihelion, longitude of the ascending node at epoch J2000 plus secular rates per Julian century.
 
-- Алгоритм: `T = (JD − 2451545,0) / 36525`; элементы = значение на J2000 + скорость·T; `M = L − ϖ`, `ω = ϖ − Ω`; уравнение Кеплера `E − e·sin E = M` решается Ньютоном до 1e-12; координаты в плоскости орбиты → поворот на ω, I, Ω → эклиптика J2000.
-- Таблица 1 (1800–2050) — основная. Для дат после 2050 — таблица 2 (3000 до н. э. – 3000 н. э.) с поправочными членами для Юпитера–Плутона (`M = L − ϖ + b·T² + c·cos(f·T) + s·sin(f·T)`).
-- Скорость тела — центральная разность по времени (шаг 0,5 с; в double погрешность ≪ 1e-4 м/с) или аналитическая производная; нужна для смены SOI (§2.5).
-- Солнце — неподвижно в начале гелиоцентрической системы (смещение Солнца от барицентра ≈ 1 радиус Солнца игнорируется).
+- Algorithm: `T = (JD − 2451545.0) / 36525`; elements = value at J2000 + rate·T; `M = L − ϖ`, `ω = ϖ − Ω`; Kepler's equation `E − e·sin E = M` is solved by Newton to 1e-12; coordinates in the orbital plane → rotation by ω, I, Ω → J2000 ecliptic.
+- Table 1 (1800–2050) is the primary one. For dates after 2050 — table 2 (3000 BC – 3000 AD) with correction terms for Jupiter–Pluto (`M = L − ϖ + b·T² + c·cos(f·T) + s·sin(f·T)`).
+- Body velocity — central difference in time (step 0.5 s; in double the error ≪ 1e-4 m/s) or an analytic derivative; needed for the SOI change (§2.5).
+- The Sun is fixed at the origin of the heliocentric system (the Sun's offset from the barycenter ≈ 1 solar radius is ignored).
 
-Земля и Луна:
-- Элементы Standish даны для барицентра системы Земля–Луна (EMB). Земля = EMB − k·r_Луна, где `k = GM_Луна / (GM_Земля + GM_Луна) = 0,012150`; r_Луна — геоцентрический вектор Луны. Земля, таким образом, «качается» вокруг барицентра на ≈ 4670 км.
-- Луна — элементы Шлайтера (геоцентрические, эклиптические). Линейные скорости: узел регрессирует −0,0529538°/сут (период 18,6 года), аргумент перигея растёт +0,1643573°/сут (долгота перигея прецессирует с периодом 8,85 года), средняя аномалия +13,0649930°/сут (аномалистический месяц 27,5546 сут). Эпохальные значения — в таблице данных по первоисточнику.
-- Без возмущений (эвекция, вариация, годичное неравенство) положение Луны отличается от реального до ~1° (≈ 6700 км); для SOI Луны 66 200 км допустимо. Добавление главных возмущений — опционально (M5, §12.2).
+Earth and the Moon:
+- The Standish elements are given for the Earth–Moon system barycenter (EMB). Earth = EMB − k·r_Moon, where `k = GM_Moon / (GM_Earth + GM_Moon) = 0.012150`; r_Moon is the geocentric Moon vector. Earth thus "wobbles" around the barycenter by ≈ 4670 km.
+- The Moon — Schlyter elements (geocentric, ecliptic). Linear rates: the node regresses −0.0529538°/day (period 18.6 years), the argument of perigee grows +0.1643573°/day (the longitude of perigee precesses with a period of 8.85 years), the mean anomaly +13.0649930°/day (anomalistic month 27.5546 days). Epoch values — in the data table from the primary source.
+- Without perturbations (evection, variation, annual equation) the Moon's position differs from the real one by up to ~1° (≈ 6700 km); acceptable for the Moon's SOI of 66 200 km. Adding the main perturbations is optional (M5, §12.2).
 
-Спутники внешних планет: круговые орбиты в плоскости экватора родителя (ориентация экватора — по IAU, §2.4); фаза на эпоху — из таблицы данных, период — из Кеплера.
+Moons of the outer planets: circular orbits in the parent's equatorial plane (equator orientation — per IAU, §2.4); the phase at epoch — from the data table, the period — from Kepler.
 
-| Спутник | Родитель | a, км | Период, сут (реал.) |
+| Moon | Parent | a, km | Period, days (real.) |
 |---|---|---|---|
-| Ио | Юпитер | 421 800 | 1,769 |
-| Европа | Юпитер | 671 100 | 3,551 |
-| Ганимед | Юпитер | 1 070 400 | 7,155 |
-| Каллисто | Юпитер | 1 882 700 | 16,689 |
-| Титан | Сатурн | 1 221 870 | 15,945 |
+| Io | Jupiter | 421 800 | 1.769 |
+| Europa | Jupiter | 671 100 | 3.551 |
+| Ganymede | Jupiter | 1 070 400 | 7.155 |
+| Callisto | Jupiter | 1 882 700 | 16.689 |
+| Titan | Saturn | 1 221 870 | 15.945 |
 
-Остальные спутники (Фобос, Деймос, Энцелад и др.) добавляются данными по мере надобности (M5).
+The remaining moons (Phobos, Deimos, Enceladus, etc.) are added as data as needed (M5).
 
-### §2.4 Ориентация и вращение тел (IAU)
-Для каждого тела: положение полюса `(α0, δ0)` и угол поворота `W` — линейные функции времени (по рекомендациям рабочей группы IAU по картографическим координатам):
+### §2.4 Orientation and rotation of bodies (IAU)
+For each body: the pole position `(α0, δ0)` and the rotation angle `W` — linear functions of time (following the recommendations of the IAU working group on cartographic coordinates):
 
-`α0 = α0₀ + α̇0·T`, `δ0 = δ0₀ + δ̇0·T`, `W = W₀ + Ẇ·d`, где T — столетия, d — сутки от J2000.
+`α0 = α0₀ + α̇0·T`, `δ0 = δ0₀ + δ̇0·T`, `W = W₀ + Ẇ·d`, where T — centuries, d — days from J2000.
 
-| Тело | Ẇ, °/сут | Сидерические сутки |
+| Body | Ẇ, °/day | Sidereal day |
 |---|---|---|
-| Земля | 360,9856235 | 23 ч 56 м 4 с |
-| Луна | 13,17635815 | 27,32 сут (синхронное вращение) |
-| Марс | 350,89198226 | 24 ч 37 м 22 с |
-| Венера | −1,4813688 (ретроградное) | 243,02 сут |
+| Earth | 360.9856235 | 23 h 56 m 4 s |
+| Moon | 13.17635815 | 27.32 days (synchronous rotation) |
+| Mars | 350.89198226 | 24 h 37 m 22 s |
+| Venus | −1.4813688 (retrograde) | 243.02 days |
 
-Вращение Земли берётся по UT1 = TT − ΔT (таблица ΔT; в 1957 г. ΔT ≈ 31 с). Либрации Луны — не моделируются. Угловая скорость Земли 7,2921159·10⁻⁵ рад/с даёт 465,1 м/с на экваторе — основа выигрыша от широты площадки (§6.8) и скорости относительно вращающейся атмосферы (§4.6).
+Earth's rotation is taken by UT1 = TT − ΔT (ΔT table; in 1957 ΔT ≈ 31 s). Lunar librations are not modeled. Earth's angular velocity of 7.2921159·10⁻⁵ rad/s gives 465.1 m/s at the equator — the basis of the gain from the launch site latitude (§6.8) and of the speed relative to the rotating atmosphere (§4.6).
 
-### §2.5 Корабль: patched conics и сферы влияния
-Корабль в каждый момент находится в SOI одного тела и движется по конике относительно него; остальные тела на него не действуют. Радиус сферы влияния: `R_SOI = a · (m / M)^0,4`, где a — большая полуось тела вокруг родителя, m и M — массы тела и родителя (в GM).
+### §2.5 Vessel: patched conics and spheres of influence
+At each moment a vessel is in the SOI of one body and moves along a conic relative to it; the other bodies do not act on it. The sphere of influence radius: `R_SOI = a · (m / M)^0.4`, where a is the semi-major axis of the body around its parent, m and M are the masses of the body and the parent (in GM).
 
-| Тело | GM, м³/с² | Радиус, км | R_SOI, км |
+| Body | GM, m³/s² | Radius, km | R_SOI, km |
 |---|---|---|---|
-| Солнце | 1,32712440·10²⁰ | 695 700 | — |
-| Земля | 3,986004418·10¹⁴ | 6378,137 (экв.) | ≈ 925 000 |
-| Луна | 4,9028·10¹² | 1737,4 | ≈ 66 200 |
-| Венера | 3,24859·10¹⁴ | 6051,8 | ≈ 616 000 |
-| Марс | 4,282837·10¹³ | 3396,2 | ≈ 577 000 |
-| Юпитер | 1,26687·10¹⁷ | 71 492 | ≈ 48,2·10⁶ |
-| Сатурн | 3,7931·10¹⁶ | 60 268 | ≈ 55·10⁶ |
-| Европа | 3,2027·10¹² | 1560,8 | ≈ 9 700 |
-| Титан | 8,978·10¹² | 2574,7 | ≈ 43 000 |
+| Sun | 1.32712440·10²⁰ | 695 700 | — |
+| Earth | 3.986004418·10¹⁴ | 6378.137 (eq.) | ≈ 925 000 |
+| Moon | 4.9028·10¹² | 1737.4 | ≈ 66 200 |
+| Venus | 3.24859·10¹⁴ | 6051.8 | ≈ 616 000 |
+| Mars | 4.282837·10¹³ | 3396.2 | ≈ 577 000 |
+| Jupiter | 1.26687·10¹⁷ | 71 492 | ≈ 48.2·10⁶ |
+| Saturn | 3.7931·10¹⁶ | 60 268 | ≈ 55·10⁶ |
+| Europa | 3.2027·10¹² | 1560.8 | ≈ 9 700 |
+| Titan | 8.978·10¹² | 2574.7 | ≈ 43 000 |
 
-(Ио ≈ 7 800 км, Ганимед ≈ 24 300 км, Каллисто ≈ 37 600 км. Значения, кроме Земли и Луны, — расчётные по формуле.)
+(Io ≈ 7 800 km, Ganymede ≈ 24 300 km, Callisto ≈ 37 600 km. Values other than Earth and the Moon are computed by the formula.)
 
-- Хранение: состояние корабля — `(r, v)` на эпоху в родительской системе + GM родителя. Распространение на рельсах — через универсальные переменные (единый код для эллипса, параболы, гиперболы, без особенностей при e≈1).
-- Смена SOI: момент пересечения `‖r‖ = R_SOI` ищется точно (корень на отрезке), состояние переводится: `r_нов = r_стар − r_тела(t)`, `v_нов = v_стар − v_тела(t)` (или обратно при выходе). Гистерезис 1 % радиуса против дребезга на границе. Ускорение времени перед сменой SOI сбрасывается (§3.3).
-- Предсказание траектории на карте: цепочка патчей (до 5), каждый — коника в своём SOI с точкой перехода.
-- Возмущения: для околоземных орбит на рельсах учитываются вековые изменения Ω и ω от J2 (`Ω̇ = −1,5·n·J2·(R/p)²·cos i`) — иначе невозможны солнечно-синхронные орбиты и «Молния» (критическое наклонение 63,4°). Остальные возмущения не моделируются (M5).
+- Storage: the vessel state — `(r, v)` at epoch in the parent frame + the parent's GM. On-rails propagation — via universal variables (one code path for ellipse, parabola, hyperbola, with no singularity at e≈1).
+- SOI change: the moment of crossing `‖r‖ = R_SOI` is found exactly (a root on an interval), the state is transformed: `r_new = r_old − r_body(t)`, `v_new = v_old − v_body(t)` (or the reverse on exit). 1 % radius hysteresis against chatter at the boundary. Time acceleration is reset before the SOI change (§3.3).
+- Trajectory prediction on the map: a chain of patches (up to 5), each a conic in its own SOI with a transition point.
+- Perturbations: for near-Earth on-rails orbits the secular changes of Ω and ω from J2 are included (`Ω̇ = −1.5·n·J2·(R/p)²·cos i`) — otherwise sun-synchronous orbits and "Molniya" (critical inclination 63.4°) are impossible. Other perturbations are not modeled (M5).
 
 ### §2.6 Floating origin
-Корабль (активный борт) — всегда в начале координат Unity. Каждый кадр перед рендером: `позиция_в_Unity = (pos_double − origin_double)` → float. Планеты, другие корабли, чанки рельефа получают малые float-смещения относительно камеры. Вместе с камерным рендером HDRP (camera-relative) это убирает дрожание и сжимает ошибки до долей миллиметра в видимом объёме. Цепочка преобразований эфемерида → origin → Unity — в одном классе, покрытом тестами M0.
+The vessel (active craft) is always at the Unity origin. Every frame before rendering: `Unity_position = (pos_double − origin_double)` → float. Planets, other vessels, terrain chunks get small float offsets relative to the camera. Together with HDRP's camera-relative rendering this removes jitter and shrinks errors to fractions of a millimeter in the visible volume. The chain of transformations ephemeris → origin → Unity is in one class, covered by M0 tests.
 
-Корабли-цели в радиусе 2,5 км — «физический пузырь» (тот же интегратор, §4.1); дальше — на рельсах.
+Target vessels within 2.5 km — a "physics bubble" (the same integrator, §4.1); farther — on rails.
 
-### §2.7 Рендер дальних тел: сжатие расстояния
-Далёкие тела нельзя рисовать в истинном месте: дальняя плоскость камеры ограничена (10⁷ м при ближней 1 м — при большей HDRP теряет тени Солнца, замер 01.10.2026), а Нептун в 4,5·10¹² м. Тела кладутся в «оболочку» перед дальней плоскостью (аналог ScaledSpace у KSP, но одной камерой). Мерило — расстояние до горизонта тела `H = √(d² − R²)`: вся видимая часть сферы ближе горизонта.
+### §2.7 Rendering distant bodies: distance compression
+Distant bodies cannot be drawn in their true place: the camera far plane is limited (10⁷ m with a near plane of 1 m — beyond that HDRP loses Sun shadows, measured 01.10.2026), and Neptune is at 4.5·10¹² m. Bodies are placed in a "shell" in front of the far plane (analogous to KSP's ScaledSpace, but with a single camera). The measure is the distance to the body's horizon `H = √(d² − R²)`: the entire visible part of the sphere is closer than the horizon.
 
-- `H ≤ H0 = 5·10⁶ м` — без изменений (активное тело у поверхности: с 40 км горизонт 715 км — патч рельефа совпадает со сферой);
-- `H > H0` — `H' = H0 + W·x/(x + s)`, `x = ln(H/H0)`, `W = 4,5·10⁶ м`, `s = 7`; направление сохраняется, тело масштабируется на `k = H'/H`, поэтому угловой размер остаётся истинным.
+- `H ≤ H0 = 5·10⁶ m` — unchanged (an active body near the surface: from 40 km the horizon is 715 km — the terrain patch coincides with the sphere);
+- `H > H0` — `H' = H0 + W·x/(x + s)`, `x = ln(H/H0)`, `W = 4.5·10⁶ m`, `s = 7`; direction is preserved, the body is scaled by `k = H'/H`, so the angular size stays true.
 
-Функция монотонна и непрерывна в `H0`, порядок тел по глубине сохраняется, всё ложится в 5·10⁶…9,5·10⁶ м. Примеры с Земли: Луна → 6,7·10⁶ м, Марс → 7,7·10⁶, Нептун → 8,0·10⁶. Свет, тени и затмения считаются в истинной геометрии (§9.3), сжатие — только позиция меша.
+The function is monotonic and continuous at `H0`, the depth order of bodies is preserved, everything falls into 5·10⁶…9.5·10⁶ m. Examples from Earth: Moon → 6.7·10⁶ m, Mars → 7.7·10⁶, Neptune → 8.0·10⁶. Light, shadows and eclipses are computed in true geometry (§9.3), compression affects only the mesh position.
 
-### §2.8 Рельеф: кубосфера и квадродерево
-- Сфера — куб из 6 граней, каждая — квадродерево; чанк делится по экранной ошибке (цель ≤ 2–4 пикселя), патч 33×33 вершины со «юбкой» против щелей и геоморфингом против «выскакивания».
-- Глубина до 18 уровней на Земле (≈ 1,2 м между вершинами: 10 018 км / 2¹⁸ / 32), на Луне ≈ 1,3 м при 16 уровнях.
-- У каждого чанка свой локальный ноль: центр чанка — double, вершины — float относительно центра. Это снимает проблему точности на поверхности.
-- Источник высот: M1 — процедурный (fBm по сфере) + уровень моря; M6 — реальные ЦМР (SRTM/батиметрия для Земли, LOLA — Луна, MOLA — Марс). Генерация — Jobs/Burst, асинхронно, ≤ 2 мс на главном потоке.
-- Столкновение с рельефом — не меш-коллайдеры, а запрос высоты `h(lat, lon)` из того же источника на фиксированном «физическом LOD» вокруг корабля, чтобы визуал и контакт совпадали (§4.8).
+### §2.8 Terrain: cubesphere and quadtree
+- The sphere is a cube of 6 faces, each a quadtree; a chunk is subdivided by screen-space error (target ≤ 2–4 pixels), a 33×33-vertex patch with a "skirt" against cracks and geomorphing against "popping".
+- Depth up to 18 levels on Earth (≈ 1.2 m between vertices: 10 018 km / 2¹⁸ / 32), on the Moon ≈ 1.3 m at 16 levels.
+- Each chunk has its own local zero: the chunk center is double, the vertices are float relative to the center. This removes the precision problem on the surface.
+- Height source: M1 — procedural (fBm over the sphere) + sea level; M6 — real DEMs (SRTM/bathymetry for Earth, LOLA — Moon, MOLA — Mars). Generation — Jobs/Burst, asynchronous, ≤ 2 ms on the main thread.
+- Terrain collision — not mesh colliders but a height query `h(lat, lon)` from the same source at a fixed "physics LOD" around the vessel, so that visuals and contact match (§4.8).
 
-### §2.9 Фигура Земли и гравитация
-Сфера радиусом 6378 км дала бы ошибку высоты Байконура ≈ 11 км (геоцентрический радиус на 46° ≈ 6367,1 км). Поэтому Земля — эллипсоид WGS84 (`a = 6 378 137 м`, `f = 1/298,257223563`): площадки, высота над уровнем моря и посадка считаются по эллипсоиду; геоид не моделируется. Гравитация Земли — центральная плюс J2 (`J2 = 1,08263·10⁻³`). Остальные тела — сферы со средним радиусом до M5, затем сплюснутость Марса/Юпитера/Сатурна.
+### §2.9 Earth's figure and gravity
+A sphere of radius 6378 km would give a Baikonur height error of ≈ 11 km (the geocentric radius at 46° ≈ 6367.1 km). Therefore Earth is the WGS84 ellipsoid (`a = 6 378 137 m`, `f = 1/298.257223563`): sites, altitude above sea level and landing are computed on the ellipsoid; the geoid is not modeled. Earth's gravity is central plus J2 (`J2 = 1.08263·10⁻³`). The other bodies are spheres with a mean radius until M5, then oblateness of Mars/Jupiter/Saturn.
 
-## §3 Время и ускорение времени
+## §3 Time and time acceleration
 
-### §3.1 Шкала времени и календарь
-- Игровое время `t` — double секунд от J2000.0 (JD 2451545,0), шкала TT. `JD = 2451545,0 + t/86400`.
-- Отображаемое время — UTC: `UTC = TT − ΔT(t)` (таблица ΔT, високосные секунды после 1972 г.). Разница ≤ 70 с на динамику не влияет, нужна, чтобы старт показывал 19:28:34, как в учебниках.
-- Календарь — григорианский, по-русски: «4 окт 1957, 19:28:34». Сокращения месяцев: янв, фев, мар, апр, мая, июн, июл, авг, сен, окт, ноя, дек.
-- Время миссии: «T+ 00:03:25» после старта, «T− 00:10:00» до события.
-- Старт новой игры: 4 окт 1957 19:28:34 UTC. Игра идёт вперёд; открытый горизонт — до 2100 г. (эфемериды §2.3).
+### §3.1 Time scale and calendar
+- Game time `t` — double seconds from J2000.0 (JD 2451545.0), TT scale. `JD = 2451545.0 + t/86400`.
+- Displayed time — UTC: `UTC = TT − ΔT(t)` (ΔT table, leap seconds after 1972). A difference of ≤ 70 s does not affect dynamics; it is needed so that the start shows 19:28:34, as in textbooks.
+- Calendar — Gregorian, displayed as "4 Oct 1957, 19:28:34". Month abbreviations: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec.
+- Mission time: "T+ 00:03:25" after launch, "T− 00:10:00" before an event.
+- New game start: 4 Oct 1957 19:28:34 UTC. The game runs forward; the open horizon is until 2100 (ephemerides §2.3).
 
-### §3.2 Ступени ускорения
-Два режима (§4.1): физический и «на рельсах».
+### §3.2 Acceleration levels
+Two modes (§4.1): physical and "on rails".
 
-| Режим | Множители | Где разрешён |
+| Mode | Multipliers | Where allowed |
 |---|---|---|
-| Физический | 1×, 2×, 3×, 4× | Атмосфера, тяга, посадка, сближение (k шагов RK4 0,02 с на тик) |
-| На рельсах | 1×, 5×, 10×, 50×, 100×, 1 000×, 10 000×, 100 000×, 1 000 000×, 10 000 000× | Вакуум, двигатели выключены, корабль вне атмосферы или на поверхности |
+| Physical | 1×, 2×, 3×, 4× | Atmosphere, thrust, landing, rendezvous (k RK4 steps of 0.02 s per tick) |
+| On rails | 1×, 5×, 10×, 50×, 100×, 1 000×, 10 000×, 100 000×, 1 000 000×, 10 000 000× | Vacuum, engines off, vessel outside the atmosphere or on the surface |
 
-Секунда реального времени при ускорении на рельсах:
+One second of real time under on-rails acceleration:
 
-| Множитель | 1 с реального = |
+| Multiplier | 1 s real = |
 |---|---|
-| 100× | 1 мин 40 с |
-| 1 000× | 16 мин 40 с |
-| 10 000× | 2 ч 47 мин |
-| 100 000× | 1 сут 3 ч 47 мин |
-| 1 000 000× | 11,6 сут |
-| 10 000 000× | 115,7 сут |
+| 100× | 1 min 40 s |
+| 1 000× | 16 min 40 s |
+| 10 000× | 2 h 47 min |
+| 100 000× | 1 day 3 h 47 min |
+| 1 000 000× | 11.6 days |
+| 10 000 000× | 115.7 days |
 
-Год проходит за ~3,2 с на максимуме; перелёт Земля–Марс по Гоману (259 сут) — за ~2,2 с; гранд-тур Вояджера (12 лет) — за ~38 с. На рельсах шаг — аналитический, поэтому нет численных ограничений; за кадр может пройти ~2 суток.
+A year passes in ~3.2 s at maximum; an Earth–Mars Hohmann transfer (259 days) — in ~2.2 s; Voyager's grand tour (12 years) — in ~38 s. On rails the step is analytic, so there are no numerical limits; about 2 days can pass per frame.
 
-### §3.3 Автоматический сброс ускорения
-Максимальное допустимое ускорение ограничено временем до ближайшего события: `k ≤ 6 · T_до_события` (с), т. е. за кадр проходит не больше 1/10 оставшегося времени. Принудительный сброс до физического (или 1×) перед:
+### §3.3 Automatic acceleration reset
+The maximum allowed acceleration is limited by the time to the nearest event: `k ≤ 6 · T_to_event` (s), i.e. no more than 1/10 of the remaining time passes per frame. A forced reset to physical (or 1×) before:
 
-- сменой SOI (точное время события известно заранее, §2.5);
-- входом в атмосферу (периапсис ниже границы атмосферы, §4.4);
-- узлом манёвра и стартом запрограммированной команды бортового компьютера (§6.4);
-- сближением с целью (< 50 км — не выше 10×; < 2,5 км — физический режим);
-- аварийными событиями: столкновение с мусором (§6.5), предупреждение о солнечной вспышке, перегрев, потеря связи, посадка.
+- an SOI change (the exact time of the event is known in advance, §2.5);
+- atmospheric entry (periapsis below the atmosphere boundary, §4.4);
+- a maneuver node and the start of a programmed onboard computer command (§6.4);
+- approach to a target (< 50 km — no higher than 10×; < 2.5 km — physical mode);
+- emergency events: collision with debris (§6.5), solar flare warning, overheating, loss of communication, landing.
 
-Запрещено: ускорение выше физического при тяге > 0, высоте < 140 км над телом с атмосферой и при контакте с поверхностью в состоянии «не посажен». Посаженный корабль неподвижен в координатах тела — на рельсах разрешено любое ускорение.
+Forbidden: acceleration above physical with thrust > 0, at altitude < 140 km above a body with an atmosphere, and on contact with the surface in the "not landed" state. A landed vessel is stationary in body coordinates — any acceleration is allowed on rails.
 
-## §4 Полётная физика
+## §4 Flight physics
 
-### §4.1 Два режима и состояние «на поверхности»
-| Режим | Когда | Метод |
+### §4.1 Two modes and the "on surface" state
+| Mode | When | Method |
 |---|---|---|
-| Физический | Атмосфера, тяга, сближение < 2,5 км, контакт с землёй | Собственный RK4, шаг 0,02 с (50 Гц) |
-| На рельсах | Вакуум, тяга 0, вне «пузыря» | Аналитическая коника, универсальные переменные (§2.5) |
-| На поверхности | Мягкая посадка | Фиксированные `(lat, lon, высота над поверхностью, курс)` в координатах тела, вращается вместе с телом |
+| Physical | Atmosphere, thrust, rendezvous < 2.5 km, ground contact | Custom RK4, step 0.02 s (50 Hz) |
+| On rails | Vacuum, thrust 0, outside the "bubble" | Analytic conic, universal variables (§2.5) |
+| On surface | Soft landing | Fixed `(lat, lon, height above surface, heading)` in body coordinates, rotates with the body |
 
-Переход «на рельсы → физика» при приближении к атмосфере, включении тяги, сближении; обратный — после выключения тяги и выхода из атмосферы на устойчивую траекторию. PhysX не используется: нужна детерминированность, управляемая точность и работа с double.
+The "on rails → physics" transition happens on approaching the atmosphere, on engine ignition, on rendezvous; the reverse — after engine shutdown and exit from the atmosphere onto a stable trajectory. PhysX is not used: determinism, controllable precision and double support are needed.
 
-### §4.2 Интегратор RK4
-- Состояние корабля: позиция `r` и скорость `v` (double, в родительской инерциальной системе), ориентация (кватернион), угловая скорость ω, масса m (меняется от расхода), положения ступеней.
-- Правая часть: гравитация тела SOI (§4.3), тяга (§4.5), сопротивление относительно вращающейся атмосферы (§4.6), расход массы `ṁ = −F / (Isp · g0)`.
-- Фиксированный шаг 0,02 с. Положение дросселя и ориентации внутри шага постоянны (удержание нулевого порядка). Ориентация интегрируется кватернионом в том же шаге с перенормировкой.
-- Выбор RK4: ошибка на круговой орбите при шаге 0,02 с пренебрежимо мала (`ω·dt ≈ 2·10⁻⁵`), контроль — тест «дрейф энергии < 1e-9 за 100 витков» (M0). Расчёт стоит 4 вызова правой части на шаг, на физическом ускорении 4× — 200 шагов/с.
-- `g0 = 9,80665 м/с²` во всех расчётах Isp.
+### §4.2 RK4 integrator
+- Vessel state: position `r` and velocity `v` (double, in the parent inertial frame), orientation (quaternion), angular velocity ω, mass m (changes with consumption), stage positions.
+- Right-hand side: gravity of the SOI body (§4.3), thrust (§4.5), drag relative to the rotating atmosphere (§4.6), mass flow `ṁ = −F / (Isp · g0)`.
+- Fixed step 0.02 s. Throttle and orientation within a step are constant (zero-order hold). Orientation is integrated as a quaternion in the same step with renormalization.
+- Choosing RK4: the error on a circular orbit at a 0.02 s step is negligible (`ω·dt ≈ 2·10⁻⁵`), the check is the test "energy drift < 1e-9 over 100 revolutions" (M0). The computation costs 4 right-hand-side calls per step, at physical 4× acceleration — 200 steps/s.
+- `g0 = 9.80665 m/s²` in all Isp calculations.
 
-### §4.3 Гравитация
-Тело SOI — точечная масса `a = −GM·r/‖r‖³`; для Земли добавляется J2. Гравитация второго порядка (Луна на корабле у Земли) не учитывается — patched conics (§2.5). На поверхности `g` зависит от широты (Земля: 9,780 на экваторе, 9,832 на полюсе) — естественно получается из эллипсоида и J2.
+### §4.3 Gravity
+The SOI body is a point mass `a = −GM·r/‖r‖³`; for Earth J2 is added. Second-order gravity (the Moon acting on a vessel near Earth) is not accounted for — patched conics (§2.5). On the surface `g` depends on latitude (Earth: 9.780 at the equator, 9.832 at the pole) — this comes out naturally from the ellipsoid and J2.
 
-### §4.4 Атмосферы
-| Тело | Модель | p0 | ρ0, кг/м³ | T0 | Масштабная высота | Граница |
+### §4.4 Atmospheres
+| Body | Model | p0 | ρ0, kg/m³ | T0 | Scale height | Boundary |
 |---|---|---|---|---|---|---|
-| Земля | US Standard Atmosphere 1976 до 86 км, далее таблица | 101 325 Па | 1,225 | 288,15 К | ≈ 8,4 км (в нижней части) | 140 км |
-| Марс | экспонента | 610 Па | 0,020 | 210 К | 11,1 км | 100 км (проверить) |
-| Венера | экспонента | 9,3 МПа (92 атм) | 65 | 737 К (464 °C) | ≈ 15,9 км | 150 км (проверить) |
-| Титан | экспонента | 147 кПа | 5,3 | 94 К | ≈ 20 км | 600 км (проверить) |
+| Earth | US Standard Atmosphere 1976 up to 86 km, then a table | 101 325 Pa | 1.225 | 288.15 K | ≈ 8.4 km (in the lower part) | 140 km |
+| Mars | exponential | 610 Pa | 0.020 | 210 K | 11.1 km | 100 km (to verify) |
+| Venus | exponential | 9.3 MPa (92 atm) | 65 | 737 K (464 °C) | ≈ 15.9 km | 150 km (to verify) |
+| Titan | exponential | 147 kPa | 5.3 | 94 K | ≈ 20 km | 600 km (to verify) |
 
-Земля — граница 140 км: выше — вакуум для физического режима. Табличные значения USSA76: 11 км — 216,65 К, 22 632 Па, 0,3639 кг/м³ (контрольные точки для тестов M0). Скорость звука `a = √(γ·R·T)`. Для других тел — экспоненциальные ρ(h) = ρ0·e^(−h/H) и температура профилем; детализация — по необходимости миссий (§7). Вращение атмосферы вместе с телом: скорость воздуха — `Ω × r`.
+Earth — boundary 140 km: above it is vacuum for the physical mode. USSA76 table values: 11 km — 216.65 K, 22 632 Pa, 0.3639 kg/m³ (control points for M0 tests). Speed of sound `a = √(γ·R·T)`. For other bodies — exponential ρ(h) = ρ0·e^(−h/H) and a temperature profile; the level of detail — as needed by the missions (§7). The atmosphere rotates with the body: air velocity is `Ω × r`.
 
-### §4.5 Тяга и удельный импульс
-- Тяга и Isp интерполируются между значением в вакууме и у земли по давлению: `F(p) = F_vac + (F_sl − F_vac)·p/p0`, то же для Isp. Расход топлива выводится из них: `ṁ = F(p)/(Isp(p)·g0)`. У «Кара-1» данные ступени 1 дают ṁ = 2751 кг/с у земли и 2697 кг/с в вакууме — расхождение ≈ 2 % следствие округления опубликованных чисел; значения не правим.
-- Дроссель масштабирует тягу и расход линейно; ограничен снизу `minThrottle` (§5.3).
-- Запрет запуска: двигатели вакуумных ступеней при `p > maxIgnitionPressure` (≈ 0,1 атм) не включаются — отрыв потока в сопле.
-- Дельта-V ступени: `Δv = Isp · g0 · ln(m0/mf)`; ступень считается по вакуумному Isp для UI и по реальному профилю давления в полёте.
+### §4.5 Thrust and specific impulse
+- Thrust and Isp are interpolated between the vacuum value and the sea-level value by pressure: `F(p) = F_vac + (F_sl − F_vac)·p/p0`, same for Isp. Propellant flow is derived from them: `ṁ = F(p)/(Isp(p)·g0)`. For "Kara-1" the stage 1 data give ṁ = 2751 kg/s at sea level and 2697 kg/s in vacuum — the ≈ 2 % discrepancy is a consequence of rounding of the published numbers; we do not correct the values.
+- Throttle scales thrust and flow linearly; bounded below by `minThrottle` (§5.3).
+- Ignition prohibition: vacuum stage engines do not ignite at `p > maxIgnitionPressure` (≈ 0.1 atm) — flow separation in the nozzle.
+- Stage delta-v: `Δv = Isp · g0 · ln(m0/mf)`; a stage is computed with vacuum Isp for the UI and with the real pressure profile in flight.
 
-### §4.6 Аэродинамика
-- Сила сопротивления: `F_d = ½·ρ·v_rel²·Cd(M)·A`, `v_rel = v − Ω × r` (относительно вращающейся атмосферы). Площадь A — по миделю собранного корабля.
-- Cd зависит от числа Маха: дозвук ≈ 0,30, трансзвуковой пик у M ≈ 1,0–1,2 (≈ 0,55 для обтекаемой ракеты), затем спад до ≈ 0,25–0,30 на гиперзвуке. Для капсул (затупленное тело) Cd ≈ 1,2–1,4 в гиперзвуке. Таблицы Cd(M) — данные детали/корабля.
-- Аэродинамический момент: центр давления впереди центра масс — ракета неустойчива и кувыркается без управления; гравитационный разворот держит угол атаки близким к нулю (M2: полный расчёт момента, M1: только сопротивление).
+### §4.6 Aerodynamics
+- Drag force: `F_d = ½·ρ·v_rel²·Cd(M)·A`, `v_rel = v − Ω × r` (relative to the rotating atmosphere). Area A — by the midsection of the assembled vessel.
+- Cd depends on Mach number: subsonic ≈ 0.30, transonic peak at M ≈ 1.0–1.2 (≈ 0.55 for a streamlined rocket), then dropping to ≈ 0.25–0.30 at hypersonic speeds. For capsules (blunt body) Cd ≈ 1.2–1.4 in hypersonic flow. Cd(M) tables are part/vessel data.
+- Aerodynamic moment: the center of pressure is ahead of the center of mass — the rocket is unstable and tumbles without control; a gravity turn keeps the angle of attack near zero (M2: full moment computation, M1: drag only).
 
-### §4.7 Разрушение и нагрев
-- Конструктивное разрушение — по `Qα = q · |sin α|` (скоростной напор × угол атаки) и по осевому q. Порог «Кара-1» — `Qα ≈ 6 кПа`: при max-Q ≈ 33 кПа это ≈ 10° угла атаки. Значения калибруются в M2.
-- Нагрев при входе: конвективный поток по Саттону–Грейвсу `q_conv = k·√(ρ/R_n)·v³`, `k = 1,7415·10⁻⁴` (СИ, воздух Земли); температура обшивки — тепловая модель с теплозащитой (абляция расходует массу). Превышение предела материала — разрушение.
-- Перегрузка экипажа — предел по эпохе: > 9 g дольше 10 с — гибель (параметры в §8.2).
-- Нагрев и радиационные дозы (§6.6) — отдельные ресурсы «здоровья» части.
+### §4.7 Destruction and heating
+- Structural failure — by `Qα = q · |sin α|` (dynamic pressure × angle of attack) and by axial q. The "Kara-1" threshold is `Qα ≈ 6 kPa`: at max-Q ≈ 33 kPa this is ≈ 10° angle of attack. Values are calibrated in M2.
+- Entry heating: convective flux by Sutton–Graves `q_conv = k·√(ρ/R_n)·v³`, `k = 1.7415·10⁻⁴` (SI, Earth air); skin temperature — a thermal model with a heat shield (ablation consumes mass). Exceeding the material limit — destruction.
+- Crew g-load — limit by era: > 9 g for longer than 10 s — death (parameters in §8.2).
+- Heating and radiation doses (§6.6) are separate "health" resources of a part.
 
-### §4.8 Посадка и контакт с поверхностью
-- Контакт: `высота_над_поверхностью = ‖r‖ − R(lat, lon) − h(lat, lon)` из источника высот (§2.8). Контакт — при высоте ≤ 0.
-- Мягко (скорость относительно поверхности < 10 м/с, наклон < 20°): корабль переходит в состояние «на поверхности» (§4.1), экипаж и аппаратура целы, запуск с поверхности разрешён.
-- Жёстко (≥ 10 м/с или наклон больше): крушение; корабль и миссия потеряны, обломки — объект на поверхности.
-- Предел скорости — свойство опоры: посадочные опоры 10 м/с, амортизатор/«шар» до 25 м/с (Луна-9), парашютная капсула 8 м/с (с ретро-двигателем — 10).
+### §4.8 Landing and surface contact
+- Contact: `height_above_surface = ‖r‖ − R(lat, lon) − h(lat, lon)` from the height source (§2.8). Contact — at height ≤ 0.
+- Soft (speed relative to the surface < 10 m/s, tilt < 20°): the vessel switches to the "on surface" state (§4.1), crew and equipment are intact, launching from the surface is allowed.
+- Hard (≥ 10 m/s or greater tilt): crash; the vessel and mission are lost, the wreckage is an object on the surface.
+- The speed limit is a property of the support: landing legs 10 m/s, shock absorber/"ball" up to 25 m/s (Luna 9), parachute capsule 8 m/s (with a retro-engine — 10).
 
-### §4.9 Ориентация и SAS
-- Момент инерции — по цилиндру: `I_осевой = ½·m·r²`, `I_поперечный = m·(3r² + h²)/12`. Оценка «Кара-1» на старте: m = 528 т, h ≈ 70 м, r = 1,83 м → `I⊥ ≈ 2·10⁸ кг·м²`.
-- Управляющий момент — качание сопел `M = F·L·sin δ` (пример: 7607 кН, плечо ≈ 20 м, ±5° → 1,3·10⁷ Н·м → ≈ 0,06 рад/с², т. е. ≈ 3,5 °/с²) и маховики (малый момент, по эре), микро-двигатели ориентации (RCS).
-- SAS (T — включить/выключить, F — режимы по кругу): удержание ориентации, прямо по скорости (prograde), против скорости (retrograde), нормаль, антинормаль, радиально наружу, радиально внутрь; при выбранной цели добавляются «на цель» и «от цели». Управление — ПД-регулятор с ограничением угловой скорости; система отсчёта скорости (орбитальная/поверхностная/относительно цели) выбирается в HUD (§10.2).
+### §4.9 Attitude and SAS
+- Moment of inertia — by a cylinder: `I_axial = ½·m·r²`, `I_transverse = m·(3r² + h²)/12`. An estimate for "Kara-1" at launch: m = 528 t, h ≈ 70 m, r = 1.83 m → `I⊥ ≈ 2·10⁸ kg·m²`.
+- Control torque — nozzle gimbaling `M = F·L·sin δ` (example: 7607 kN, arm ≈ 20 m, ±5° → 1.3·10⁷ N·m → ≈ 0.06 rad/s², i.e. ≈ 3.5 °/s²) and reaction wheels (small torque, by era), micro attitude-control engines (RCS).
+- SAS (T — on/off, F — cycle through modes): attitude hold, prograde, retrograde, normal, antinormal, radial out, radial in; with a target selected, "toward target" and "away from target" are added. Control — a PD controller with angular rate limiting; the velocity reference frame (orbital/surface/relative to target) is selected in the HUD (§10.2).
 
-### §4.10 Распад орбиты на рельсах
-Граница физической атмосферы Земли — 140 км, но слабое торможение выше нужно для долговечности мусора (§6.5) и станций. Для орбит на рельсах с перигеем ниже ≈ 600 км применяется упрощённая термосферная модель: среднее торможение за виток уменьшает большую полуось (`ΔP` за виток из таблицы ρ(h) для средней солнечной активности). Модель только для распада; полёт в атмосфере ниже 140 км всегда в физическом режиме. Подробности — открытый вопрос §12.2.
+### §4.10 Orbit decay on rails
+Earth's physical atmosphere boundary is 140 km, but weak drag above it is needed for the longevity of debris (§6.5) and stations. For on-rails orbits with a perigee below ≈ 600 km a simplified thermosphere model is applied: the mean drag per revolution reduces the semi-major axis (`ΔP` per revolution from a ρ(h) table for average solar activity). The model is for decay only; flight in the atmosphere below 140 km is always in physical mode. Details — open question §12.2.
 
-## §5 Корабли, ступени, двигатели
+## §5 Vessels, stages, engines
 
-### §5.1 Модель ступени
-Ступень описывается данными: сухая масса, масса топлива, двигатели (число, тяга у земли/в вакууме, Isp у земли/в вакууме, `minThrottle`, число запусков, `maxIgnitionPressure`), диаметр, длина, коэффициент Cd(M), положение центра масс, момент качания (градусы), ограничения (q, Qα). Корабль — список ступеней (порядок сброса), полезная нагрузка, обтекатель. Структурный коэффициент `ε = m_сух / (m_сух + m_топл)`.
+### §5.1 Stage model
+A stage is described by data: dry mass, propellant mass, engines (count, thrust sea-level/vacuum, Isp sea-level/vacuum, `minThrottle`, number of ignitions, `maxIgnitionPressure`), diameter, length, drag coefficient Cd(M), center of mass position, gimbal range (degrees), limits (q, Qα). A vessel is a list of stages (jettison order), payload, fairing. Structural coefficient `ε = m_dry / (m_dry + m_prop)`.
 
-### §5.2 Ракета «Кара-1» (по мотивам Falcon 9)
-Двухступенчатая. Эталон для M0–M2 (отладка, вертикальный срез).
+### §5.2 The "Kara-1" rocket (inspired by Falcon 9)
+Two-stage. The reference for M0–M2 (debugging, vertical slice).
 
-| Параметр | Ступень 1 | Ступень 2 |
+| Parameter | Stage 1 | Stage 2 |
 |---|---|---|
-| Сухая масса, т | 25,6 | 3,9 |
-| Топливо, т | 395,7 | 92,67 |
-| Тяга у земли / в вакууме, кН | 7607 / 8227 | — / 981 |
-| Isp у земли / в вакууме, с | 282 / 311 | — / 348 |
-| Двигатели | 9 × 845 / 914 кН (по аналогу) | 1 × 981 кН |
-| ε | 0,061 | 0,040 |
+| Dry mass, t | 25.6 | 3.9 |
+| Propellant, t | 395.7 | 92.67 |
+| Thrust sea-level / vacuum, kN | 7607 / 8227 | — / 981 |
+| Isp sea-level / vacuum, s | 282 / 311 | — / 348 |
+| Engines | 9 × 845 / 914 kN (per the analog) | 1 × 981 kN |
+| ε | 0.061 | 0.040 |
 
-Полезная нагрузка 10 т (в v1 масса обтекателя и адаптера включена в неё — допущение).
+Payload 10 t (in v1 the mass of the fairing and adapter is included in it — an assumption).
 
-Расчётные характеристики (для проверки модели в M0):
+Computed characteristics (for model verification in M0):
 
-| Величина | Значение |
+| Quantity | Value |
 |---|---|
-| Стартовая масса | 527,87 т |
-| TWR на старте | ≈ 1,47 |
-| Δv ступени 1 (вакуум / у земли) | ≈ 4,22 / 3,83 км/с |
-| Δv ступени 2 | ≈ 6,95 км/с |
-| Δv суммарная (вакуум) | ≈ 11,2 км/с |
-| Время работы ступени 1 | ≈ 144 с (у земли) – 147 с (вакуум) |
-| Время работы ступени 2 | ≈ 322 с |
-| Ускорение перед отсечкой ступеней 1 / 2 | ≈ 6,4 g / 7,2 g (нужен дроссель) |
-| Запас Δv над НОО (≈ 9,4 км/с, с потерями) | ≈ 1,4–1,8 км/с |
+| Liftoff mass | 527.87 t |
+| TWR at liftoff | ≈ 1.47 |
+| Stage 1 Δv (vacuum / sea level) | ≈ 4.22 / 3.83 km/s |
+| Stage 2 Δv | ≈ 6.95 km/s |
+| Total Δv (vacuum) | ≈ 11.2 km/s |
+| Stage 1 burn time | ≈ 144 s (sea level) – 147 s (vacuum) |
+| Stage 2 burn time | ≈ 322 s |
+| Acceleration before cutoff of stages 1 / 2 | ≈ 6.4 g / 7.2 g (throttling needed) |
+| Δv margin over LEO (≈ 9.4 km/s, with losses) | ≈ 1.4–1.8 km/s |
 
-Оценка: для транслунной траектории нагрузку надо снижать до ≈ 3–4 т (точнее — расчётом в игре). Это сознательное свойство: ракета «Кара-1» — не лунная; лунная ракета — отдельная линейка: «Кара-0» (Р-7-подобная, эра I), «Кара-2» (сверхтяжёлая, водород на верхних ступенях, эра II), «Кара-3» (станции и зонды, эры III–IV); в эре V — многоразовая «Кара-1» (§12.2).
+Estimate: for a trans-lunar trajectory the payload must be reduced to ≈ 3–4 t (more precisely — by calculation in the game). This is a deliberate property: the "Kara-1" rocket is not a lunar one; the lunar rocket is a separate line: "Kara-0" (R-7-like, era I), "Kara-2" (super-heavy, hydrogen on the upper stages, era II), "Kara-3" (stations and probes, eras III–IV); in era V — the reusable "Kara-1" (§12.2).
 
-### §5.3 Механики двигателя
-| Механика | Правило |
+### §5.3 Engine mechanics
+| Mechanic | Rule |
 |---|---|
-| Ограниченное число запусков | Двигатель ступени 1 — 1 запуск (для «Кара-1»; посадочные манёвры — по многоразовой версии, §6.9), ступени 2 — 3 запуска. Исчерпан → не включится. |
-| Осадка топлива (ullage) | Запуск в невесомости требует осевого ускорения ≥ 0,05 м/с² в течение ≥ 5 с (RCS или ускорители осадки), иначе вероятность отказа запуска растёт пропорционально недостатку. |
-| Минимальная тяга дросселя | Ступень 1: 40 % от одного двигателя (338 кН у земли). Ступень 2: 39 % (≈ 380 кН). |
-| Надёжность и налёт | Вероятность успешного запуска/работы `R(n) = R_max − (R_max − R_0)·e^(−n/τ)`: новый двигатель `R_0 = 0,90`, `R_max = 0,995`, τ = 15 запусков; n — налёт серии (полёты + огневые испытания). |
-| Виды отказов | Отказ запуска (штатный отбой), остановка в полёте, потеря тяги на x %, разрушение (RUD). Веса — в данных двигателя. |
+| Limited number of ignitions | The stage 1 engine — 1 ignition (for "Kara-1"; landing maneuvers — in the reusable version, §6.9), stage 2 — 3 ignitions. Exhausted → will not ignite. |
+| Propellant settling (ullage) | Ignition in weightlessness requires axial acceleration ≥ 0.05 m/s² for ≥ 5 s (RCS or ullage motors), otherwise the probability of ignition failure grows in proportion to the shortfall. |
+| Minimum throttle thrust | Stage 1: 40 % of a single engine (338 kN at sea level). Stage 2: 39 % (≈ 380 kN). |
+| Reliability and flight hours | Probability of successful ignition/operation `R(n) = R_max − (R_max − R_0)·e^(−n/τ)`: a new engine `R_0 = 0.90`, `R_max = 0.995`, τ = 15 ignitions; n — series flight hours (flights + static fire tests). |
+| Failure types | Ignition failure (nominal abort), in-flight shutdown, loss of thrust by x %, destruction (RUD). Weights — in the engine data. |
 
-Следствие минимальной тяги: посадка первой ступени. Сухая масса 25,6 т → вес 251 кН; один двигатель на 40 % даёт 338 кН (TWR_min ≈ 1,35) — зависнуть нельзя, посадка только «в последний момент» (suicide burn).
+Consequence of the minimum thrust: first stage landing. Dry mass 25.6 t → weight 251 kN; one engine at 40 % gives 338 kN (TWR_min ≈ 1.35) — hovering is impossible, landing only "at the last moment" (suicide burn).
 
-### §5.4 Конструктор (M3)
-Сборка из деталей: баки, двигатели, обтекатели, декуплеры, переходники, RCS, посадочные опоры, парашюты, солнечные панели, антенны, РИТЭГ, командные модули, шлюзы.
+### §5.4 Builder (M3)
+Assembly from parts: tanks, engines, fairings, decouplers, adapters, RCS, landing legs, parachutes, solar panels, antennas, RTG, command modules, airlocks.
 
-- Сетка поперечных размеров: 1; 2; 3,7; 5; 7,5; 10 м, переходники между соседними размерами.
-- Узлы крепления: осевые (стек) и радиальные, симметрия 2/3/4/6/8; перекачка топлива (crossfeed); порядок ступеней — в списке.
-- Показатели в реальном времени: масса, центр масс, Δv и TWR по ступеням (у земли и в вакууме), центр давления, статический запас устойчивости.
-- Проверки перед стартом: есть двигатель, TWR ступени 1 ≥ 1, есть команда на отделение, корабль помещается на площадку.
-- Сохранение — JSON-дерево деталей; тот же формат, что у каталога готовых кораблей.
+- Cross-section size grid: 1; 2; 3.7; 5; 7.5; 10 m, adapters between neighboring sizes.
+- Attachment nodes: axial (stack) and radial, symmetry 2/3/4/6/8; fuel transfer (crossfeed); stage order — in a list.
+- Real-time indicators: mass, center of mass, Δv and TWR per stage (sea level and vacuum), center of pressure, static stability margin.
+- Pre-launch checks: an engine exists, stage 1 TWR ≥ 1, a separation command exists, the vessel fits on the pad.
+- Saving — a JSON tree of parts; the same format as the catalog of ready-made vessels.
 
-## §6 Уникальные механики
+## §6 Unique mechanics
 
-Каждая раскрыта по схеме: суть, зачем игроку, как реализуется, веха.
+Each is laid out in the scheme: essence, why the player cares, how it is implemented, milestone.
 
-### §6.1 Космическая гонка с историческим соперником
-- Суть: соперник — календарь реальной истории. Для миссии задана дата «первого в мире» (Спутник, Гагарин, Леонов, Луна-9, Аполлон-11…). Игрок успевает раньше — «первый»; позже — «второй» и менее.
-- Зачем: даёт дедлайн и драму без искусственного ИИ-противника; эпоху не пройти «когда-нибудь».
-- Реализация: список событий `history.json` (дата, метка, категория). Хроника показывает «через 214 сут: Восток-1». Формула престижа за миссию с базой `P`:
-  - раньше соперника: `P·(1 + min(1, дней_раньше/365))` — до ×2;
-  - позже: `P·max(0,1; 0,5·e^(−лет_позже/2))`.
-  Побочные эффекты: после события соперника зависящие от него узлы техдерева дешевеют на 20 % («опыт опубликован»). Режимы: «История» (реальные даты), «Ускоренный» (даты сдвинуты на −N лет), «Выключен».
-- Веха: M4 (миссии, престиж); простая хроника — M1.
+### §6.1 Space race against a historical rival
+- Essence: the rival is the calendar of real history. A mission has a "world first" date (Sputnik, Gagarin, Leonov, Luna 9, Apollo 11…). If the player makes it earlier — "first"; later — "second" and below.
+- Why: gives a deadline and drama without an artificial AI opponent; an era cannot be passed "someday".
+- Implementation: an event list `history.json` (date, label, category). The chronicle shows "in 214 days: Vostok 1". The prestige formula for a mission with base `P`:
+  - earlier than the rival: `P·(1 + min(1, days_earlier/365))` — up to ×2;
+  - later: `P·max(0.1; 0.5·e^(−years_later/2))`.
+  Side effects: after the rival's event, the tech tree nodes dependent on it become 20 % cheaper ("experience published"). Modes: "History" (real dates), "Accelerated" (dates shifted by −N years), "Off".
+- Milestone: M4 (missions, prestige); a simple chronicle — M1.
 
-### §6.2 Реальные окна запуска и межпланетные окна
-- Суть: время старта определяет доступную плоскость орбиты, а положение планет — стоимость перелёта.
-- Зачем: игрок ждёт и планирует, а не «летит когда хочет»; рождается стратегия.
-- Реализация:
-  - Околоземные окна: наклонение i ≥ широте площадки; азимут `sin Az = cos i / cos φ`, коррекция на вращение Земли `tan Az' = (v_орб·sin Az − ω·R·cos φ)/(v_орб·cos Az)`; окно — когда плоскость орбиты проходит через площадку (два раза в сутки). Окно на стыковку с ISS — мгновенное, минуты.
-  - Луна: окно раз в сидерический месяц (27,3 сут) и дважды в сутки по плоскости.
-  - Межпланетные: порк-чоп диаграмма — сетка дат старта × дат прибытия (≈ 200×200), в каждой ячейке решение задачи Ламберта; показываются `C3`, `v∞` прибытия и суммарное Δv; контуры, минимумы подсвечены. 40 000 решений Ламберта — одна секунда на Burst. Синодические периоды: Венера 584 сут (19,2 мес), Марс 780 сут (25,6 мес), Юпитер 399 сут (13,1 мес). Пример: Земля→Марс по Гоману — 259 сут, `v∞ ≈ 2,94 км/с`, Δv из НОО 200 км ≈ 3,6 км/с.
-  - Окно Гранд-тура — ≈ 1976–1979 (§7.4); в игре возникает само из реальных эфемерид.
-- Веха: околоземные — M1 (расчёт азимута); порк-чоп — M5.
+### §6.2 Real launch windows and interplanetary windows
+- Essence: the launch time determines the available orbital plane, and the positions of the planets determine the cost of the transfer.
+- Why: the player waits and plans instead of "flying whenever they want"; strategy emerges.
+- Implementation:
+  - Near-Earth windows: inclination i ≥ site latitude; azimuth `sin Az = cos i / cos φ`, correction for Earth's rotation `tan Az' = (v_orb·sin Az − ω·R·cos φ)/(v_orb·cos Az)`; the window is when the orbital plane passes through the site (twice a day). The window for docking with the ISS is instantaneous, minutes.
+  - Moon: a window once per sidereal month (27.3 days) and twice a day by plane.
+  - Interplanetary: a porkchop plot — a grid of launch dates × arrival dates (≈ 200×200), in each cell a Lambert problem solution; `C3`, arrival `v∞` and total Δv are shown; contours, minima are highlighted. 40 000 Lambert solutions take one second on Burst. Synodic periods: Venus 584 days (19.2 months), Mars 780 days (25.6 months), Jupiter 399 days (13.1 months). Example: Earth→Mars by Hohmann — 259 days, `v∞ ≈ 2.94 km/s`, Δv from a 200 km LEO ≈ 3.6 km/s.
+  - The Grand Tour window — ≈ 1976–1979 (§7.4); in the game it arises on its own from the real ephemerides.
+- Milestone: near-Earth — M1 (azimuth calculation); porkchop — M5.
 
-### §6.3 Надёжность двигателей, ограниченные запуски, ullage
-- Суть: двигатель — не идеальная деталь (§5.3).
-- Зачем: решения вида «ещё одно огневое испытание или лететь?», планирование повторных запусков верхней ступени.
-- Реализация: модель `R(n)`, счётчик запусков в состоянии двигателя, ullage-проверка в момент включения; налёт серии накапливается между кораблями (тесты на стенде в §8.3 повышают его за деньги).
-- Веха: M1 (ullage и число запусков), M4 (налёт и стенд).
+### §6.3 Engine reliability, limited ignitions, ullage
+- Essence: an engine is not a perfect part (§5.3).
+- Why: decisions like "one more static fire or fly?", planning upper stage restarts.
+- Implementation: the `R(n)` model, an ignition counter in the engine state, an ullage check at the moment of ignition; series flight hours accumulate between vessels (test stand runs in §8.3 raise it for money).
+- Milestone: M1 (ullage and ignition count), M4 (flight hours and test stand).
 
-### §6.4 Задержка света и программируемый бортовой компьютер
-- Суть: команды и телеметрия идут со скоростью света `c = 299 792 458 м/с`: Луна — 1,28 с, Марс — 3–22 мин, Юпитер — 35–52 мин, Сатурн — 71–87 мин, Вояджер-1 — свыше 20 ч.
-- Зачем: ручное управление дальнего зонда невозможно; нужно заранее писать программу.
-- Реализация:
-  - Расстояние до ближайшей станции связи → задержка `τ = d/c`; вид удалённого корабля — «последнее известное состояние» плюс прогноз.
-  - Бортовой компьютер (БК) выполняет очередь команд: включить двигатель, ориентацию, дроссель, отстрел, эксперимент, передача; условия запуска — время, событие, высота, истинная аномалия, апсида.
-  - Программа загружается через канал связи: задержка + размер/скорость передачи (§6.10). Ограничения по эре (память, число команд, условия): tier 1 — таймерный секвенсор (≤ 16 команд), tier 2 — ~256 команд с условиями по событиям, tier 3 — скрипт с переменными и циклами, tier 4 — автономная навигация и посадка.
-  - Язык программ — предметный язык (DSL) / визуальная временная шкала; выбор — §12.2.
-- Веха: M1 — первая программа (автопилот, §6.11); M5 — задержка и полный БК.
+### §6.4 Light delay and the programmable onboard computer
+- Essence: commands and telemetry travel at the speed of light `c = 299 792 458 m/s`: Moon — 1.28 s, Mars — 3–22 min, Jupiter — 35–52 min, Saturn — 71–87 min, Voyager 1 — over 20 h.
+- Why: manual control of a distant probe is impossible; a program must be written in advance.
+- Implementation:
+  - Distance to the nearest communication station → delay `τ = d/c`; the view of a remote vessel is the "last known state" plus a forecast.
+  - The onboard computer (OBC) executes a command queue: engine on, attitude, throttle, jettison, experiment, transmission; trigger conditions — time, event, altitude, true anomaly, apsis.
+  - The program is uploaded through the communication channel: delay + size/transfer rate (§6.10). Limits by era (memory, number of commands, conditions): tier 1 — a timer sequencer (≤ 16 commands), tier 2 — ~256 commands with event conditions, tier 3 — a script with variables and loops, tier 4 — autonomous navigation and landing.
+  - The program language — a domain-specific language (DSL) / a visual timeline; the choice — §12.2.
+- Milestone: M1 — the first program (autopilot, §6.11); M5 — delay and the full OBC.
 
-### §6.5 Синдром Кесслера
-- Суть: отработанные ступени и обломки остаются на орбите. Риск столкновений растёт с плотностью объектов; столкновение рождает новые обломки.
-- Зачем: цена небрежности — потерянные спутники и закрытые орбиты; возникает рынок уборки.
-- Реализация:
-  - Объекты: отслеживаемые (>10 см) — список с орбитами на рельсах; мелкие — статистика по ячейкам «высота (50 км) × наклонение (10°)».
-  - Частота столкновений по кинетической теории газов: `rate = s·v_отн·σ`, `s = N/V_оболочки`, `σ = π(r₁ + r₂)²`. Пример: `s = 10⁻⁸ км⁻³`, `v = 10 км/с`, `σ = 10 м²` → ≈ 3·10⁻⁵ столкновений на объект в год.
-  - Фрагментация — NASA Standard Breakup Model (катастрофическое: энергия/масса ≥ 40 Дж/г; число осколков `N(L) = 0,1·M^0,75·L^−1,71`).
-  - Для читаемости — ползунок «агрессивность мусора» 0×–100×. Калибровка: Иридий–Космос (10 фев 2009, 789 км, 11,7 км/с).
-  - Распад по §4.10; деорбит — обязательство по эре (правила «25 лет»/«5 лет»).
-  - Миссии уборки: сближение, захват (манипулятор, сеть, гарпун) и увод; оплата контрактом.
-  - Ограничение: до 20 000 отдельных объектов, дальше — в статистику.
-- Веха: M5.
+### §6.5 Kessler syndrome
+- Essence: spent stages and debris remain in orbit. The collision risk grows with object density; a collision creates new debris.
+- Why: the price of carelessness — lost satellites and closed orbits; a cleanup market emerges.
+- Implementation:
+  - Objects: tracked (>10 cm) — a list with on-rails orbits; small ones — statistics by cells "altitude (50 km) × inclination (10°)".
+  - Collision rate by the kinetic theory of gases: `rate = s·v_rel·σ`, `s = N/V_shell`, `σ = π(r₁ + r₂)²`. Example: `s = 10⁻⁸ km⁻³`, `v = 10 km/s`, `σ = 10 m²` → ≈ 3·10⁻⁵ collisions per object per year.
+  - Fragmentation — NASA Standard Breakup Model (catastrophic: energy/mass ≥ 40 J/g; number of fragments `N(L) = 0.1·M^0.75·L^−1.71`).
+  - For readability — a "debris aggressiveness" slider 0×–100×. Calibration: Iridium–Cosmos (10 Feb 2009, 789 km, 11.7 km/s).
+  - Decay per §4.10; deorbit — an obligation by era ("25 years"/"5 years" rules).
+  - Cleanup missions: rendezvous, capture (manipulator, net, harpoon) and removal; paid by contract.
+  - Limit: up to 20 000 individual objects, beyond that — into statistics.
+- Milestone: M5.
 
-### §6.6 Радиационные пояса Ван Аллена
-- Суть: заряженные частицы в магнитосфере Земли дозируют экипаж и электронику.
-- Зачем: траектория и защита — решения, а не декорации; ГСО и средние орбиты (ГНСС, ≈ 20 000 км) лежат в поясе электронов.
-- Реализация:
-  - Магнитное поле — наклонный диполь (≈ 10°) со смещением ≈ 500 км (даёт Южно-Атлантическую аномалию). Параметр оболочки `L = r/(R·cos²λ_м)`.
-  - Внутренний пояс — протоны, ≈ 1000–6000 км высоты (L ≈ 1,2–2); внешний — электроны, ≈ 13 000–60 000 км (L ≈ 3–7).
-  - Мощность дозы `D(L, B)` — таблица, калибруется по историческим дозам: Аполлон-11 ≈ 0,18 рад на экипаж за миссию, Аполлон-14 ≈ 1,14 рад; МКС ≈ 0,5 мЗв/сут.
-  - Масса защиты уменьшает дозу. Доза экипажа накапливается (пределы по эре, ≥ 1 Зв за короткое время — лучевая болезнь, ≈ 4 Зв — смертельно). Электроника: суммарная доза (крад) и одиночные сбои. Случайные солнечные вспышки (SPE) с предупреждением 30–60 мин.
-  - Юпитер: у Европы ≈ 5 Зв/сут (реал.) — тот же механизм для миссий §7.
-- Веха: M5.
+### §6.6 Van Allen radiation belts
+- Essence: charged particles in Earth's magnetosphere dose the crew and electronics.
+- Why: trajectory and shielding are decisions, not decoration; GEO and medium orbits (GNSS, ≈ 20 000 km) lie in the electron belt.
+- Implementation:
+  - The magnetic field — a tilted dipole (≈ 10°) offset by ≈ 500 km (gives the South Atlantic Anomaly). Shell parameter `L = r/(R·cos²λ_m)`.
+  - The inner belt — protons, ≈ 1000–6000 km altitude (L ≈ 1.2–2); the outer — electrons, ≈ 13 000–60 000 km (L ≈ 3–7).
+  - Dose rate `D(L, B)` — a table, calibrated against historical doses: Apollo 11 ≈ 0.18 rad per crew for the mission, Apollo 14 ≈ 1.14 rad; ISS ≈ 0.5 mSv/day.
+  - Shielding mass reduces the dose. Crew dose accumulates (limits by era, ≥ 1 Sv in a short time — radiation sickness, ≈ 4 Sv — lethal). Electronics: total dose (krad) and single-event upsets. Random solar particle events (SPE) with a 30–60 min warning.
+  - Jupiter: at Europa ≈ 5 Sv/day (real.) — the same mechanism for the missions of §7.
+- Milestone: M5.
 
-### §6.7 Плазменная блокировка связи при входе
-- Суть: при входе ионизированный слой не пропускает радиоволны.
-- Зачем: корабль несколько минут «молчит» — нужны автономный вход и запись телеметрии.
-- Реализация: радиосвязь теряется, если концентрация электронов превышает критическую `n_c = (f / 8,98)²` м⁻³: S-диапазон 2,2 ГГц — ≈ 6·10¹⁶ м⁻³, X-диапазон 8,4 ГГц — ≈ 8,7·10¹⁷ м⁻³. Концентрация `n_e(v, h)` — эмпирическая таблица по данным лётных экспериментов вроде RAM-C. Типичное окно: скорость > 4 км/с, высота 40–90 км. Следствие: чем выше частота, тем короче блокировка (улучшение связи через ТРС/релейные спутники — позже).
-- Веха: M2 (флаг блокировки), M5 (полная модель).
+### §6.7 Plasma communication blackout on entry
+- Essence: on entry the ionized layer blocks radio waves.
+- Why: the vessel is "silent" for several minutes — autonomous entry and telemetry recording are needed.
+- Implementation: radio communication is lost if the electron density exceeds the critical `n_c = (f / 8.98)²` m⁻³: S-band 2.2 GHz — ≈ 6·10¹⁶ m⁻³, X-band 8.4 GHz — ≈ 8.7·10¹⁷ m⁻³. The density `n_e(v, h)` is an empirical table based on flight experiment data such as RAM-C. A typical window: speed > 4 km/s, altitude 40–90 km. Consequence: the higher the frequency, the shorter the blackout (improving communication via TDRS/relay satellites — later).
+- Milestone: M2 (blackout flag), M5 (full model).
 
-### §6.8 Реальные космодромы
-| Площадка | Широта, долгота | Скорость вращения (м/с) | Мин. наклонение | Выигрыш к Байконуру | Смена плоскости на ГСО (≈ верхняя оценка) |
+### §6.8 Real spaceports
+| Site | Latitude, longitude | Rotation speed (m/s) | Min. inclination | Gain vs Baikonur | Plane change at GEO (≈ upper estimate) |
 |---|---|---|---|---|---|
-| Байконур, Гагаринский старт | 45,920° с.ш., 63,342° в.д. | 324 | 45,9° | 0 | ≈ 2,4 км/с |
-| Канаверал / Кеннеди | ≈ 28,5° с.ш., 80,6° з.д. | 409 | 28,5° | +85 м/с | ≈ 1,5 км/с |
-| Куру | 5,24° с.ш., 52,77° з.д. | 463 | 5,2° | +140 м/с | ≈ 0,28 км/с |
-| Плесецк | 62,93° с.ш., 40,58° в.д. | 212 | 62,9° | −112 м/с | ≈ 3,2 км/с |
-| Восточный | 51,88° с.ш., 128,33° в.д. | 287 | 51,9° | −37 м/с | ≈ 2,7 км/с |
+| Baikonur, Gagarin's Start | 45.920° N, 63.342° E | 324 | 45.9° | 0 | ≈ 2.4 km/s |
+| Canaveral / Kennedy | ≈ 28.5° N, 80.6° W | 409 | 28.5° | +85 m/s | ≈ 1.5 km/s |
+| Kourou | 5.24° N, 52.77° W | 463 | 5.2° | +140 m/s | ≈ 0.28 km/s |
+| Plesetsk | 62.93° N, 40.58° E | 212 | 62.9° | −112 m/s | ≈ 3.2 km/s |
+| Vostochny | 51.88° N, 128.33° E | 287 | 51.9° | −37 m/s | ≈ 2.7 km/s |
 
-- Суть: площадка определяет вращательный бонус и доступные наклонения (не ниже широты; без дополнительных манёвров). Плесецк — полярные и высокоэллиптические («Молния», 62,9°), Куру — ГСО, Канаверал — Луна/МКС, Байконур — исторический старт, Восточный — российская линейка эры V.
-- Зачем: выбор площадки — часть стратегии и экономики.
-- Реализация: данные площадок (координаты, ориентация, ограничения азимута, стоимость постройки/аренды); игрок открывает их в техдереве и экономике; запуск конвертирует `(lat, lon, высота, курс)` через эллипсоид (§2.9) в состояние ракеты.
-- Веха: M1 — Байконур; M4 — остальные площадки.
+- Essence: the site determines the rotational bonus and the available inclinations (not lower than the latitude; without additional maneuvers). Plesetsk — polar and highly elliptical ("Molniya", 62.9°), Kourou — GEO, Canaveral — Moon/ISS, Baikonur — the historical launch site, Vostochny — the Russian line of era V.
+- Why: the choice of site is part of strategy and economy.
+- Implementation: site data (coordinates, orientation, azimuth restrictions, construction/rental cost); the player unlocks them in the tech tree and economy; a launch converts `(lat, lon, height, heading)` via the ellipsoid (§2.9) into the rocket state.
+- Milestone: M1 — Baikonur; M4 — the other sites.
 
-### §6.9 Многоразовые ступени
-- Суть: возврат первой ступени (бустбэк, вход, посадка), по образцу Falcon 9.
-- Зачем: экономия денег (§8.4), вызов точной посадки с минимальной тягой > веса (§5.3).
-- Реализация: резерв топлива на три манёвра (бустбэк, тормозной импульс на входе, посадочный); зона посадки — суша или баржа (координаты); посадочные опоры; повреждения/износ ступени; налёт растёт (§5.3). Типичное снижение нагрузки — 30–40 % по аналогии с Falcon 9 (калибруется).
-- Веха: M2 (посадка на рельеф), M4 (экономика).
+### §6.9 Reusable stages
+- Essence: recovery of the first stage (boostback, entry, landing), modeled on Falcon 9.
+- Why: saving money (§8.4), the challenge of a precise landing with minimum thrust > weight (§5.3).
+- Implementation: propellant reserve for three maneuvers (boostback, entry braking burn, landing); the landing zone — land or a barge (coordinates); landing legs; stage damage/wear; flight hours grow (§5.3). A typical payload reduction — 30–40 % by analogy with Falcon 9 (to be calibrated).
+- Milestone: M2 (landing on terrain), M4 (economy).
 
-### §6.10 Пропускная способность научного канала
-- Суть: наука не появляется мгновенно, а передаётся: каждому эксперименту — объём в Мбит; передача ограничена скоростью канала, зависящей от антенны, мощности и расстояния.
-- Зачем: ограничение, из-за которого разные антенны и релеи имеют смысл; сжатый «ожидаемый» поток данных.
-- Реализация: `скорость(d) = скорость_ref·(d_ref/d)²`, ограничена потолком антенны. Ориентиры (реал.): Маринер-4 — 8,33 бит/с у Марса (одна фотография ≈ 8 ч); Вояджер у Юпитера — 115,2 кбит/с, у Нептуна — 21,6 кбит/с. Бортовой накопитель ограничен: при переполнении данные теряются. Наземные станции — зона видимости (горизонт, вращение Земли), релейные спутники у Марса (M5). Возврат образцов даёт множитель ×3 к науке по сравнению с передачей (§8.3).
-- Веха: M5.
+### §6.10 Science channel bandwidth
+- Essence: science does not appear instantly but is transmitted: each experiment has a volume in Mbit; transmission is limited by the channel rate, which depends on the antenna, power and distance.
+- Why: a constraint that makes different antennas and relays meaningful; a compressed "expected" data stream.
+- Implementation: `rate(d) = rate_ref·(d_ref/d)²`, capped by the antenna ceiling. Benchmarks (real.): Mariner 4 — 8.33 bit/s at Mars (one photograph ≈ 8 h); Voyager at Jupiter — 115.2 kbit/s, at Neptune — 21.6 kbit/s. Onboard storage is limited: on overflow the data is lost. Ground stations — visibility zone (horizon, Earth's rotation), relay satellites at Mars (M5). Sample return gives a ×3 multiplier to science compared with transmission (§8.3).
+- Milestone: M5.
 
-### §6.11 Автопилот выведения как первая программа БК
-- Суть: первая программа бортового компьютера — программа выведения: вертикальный подъём, программа тангажа, гравитационный разворот, отделение ступеней, довыведение на круговую.
-- Зачем: вход для новичков и точка отсчёта для системы программ (§6.4).
-- Реализация: параметры — целевая орбита `(Pe, Ap, i)`, азимут (§6.2), высота начала разворота; этапы: вертикаль до ≈ 100 м/с, малый тангаж, следование за вектором скорости (prograde hold), отсечка ступени по расходу топлива, разведение по апоцентру, расчёт времени и начала довыведения по Δv и ускорению. Поздние версии — PEG-подобное «явное наведение» для верхней ступени. Автопилот — один из «профилей» БК, его можно редактировать.
-- Веха: M1.
+### §6.11 Ascent autopilot as the first OBC program
+- Essence: the first onboard computer program is the ascent program: vertical rise, pitch program, gravity turn, stage separation, insertion onto a circular orbit.
+- Why: an entry point for newcomers and a reference for the program system (§6.4).
+- Implementation: parameters — target orbit `(Pe, Ap, i)`, azimuth (§6.2), turn start altitude; phases: vertical until ≈ 100 m/s, small pitch, following the velocity vector (prograde hold), stage cutoff by propellant consumption, separation at apoapsis, computing the time and start of the circularization burn from Δv and acceleration. Later versions — PEG-like "explicit guidance" for the upper stage. The autopilot is one of the OBC "profiles", it can be edited.
+- Milestone: M1.
 
-## §7 Миссии
+## §7 Missions
 
-### §7.1 Формат описания
-Миссии — данные (JSON/ScriptableObject), а не код. Миссия состоит из целей-условий, логики выполнения, штрафов, награды и даты соперника.
+### §7.1 Description format
+Missions are data (JSON/ScriptableObject), not code. A mission consists of condition objectives, execution logic, penalties, reward and the rival's date.
 
 ```json
 {
   "id": "venera_lander",
   "era": 2,
   "requires": ["luna9"],
-  "title": "Венера: посадка",
+  "title": "Venus: landing",
   "objectives": [
     { "id": "arrive", "type": "Orbit",   "body": "Venus", "peKm": [200, 100000] },
     { "id": "land",   "type": "Landing", "body": "Venus", "maxSpeed": 10, "after": "arrive" },
@@ -439,248 +439,248 @@ Float на расстоянии Луны дробит пространство �
   "success": "all",
   "fail": [ { "type": "Deadline", "date": "1975-01-01" } ],
   "reward": { "prestige": 400, "science": 60, "funds": 150 },
-  "rival": { "date": "1970-12-15", "label": "Венера-7" }
+  "rival": { "date": "1970-12-15", "label": "Venera 7" }
 }
 ```
 
-Логика: `all` (все цели), `any` (любая), `sequence` (по `after`). Условия проверяются событиями (смена SOI, посадка, стыковка, передача данных) и опросом раз в секунду для непрерывных. Состояния цели: ожидание, активна, выполнена, провалена. Дата соперника — день (или момент); если `rival` нет — миссия без гонки.
+Logic: `all` (all objectives), `any` (any one), `sequence` (by `after`). Conditions are checked by events (SOI change, landing, docking, data transmission) and by polling once a second for continuous ones. Objective states: pending, active, completed, failed. The rival's date is a day (or a moment); if there is no `rival` — the mission has no race.
 
-### §7.2 Типы условий
-| Тип | Параметры |
+### §7.2 Condition types
+| Type | Parameters |
 |---|---|
-| `Orbit` | тело; диапазоны `Pe`, `Ap`, `i`, `e`; число витков или время на орбите |
-| `Landing` | тело; максимальная скорость; регион (lat, lon, радиус); наклон |
-| `Survive` | секунды; пределы среды (давление, температура корпуса, доза) — таймер выживания |
-| `Return` | возврат на поверхность тела; предел перегрузки; предел дозы; зона приземления |
-| `Crew` | число людей; живы на момент события |
-| `EVA` | длительность; человек вне корабля |
-| `Dock` | цель; расстояние, относительная скорость ≤ 0,3 м/с, ориентация |
-| `Flyby` | тело; диапазон высоты; порядок облётов |
-| `Data` | эксперимент; Мбит, переданные/возвращённые |
-| `Mobility` | пройденная дистанция; пережитая ночь |
-| `Aerial` | число полётов; высота; дальность (вертолёт) |
-| `Drill` | глубина проникновения (лёд) |
-| `Assemble` | число модулей, состыкованных с корпусом станции |
-| `Deadline` / `NotBefore` | дата не позднее / не ранее |
-| `Within` | не позднее N секунд после события (относительный таймер) |
-| `Debris` | объекты мусора (ID), уведённые с орбиты |
+| `Orbit` | body; ranges of `Pe`, `Ap`, `i`, `e`; number of revolutions or time in orbit |
+| `Landing` | body; maximum speed; region (lat, lon, radius); tilt |
+| `Survive` | seconds; environment limits (pressure, hull temperature, dose) — a survival timer |
+| `Return` | return to the surface of a body; g-load limit; dose limit; landing zone |
+| `Crew` | number of people; alive at the time of the event |
+| `EVA` | duration; a person outside the vessel |
+| `Dock` | target; distance, relative speed ≤ 0.3 m/s, orientation |
+| `Flyby` | body; altitude range; order of flybys |
+| `Data` | experiment; Mbit transmitted/returned |
+| `Mobility` | distance traveled; night survived |
+| `Aerial` | number of flights; altitude; range (helicopter) |
+| `Drill` | penetration depth (ice) |
+| `Assemble` | number of modules docked to the station hull |
+| `Deadline` / `NotBefore` | date no later / no earlier than |
+| `Within` | no later than N seconds after an event (relative timer) |
+| `Debris` | debris objects (IDs) removed from orbit |
 
-### §7.3 Таблица миссий
-Награда: П — престиж, Н — наука, ₢ — деньги (М₢, млн условных кредитов).
+### §7.3 Mission table
+Reward: P — prestige, S — science, ₢ — money (M₢, millions of conventional credits).
 
-| № | Эра | Миссия | Цель | Условия успеха | Награда | Дата соперника |
+| № | Era | Mission | Goal | Success conditions | Reward | Rival date |
 |---|---|---|---|---|---|---|
-| 1 | I | Спутник | Первый ИСЗ | `Orbit` Земля: Pe ≥ 150 км, Ap ≤ 1500 км, ≥ 1 виток; маяк работает ≥ 21 сут | П100 Н5 20 | 4 окт 1957 (старт игры) |
-| 2 | I | Восток | Человек на орбите | `Orbit` ≥ 1 виток, Pe ≥ 150 км; `Crew` 1, жив; `Return` Земля, перегрузка ≤ 9 g | П300 Н15 60 | 12 апр 1961 |
-| 3 | I | Пролёт Луны | Снимок обратной стороны | `Flyby` Луна ≤ 10 000 км; `Data` ≥ 20 Мбит передано | П200 Н20 50 | 7 окт 1959 (Луна-3) |
-| 4 | II | Выход в открытый космос | EVA | `Orbit` Земля; `EVA` ≥ 10 мин; `Crew` жив, `Return` | П250 Н15 50 | 18 мар 1965 (Леонов) |
-| 5 | II | Луна-9 | Мягкая посадка на Луну | `Landing` Луна: скорость < 10 м/с (с амортизатором < 25 м/с); `Data` ≥ 1 панорама | П300 Н30 100 | 3 фев 1966 |
-| 6 | II | Стыковка | Сближение и стыковка двух аппаратов | `Dock`: расстояние < 0,5 м, скорость ≤ 0,3 м/с, ориентация ≤ 5°; замок | П250 Н20 80 | 16 мар 1966 (Gemini-8/Agena) |
-| 7 | II | Аполлон | Высадка и возврат | `Landing` Луна, `Crew` ≥ 2; пребывание на поверхности ≥ 20 ч; старт с поверхности, стыковка на орбите Луны; `Return` Земля, перегрузка ≤ 9 g, доза ≤ предел | П1000 Н100 500 | 20 июл 1969 (посадка); 24 июл 1969 (возврат) |
-| 8 | II | Луноход | Дистанционный ровер | `Landing` Луна; `Mobility` ≥ 10 км; пережить ≥ 1 лунную ночь (≈ 14,8 сут) | П250 Н50 120 | 17 ноя 1970 |
-| 9 | II | Венера | Посадка с таймером выживания | `Landing` Венера < 10 м/с; `Survive` ≥ 23 мин (Венера-7) / 127 мин (Венера-13, золото) при 92 атм и 460 °C | П400 Н60 150 | 15 дек 1970 (Венера-7) |
-| 10 | II | Марс: посадка и ровер | Посадка, затем ровер | `Landing` Марс < 10 м/с; `Mobility` ≥ 100 м; `Data` | П400 Н80 200 | 2 дек 1971 (посадка Марс-3); 4 июл 1997 (ровер Sojourner) |
-| 11 | III | Вояджер: Гранд-тур | Облёт Юпитера, Сатурна, Урана (+Нептун — золото) | `Flyby` последовательно, Юпитер ≤ 600 000 км, Сатурн ≤ 150 000 км, Уран ≤ 100 000 км, Нептун ≤ 50 000 км; `Data` по каждому | П800 Н200 400 | 25 авг 1989 (Нептун, Вояджер-2) |
-| 12 | IV | МКС | Сборка станции | `Orbit` i 51,6° ± 0,3°, 380–430 км; `Assemble` ≥ 6 модулей; `Crew` ≥ 3 ≥ 180 сут; поддержание орбиты | П700 Н150 600 | 2 ноя 2000 (Экспедиция-1) |
-| 13 | V | Многоразовая ступень | Возврат первой ступени | `Return` ступень: мягкая посадка в зоне; повторный запуск | П300 Н0 150 | 21 дек 2015 |
-| 14 | V | Европа | Подлёдный зонд | `Orbit` Юпитер; `Landing` Европа < 5 м/с; `Drill` ≥ 20 км льда; `Data` ≥ 100 Мбит; предел дозы | П900 Н300 800 | нет (план ≥ 2030-х) |
-| 15 | V | Титан | Вертолёт | `Landing` Титан (парашют, < 10 м/с); `Aerial` ≥ 3 полёта, ≥ 10 км суммарно | П600 Н250 700 | 14 янв 2005 (посадка Гюйгенса); 2034 (план Dragonfly) |
-| 16 | V | Возврат грунта с Марса | Образцы на Земле | `Landing` Марс; `Data`/образцы; старт с Марса, стыковка на орбите; `Return` Земля, капсула цела | П1200 Н400 1000 | нет |
-| 17 | V | Уборка орбиты | Увод мусора | `Dock`/захват объектов; `Debris` ≥ 3 объекта уведено | П300 Н50 200 | нет |
+| 1 | I | Sputnik | The first satellite | `Orbit` Earth: Pe ≥ 150 km, Ap ≤ 1500 km, ≥ 1 revolution; beacon works ≥ 21 days | P100 S5 20 | 4 Oct 1957 (game start) |
+| 2 | I | Vostok | A human in orbit | `Orbit` ≥ 1 revolution, Pe ≥ 150 km; `Crew` 1, alive; `Return` Earth, g-load ≤ 9 g | P300 S15 60 | 12 Apr 1961 |
+| 3 | I | Lunar flyby | Photo of the far side | `Flyby` Moon ≤ 10 000 km; `Data` ≥ 20 Mbit transmitted | P200 S20 50 | 7 Oct 1959 (Luna 3) |
+| 4 | II | Spacewalk | EVA | `Orbit` Earth; `EVA` ≥ 10 min; `Crew` alive, `Return` | P250 S15 50 | 18 Mar 1965 (Leonov) |
+| 5 | II | Luna 9 | Soft landing on the Moon | `Landing` Moon: speed < 10 m/s (with a shock absorber < 25 m/s); `Data` ≥ 1 panorama | P300 S30 100 | 3 Feb 1966 |
+| 6 | II | Docking | Rendezvous and docking of two vehicles | `Dock`: distance < 0.5 m, speed ≤ 0.3 m/s, orientation ≤ 5°; latch | P250 S20 80 | 16 Mar 1966 (Gemini 8/Agena) |
+| 7 | II | Apollo | Landing and return | `Landing` Moon, `Crew` ≥ 2; time on the surface ≥ 20 h; liftoff from the surface, docking in lunar orbit; `Return` Earth, g-load ≤ 9 g, dose ≤ limit | P1000 S100 500 | 20 Jul 1969 (landing); 24 Jul 1969 (return) |
+| 8 | II | Lunokhod | Remote-controlled rover | `Landing` Moon; `Mobility` ≥ 10 km; survive ≥ 1 lunar night (≈ 14.8 days) | P250 S50 120 | 17 Nov 1970 |
+| 9 | II | Venus | Landing with a survival timer | `Landing` Venus < 10 m/s; `Survive` ≥ 23 min (Venera 7) / 127 min (Venera 13, gold) at 92 atm and 460 °C | P400 S60 150 | 15 Dec 1970 (Venera 7) |
+| 10 | II | Mars: landing and rover | Landing, then a rover | `Landing` Mars < 10 m/s; `Mobility` ≥ 100 m; `Data` | P400 S80 200 | 2 Dec 1971 (Mars 3 landing); 4 Jul 1997 (Sojourner rover) |
+| 11 | III | Voyager: Grand Tour | Flyby of Jupiter, Saturn, Uranus (+Neptune — gold) | `Flyby` in sequence, Jupiter ≤ 600 000 km, Saturn ≤ 150 000 km, Uranus ≤ 100 000 km, Neptune ≤ 50 000 km; `Data` for each | P800 S200 400 | 25 Aug 1989 (Neptune, Voyager 2) |
+| 12 | IV | ISS | Station assembly | `Orbit` i 51.6° ± 0.3°, 380–430 km; `Assemble` ≥ 6 modules; `Crew` ≥ 3 for ≥ 180 days; orbit maintenance | P700 S150 600 | 2 Nov 2000 (Expedition 1) |
+| 13 | V | Reusable stage | First stage recovery | `Return` stage: soft landing in the zone; relaunch | P300 S0 150 | 21 Dec 2015 |
+| 14 | V | Europa | Subglacial probe | `Orbit` Jupiter; `Landing` Europa < 5 m/s; `Drill` ≥ 20 km of ice; `Data` ≥ 100 Mbit; dose limit | P900 S300 800 | none (planned ≥ 2030s) |
+| 15 | V | Titan | Helicopter | `Landing` Titan (parachute, < 10 m/s); `Aerial` ≥ 3 flights, ≥ 10 km total | P600 S250 700 | 14 Jan 2005 (Huygens landing); 2034 (Dragonfly plan) |
+| 16 | V | Mars sample return | Samples on Earth | `Landing` Mars; `Data`/samples; liftoff from Mars, docking in orbit; `Return` Earth, capsule intact | P1200 S400 1000 | none |
+| 17 | V | Orbit cleanup | Debris removal | `Dock`/capture of objects; `Debris` ≥ 3 objects removed | P300 S50 200 | none |
 
-Миссии 3, 13 и 17 — дополнения к обязательному минимуму: гонка к обратной стороне Луны, многоразовость (§6.9), уборка (§6.5).
+Missions 3, 13 and 17 are additions to the mandatory minimum: the race to the far side of the Moon, reusability (§6.9), cleanup (§6.5).
 
-### §7.4 Заметки по ключевым миссиям
-- Спутник: дата соперника совпадает со стартом игры. Это учебная миссия: засчитывается «в ничью» при выходе на орбиту в течение суток; отдельный вопрос — §12.2.
-- Венера: давление 92 атм и 460 °C. Корпус — предел давления (Венера-4 была раздавлена на ≈ 25 км, 1967), температура корпуса — сосредоточенная модель `C·dT/dt = k_ins·(T_внеш − T_внутр) − Q_охл`. Время выживания зависит от изоляции и тепловой массы (Венера-7 — 23 мин, Венера-13 — 127 мин); медали — по времени.
-- Вояджер: окно — ≈ 1976–1979, повторяется раз в ≈ 175 лет; в игре возникает само из реальных эфемерид (Вояджер-2 стартовал 20 авг 1977). Пропущено окно — миссия фактически невозможна. Нужно ускорение 10⁷× (≈ 38 с на 12 лет).
-- Аполлон: цепочка из 6–8 целей и 3 кораблей (носитель, командный модуль, посадочный). Радиация (§6.6) и перегрузка (§4.7) — условия.
-- МКС: падение станции из-за распада (~2 км/мес реал.), поддержание — расход Δv.
-- Европа: радиация Юпитера (≈ 5 Зв/сут), толщина льда 15–25 км, подлёдный зонд (ядерный источник), задержка 35–52 мин (§6.4).
-- Титан: плотная атмосфера 1,47 бар и низкая гравитация 1,35 м/с²; вертолёт летит по программе БК (задержка ≈ 80 мин).
-- Возврат грунта: самая длинная цепочка — посадка, сбор, взлёт с Марса, стыковка, возврат; реальной даты нет, соперник не ограничивает.
+### §7.4 Notes on key missions
+- Sputnik: the rival's date coincides with the game start. This is a tutorial mission: it counts "as a tie" if orbit is reached within a day; a separate question — §12.2.
+- Venus: pressure 92 atm and 460 °C. The hull — a pressure limit (Venera 4 was crushed at ≈ 25 km, 1967), hull temperature — a lumped model `C·dT/dt = k_ins·(T_ext − T_int) − Q_cool`. Survival time depends on insulation and thermal mass (Venera 7 — 23 min, Venera 13 — 127 min); medals — by time.
+- Voyager: the window — ≈ 1976–1979, repeats once per ≈ 175 years; in the game it arises on its own from the real ephemerides (Voyager 2 launched 20 Aug 1977). A missed window — the mission is effectively impossible. Acceleration of 10⁷× is needed (≈ 38 s per 12 years).
+- Apollo: a chain of 6–8 objectives and 3 vessels (launch vehicle, command module, lander). Radiation (§6.6) and g-load (§4.7) are conditions.
+- ISS: station fall due to decay (~2 km/month real.), maintenance — Δv expenditure.
+- Europa: Jupiter's radiation (≈ 5 Sv/day), ice thickness 15–25 km, a subglacial probe (nuclear source), delay 35–52 min (§6.4).
+- Titan: a dense atmosphere of 1.47 bar and low gravity of 1.35 m/s²; the helicopter flies by an OBC program (delay ≈ 80 min).
+- Sample return: the longest chain — landing, collection, liftoff from Mars, docking, return; there is no real date, the rival does not constrain.
 
-## §8 Прогрессия: эры, техдерево, экономика
+## §8 Progression: eras, tech tree, economy
 
-### §8.1 Эры
-| Эра | Годы | Название | Тема | Бюджет в год, М₢ (ориентир) |
+### §8.1 Eras
+| Era | Years | Name | Theme | Budget per year, M₢ (guideline) |
 |---|---|---|---|---|
-| I | 1957–1965 | Первые шаги | Спутники, человек на орбите, пролёт Луны | 300 → 1500 |
-| II | 1965–1975 | Луна | Лунные посадки, стыковка, зонды к Венере и Марсу | 3000 → 2000 |
-| III | 1975–1990 | Станции и зонды | Станции, дальние зонды, Гранд-тур | 1500 → 2500 |
-| IV | 1990–2010 | Международное сотрудничество | МКС, партнёрства, ионные двигатели | ≈ 3000 |
-| V | 2010+ | Новый космос | Многоразовость, коммерческий рынок, Европа, Титан | ≈ 3000 + контракты |
+| I | 1957–1965 | First Steps | Satellites, a human in orbit, lunar flyby | 300 → 1500 |
+| II | 1965–1975 | The Moon | Lunar landings, docking, probes to Venus and Mars | 3000 → 2000 |
+| III | 1975–1990 | Stations and Probes | Stations, deep-space probes, Grand Tour | 1500 → 2500 |
+| IV | 1990–2010 | International Cooperation | ISS, partnerships, ion engines | ≈ 3000 |
+| V | 2010+ | New Space | Reusability, commercial market, Europa, Titan | ≈ 3000 + contracts |
 
-Смена эры — по календарю: узлы эпохи открываются сами при наступлении даты (но стоят науки). Игрок не обязан «закончить» эру, чтобы начать следующую.
+Era change — by the calendar: the era's nodes unlock on their own when the date arrives (but cost science). The player does not have to "finish" an era to start the next.
 
-### §8.2 Техдерево
-- Узел: `{id, era, minDate, cost{science, funds, days}, requires[], unlocks[]}`. Цена — наука, деньги и время исследований (90–720 дней).
-- Ранний доступ: узел можно открыть не более чем на 3 года раньше исторической даты; цена ×(1 + 0,5·лет_раньше). Игрок может опередить историю, но не перепрыгнуть эру.
-- Количество: ≈ 50 узлов; стоимость узла по уровню — 5–20 Н (1), 30–80 (2), 100–250 (3), 300–500 (4).
+### §8.2 Tech tree
+- Node: `{id, era, minDate, cost{science, funds, days}, requires[], unlocks[]}`. The price — science, money and research time (90–720 days).
+- Early access: a node can be unlocked no more than 3 years before the historical date; price ×(1 + 0.5·years_early). The player can get ahead of history but not skip an era.
+- Count: ≈ 50 nodes; node cost by level — 5–20 S (1), 30–80 (2), 100–250 (3), 300–500 (4).
 
-| Эра | Примеры узлов |
+| Era | Example nodes |
 |---|---|
-| I | Ракета «Кара-0», ИСЗ-маяк, спускаемая капсула, парашют, радиомаяк, фотокамера, шлюз |
-| II | Водородная ступень, тяжёлая ракета, стыковочный узел, посадочный модуль, ровер, РИТЭГ, теплозащита лунного возврата, межпланетный зонд |
-| III | Орбитальный модуль, антенна высокого усиления, БК tier 3, навигация гравитационного манёвра |
-| IV | Ионные двигатели, модули станции, Ka-диапазон, автономный ровер, международные партнёры |
-| V | Многоразовая ступень, метановый двигатель, автономная посадка, вертолёт для плотной атмосферы, подлёдный зонд, уборщик мусора, лазерная связь |
+| I | "Kara-0" rocket, satellite beacon, re-entry capsule, parachute, radio beacon, camera, airlock |
+| II | Hydrogen stage, heavy rocket, docking port, landing module, rover, RTG, lunar return heat shield, interplanetary probe |
+| III | Orbital module, high-gain antenna, OBC tier 3, gravity-assist navigation |
+| IV | Ion engines, station modules, Ka-band, autonomous rover, international partners |
+| V | Reusable stage, methane engine, autonomous landing, helicopter for a dense atmosphere, subglacial probe, debris collector, laser communication |
 
-### §8.3 Экономика: бюджет, престиж, наука
-| Ресурс | Откуда | На что |
+### §8.3 Economy: budget, prestige, science
+| Resource | Source | Use |
 |---|---|---|
-| Бюджет (₢) | Годовой бюджет (стартует 1 января), контракты миссий, коммерческие пуски (эра V) | Ракеты и детали, площадки, исследования, эксплуатация, наземные станции |
-| Престиж (П) | За миссии и «первые» (§6.1) | Множитель бюджета: `B(год) = B_база·(1 + 0,5·tanh(П/500))`; открывает контракты и партнёров |
-| Наука (Н) | Эксперименты: `V_баз · множитель_тела · 0,5^(повторы)`; передача × 1, возврат образцов × 3 | Узлы техдерева |
+| Budget (₢) | Annual budget (starts 1 January), mission contracts, commercial launches (era V) | Rockets and parts, sites, research, operations, ground stations |
+| Prestige (P) | For missions and "firsts" (§6.1) | Budget multiplier: `B(year) = B_base·(1 + 0.5·tanh(P/500))`; unlocks contracts and partners |
+| Science (S) | Experiments: `V_base · body_multiplier · 0.5^(repeats)`; transmission × 1, sample return × 3 | Tech tree nodes |
 
-Стартовая касса 1957 г. — 150 М₢, годовой бюджет — 300 М₢. Дефицит: если баланс отрицателен — урезается бюджет следующего года; игра не заканчивается. Расход — на этапе проектирования, запуска и эксплуатации (антенны, ресурс наземных станций).
+The 1957 starting treasury — 150 M₢, annual budget — 300 M₢. Deficit: if the balance is negative, the next year's budget is cut; the game does not end. Expenses — at the design, launch and operation stages (antennas, ground station upkeep).
 
-### §8.4 Стоимость запуска и многоразовость
-Пример для «Кара-1» (условно 60 М₢ за пуск без возврата): ступень 1 — 36, ступень 2 — 12, обтекатель — 6, эксплуатация пуска — 6.
+### §8.4 Launch cost and reusability
+An example for "Kara-1" (conventionally 60 M₢ per expendable launch): stage 1 — 36, stage 2 — 12, fairing — 6, launch operations — 6.
 
-`цена_пуска = ступень1/N_повторов + ремонт(10 % ступени 1) + возврат(2) + ступень2 + обтекатель + эксплуатация`
+`launch_price = stage1/N_reuses + refurbishment(10 % of stage 1) + recovery(2) + stage2 + fairing + operations`
 
-N = 10: 36/10 + 3,6 + 2 + 12 + 6 + 6 = 33,2 М₢ (≈ 55 % от разового пуска). При N = 1 выгоды нет (36 + 3,6 + 2 > 36). Надёжность растёт с налётом (§5.3); посадка снижает нагрузку (§6.9).
+N = 10: 36/10 + 3.6 + 2 + 12 + 6 + 6 = 33.2 M₢ (≈ 55 % of an expendable launch). At N = 1 there is no benefit (36 + 3.6 + 2 > 36). Reliability grows with flight hours (§5.3); landing reduces the payload (§6.9).
 
-### §8.5 Режимы сложности
-| Параметр | Реализм (по умолчанию) | Упрощённый | Песочница |
+### §8.5 Difficulty modes
+| Parameter | Realism (default) | Simplified | Sandbox |
 |---|---|---|---|
-| Δv (множитель Isp) | 1,0 | 1,2–1,5 («ускоренная Δv») | 1,5–2 |
-| Предел q и Qα | 1,0 | ×2 | выкл |
-| Радиация, Кесслер, плазма | вкл | настраивается | выкл |
-| Связь с задержкой | вкл | без задержки | выкл |
-| Надёжность двигателей | вкл | ×0,5 вероятностей отказа | выкл |
-| Экономика | вкл | вкл, бюджет ×2 | деньги без ограничений |
-| Автопилот выведения | эра I | сразу | сразу |
+| Δv (Isp multiplier) | 1.0 | 1.2–1.5 ("boosted Δv") | 1.5–2 |
+| q and Qα limit | 1.0 | ×2 | off |
+| Radiation, Kessler, plasma | on | configurable | off |
+| Communication with delay | on | no delay | off |
+| Engine reliability | on | ×0.5 failure probabilities | off |
+| Economy | on | on, budget ×2 | unlimited money |
+| Ascent autopilot | era I | immediately | immediately |
 
-Масштаб (1:1) не меняется ни в одном режиме.
+The scale (1:1) does not change in any mode.
 
-## §9 Графика
+## §9 Graphics
 
-Реалистичная графика на HDRP: физически-корректное небо, физические единицы света, реальная геометрия затмений.
+Realistic graphics on HDRP: a physically correct sky, physical light units, real eclipse geometry.
 
-### §9.1 Конвейер
-HDRP, физические единицы света (Солнце на 1 а.е. ≈ 127 000 лк, обратный квадрат расстояния: у Марса ≈ 0,43 от земного). Режим камеры — camera-relative. Reversed-Z, ближняя/дальняя плоскость 1 / 10⁷ м (§2.7). Качество: Low/Medium/High/Ultra — количество выборок неба, дальность чанков, тени.
+### §9.1 Pipeline
+HDRP, physical light units (the Sun at 1 AU ≈ 127 000 lux, inverse-square of distance: at Mars ≈ 0.43 of Earth's). Camera mode — camera-relative. Reversed-Z, near/far plane 1 / 10⁷ m (§2.7). Quality: Low/Medium/High/Ultra — sky sample count, chunk distance, shadows.
 
-### §9.2 Небо и атмосфера
-- Physically Based Sky в «космическом» режиме: атмосфера видна с орбиты (кромка Земли, закат из космоса). Для этого во встроенном пакете конфигурации HDRP выставлено `PrecomputedAtmosphericAttenuation = 0`: отключено предвычисленное ослабление света атмосферой (рассчитано на наблюдателя у поверхности), атмосфера считается по пикселям — иначе вид планеты из космоса неверен. Изменение живёт в локальной копии пакета конфигурации (риск при обновлении HDRP — §12).
-- Центр планеты и радиус обновляются каждый кадр (double → относительное float-смещение от камеры, §2.6). Профиль неба переключается при смене SOI (Земля/Марс/Венера/нет атмосферы).
-- Звёздное небо — процедурный кубмап как эмиссия космоса (Space Emission): распределение звёзд по звёздным величинам и полоса Млечного Пути; позже — реальная карта звёздного неба (Hipparcos/NASA).
-- Без атмосферы (Луна и др.) — только эмиссия космоса и Солнце. Марс, Венера, Титан — собственные параметры рассеяния (M6).
+### §9.2 Sky and atmosphere
+- Physically Based Sky in "space" mode: the atmosphere is visible from orbit (Earth's limb, a sunset from space). For this, in the embedded HDRP configuration package `PrecomputedAtmosphericAttenuation = 0` is set: the precomputed attenuation of light by the atmosphere (designed for an observer near the surface) is disabled, the atmosphere is computed per pixel — otherwise the view of the planet from space is wrong. The change lives in a local copy of the configuration package (a risk on HDRP update — §12).
+- The planet center and radius are updated every frame (double → relative float offset from the camera, §2.6). The sky profile switches on SOI change (Earth/Mars/Venus/no atmosphere).
+- The starry sky — a procedural cubemap as space emission (Space Emission): distribution of stars by magnitude and the Milky Way band; later — a real star map (Hipparcos/NASA).
+- Without an atmosphere (the Moon etc.) — only space emission and the Sun. Mars, Venus, Titan — their own scattering parameters (M6).
 
-### §9.3 Свет, затмения, экспозиция
-- Затмения: гашение солнечного света по перекрытию угловых дисков Солнца и затмевающего тела (в истинной геометрии, без сжатия §2.7); полутень даёт частичное затмение; орбитальная ночь у Земли до ≈ 35 мин.
-- Автоэкспозиция: три профиля по ситуации с плавным переходом (тёмное → светлое 0,5 с, светлое → тёмное 1,5 с):
+### §9.3 Light, eclipses, exposure
+- Eclipses: sunlight is attenuated by the overlap of the angular disks of the Sun and the occluding body (in true geometry, without the §2.7 compression); the penumbra gives a partial eclipse; orbital night at Earth is up to ≈ 35 min.
+- Auto-exposure: three profiles by situation with a smooth transition (dark → bright 0.5 s, bright → dark 1.5 s):
 
-| Ситуация | EV100 (ориентир) |
+| Situation | EV100 (guideline) |
 |---|---|
-| День у поверхности/в атмосфере | 13–15 |
-| Орбита на свету | ≈ 15 (фиксированный) |
-| Ночь/тень, звёздный свет | от −5 до −2 |
+| Day at the surface/in the atmosphere | 13–15 |
+| Orbit in sunlight | ≈ 15 (fixed) |
+| Night/shadow, starlight | from −5 to −2 |
 
-  Диапазон EV ограничен `[−5, 16]`, на карте — фиксированная экспозиция.
+  The EV range is limited to `[−5, 16]`, on the map — fixed exposure.
 
-### §9.4 Планеты: текстуры
-- Этап 1: процедурные текстуры-заглушки (цвет по широте и высоте, шум, ночные огни для Земли), без загрузки внешних данных.
-- Этап 2 (M6): реальные текстуры NASA — Blue Marble (Земля), LROC/LOLA (Луна), MOLA/Viking (Марс), Magellan (Венера), Cassini/Voyager/Juno (газовые гиганты и спутники). Материалы NASA, как правило, не защищены авторским правом (public domain), но каждый источник проверяется по правилам использования.
-- Загрузка внешних данных — только с явного согласия владельца проекта; тяжёлые файлы — через Git LFS или внешнюю папку; в билд — сжатые форматы с мип-стримингом.
+### §9.4 Planets: textures
+- Stage 1: procedural placeholder textures (color by latitude and height, noise, night lights for Earth), without loading external data.
+- Stage 2 (M6): real NASA textures — Blue Marble (Earth), LROC/LOLA (Moon), MOLA/Viking (Mars), Magellan (Venus), Cassini/Voyager/Juno (gas giants and moons). NASA materials are generally not copyrighted (public domain), but each source is checked against its usage rules.
+- Loading external data — only with the project owner's explicit consent; heavy files — via Git LFS or an external folder; in the build — compressed formats with mip streaming.
 
-### §9.5 Эффекты
-- Выхлоп двигателя (VFX Graph): форма факела зависит от давления окружающей среды (расширение в вакууме), яркость — от тяги и дросселя; ударные «алмазы» — опционально.
-- Нагрев при входе: свечение обшивки (эмиссия по температуре, §4.7) и плазменный шлейф; конденсационный конус при M ≈ 1.
-- Разделение ступеней, парашюты, пыль при посадке (M2+), облака — M6 (объёмные облака HDRP рассчитаны на Землю, адаптация под другие тела — исследование).
+### §9.5 Effects
+- Engine exhaust (VFX Graph): the plume shape depends on ambient pressure (expansion in vacuum), brightness — on thrust and throttle; shock "diamonds" — optional.
+- Entry heating: skin glow (emission by temperature, §4.7) and a plasma trail; a condensation cone at M ≈ 1.
+- Stage separation, parachutes, dust on landing (M2+), clouds — M6 (HDRP volumetric clouds are designed for Earth, adapting to other bodies — research).
 
-### §9.6 Карта
-Отдельный вид (клавиша M): орбиты коник (до 256 точек на витке, гиперболы — до границы SOI), Ap/Pe, узлы (восходящий/нисходящий), смены SOI, узлы манёвра (Δv-векторы), точки сближения, порк-чоп диаграммы (M5). Масштаб карты — собственный, без сжатия §2.7; фокус на теле/корабле, фиксированная экспозиция.
+### §9.6 Map
+A separate view (key M): conic orbits (up to 256 points per revolution, hyperbolas — up to the SOI boundary), Ap/Pe, nodes (ascending/descending), SOI changes, maneuver nodes (Δv vectors), closest approach points, porkchop plots (M5). The map scale is its own, without the §2.7 compression; focus on a body/vessel, fixed exposure.
 
-## §10 Управление и интерфейс
+## §10 Controls and interface
 
-### §10.1 Клавиши
-| Клавиша | Действие |
+### §10.1 Keys
+| Key | Action |
 |---|---|
-| W / S | Тангаж вниз / вверх (нос) |
-| A / D | Рыскание влево / вправо |
-| Q / E | Крен влево / вправо |
-| Shift / Ctrl | Дроссель больше / меньше |
-| Z / X | Дроссель 100 % / 0 % |
-| Пробел | Следующая ступень |
-| T | SAS вкл/выкл |
-| F | Режимы SAS по кругу (§4.9) |
-| M | Карта / вид корабля |
-| `.` | Ускорение времени выше |
-| `,` | Ускорение времени ниже |
+| W / S | Pitch down / up (nose) |
+| A / D | Yaw left / right |
+| Q / E | Roll left / right |
+| Shift / Ctrl | Throttle up / down |
+| Z / X | Throttle 100 % / 0 % |
+| Space | Next stage |
+| T | SAS on/off |
+| F | Cycle SAS modes (§4.9) |
+| M | Map / vessel view |
+| `.` | Time acceleration up |
+| `,` | Time acceleration down |
 
-Привязка — через Unity Input System, клавиши переназначаются. Предложение, не фиксировано: `R` — RCS, `V` — переключение системы отсчёта скорости, `C` — режим камеры, `F5`/`F9` — быстрое сохранение/загрузка.
+Binding — via the Unity Input System, keys are remappable. A proposal, not fixed: `R` — RCS, `V` — switch the velocity reference frame, `C` — camera mode, `F5`/`F9` — quicksave/quickload.
 
-### §10.2 Интерфейс v1: IMGUI HUD
-Текстовая панель (IMGUI), без графики нав-шара. Состав:
+### §10.2 Interface v1: IMGUI HUD
+A text panel (IMGUI), without a graphical navball. Contents:
 
-| Поле | Описание |
+| Field | Description |
 |---|---|
-| Высота | Над уровнем моря и над поверхностью (радиовысотомер) |
-| Скорость | Орбитальная / поверхностная / относительно цели (переключается) |
-| Ap / Pe | Высоты апо- и периапсиса + время до них |
-| Δv ступени | Остаток по вакууму, текущей ступени и суммарно |
-| TWR | Текущий, у земли и в вакууме |
-| Дата | «4 окт 1957, 19:28:34», T+ |
-| Ускорение | Множитель и режим (физический / на рельсах) |
-| q | Скоростной напор, кПа; Qα |
-| Мах | Число Маха |
-| Дроссель, SAS, масса, топливо | Индикаторы |
+| Altitude | Above sea level and above the surface (radar altimeter) |
+| Speed | Orbital / surface / relative to target (switchable) |
+| Ap / Pe | Apoapsis and periapsis altitudes + time to them |
+| Stage Δv | Remaining in vacuum, for the current stage and total |
+| TWR | Current, at sea level and in vacuum |
+| Date | "4 Oct 1957, 19:28:34", T+ |
+| Acceleration | Multiplier and mode (physical / on rails) |
+| q | Dynamic pressure, kPa; Qα |
+| Mach | Mach number |
+| Throttle, SAS, mass, propellant | Indicators |
 
-Масштаб — по DPI; русский шрифт обязателен.
+Scale — by DPI; a font with Cyrillic support is mandatory (the game is localized in Russian).
 
-### §10.3 Дальше
-UI Toolkit (v2): нав-шар, планировщик манёвров, окно бортового компьютера, порк-чоп, хроника гонки, меню техдерева и экономики. Сохранения — JSON: время, состояния кораблей (r, v, ориентация, массы), техдерево, экономика, события истории; формат версионируется. Обучение — серия сценариев (первый запуск, орбита, Луна).
+### §10.3 Next
+UI Toolkit (v2): navball, maneuver planner, onboard computer window, porkchop, race chronicle, tech tree and economy menus. Saves — JSON: time, vessel states (r, v, orientation, masses), tech tree, economy, history events; the format is versioned. Tutorial — a series of scenarios (first launch, orbit, Moon).
 
-## §11 Дорожная карта
+## §11 Roadmap
 
-| Веха | Содержание | Критерий выхода | Статус |
+| Milestone | Content | Exit criterion | Status |
 |---|---|---|---|
-| M0 | Ядро симуляции: тела и эфемериды, орбиты, универсальные переменные, SOI, атмосфера, ракета, RK4; тесты без Unity | Тесты ниже зелёные; «Кара-1» в headless-прогоне выходит на круговую ≈ 200 км | В работе |
-| M1 | Вертикальный срез: старт с Байконура → орбита → карта → ускорение времени | Игровая сессия без вылетов: старт, автопилот, орбита, карта, ускорение 1e7× без дрожания | План |
-| M2 | Луна: SOI, посадка, возврат, вход в атмосферу | Посадка и возвращение капсулы; q/Qα; блокировка связи (флаг) | План |
-| M3 | Конструктор ракет | Корабль из деталей по §5.4 летит в M1/M2 | Базово: ангар, каталог, симметрия, ступени, JSON, запуск |
-| M4 | Карьера: миссии, гонка, экономика | Миссии 1–10, престиж, бюджет, налёт двигателей | План |
-| M5 | Межпланетные полёты и уникальные механики | Порк-чоп, БК, Кесслер, Ван Аллен, канал науки; миссии 11–17 | План |
-| M6 | Графика продакшн-уровня | Текстуры NASA, облака, океан, эффекты | План |
+| M0 | Simulation core: bodies and ephemerides, orbits, universal variables, SOI, atmosphere, rocket, RK4; tests without Unity | The tests below are green; "Kara-1" in a headless run reaches a ≈ 200 km circular orbit | In progress |
+| M1 | Vertical slice: launch from Baikonur → orbit → map → time acceleration | A play session without crashes: launch, autopilot, orbit, map, 1e7× acceleration without jitter | Planned |
+| M2 | The Moon: SOI, landing, return, atmospheric entry | Landing and capsule return; q/Qα; communication blackout (flag) | Planned |
+| M3 | Rocket builder | A vessel built from parts per §5.4 flies in M1/M2 | Basic: hangar, catalog, symmetry, stages, JSON, launch |
+| M4 | Career: missions, race, economy | Missions 1–10, prestige, budget, engine flight hours | Planned |
+| M5 | Interplanetary flight and unique mechanics | Porkchop, OBC, Kessler, Van Allen, science channel; missions 11–17 | Planned |
+| M6 | Production-level graphics | NASA textures, clouds, ocean, effects | Planned |
 
-### §11.1 Тесты M0 (без Unity)
-- Кеплер: туда-обратно между `(r, v)` и элементами, ошибка < 1e-9 (эллипс, гипербола, e≈1).
-- Эфемериды: Земля на J2000 — расстояние до Солнца ≈ 0,9833 а.е.; Луна — период 27,32 сут; сверка с контрольными датами JPL Horizons.
-- Универсальные переменные: распространение вперёд и назад, сохранение энергии.
-- RK4: дрейф энергии круговой орбиты < 1e-9 за 100 витков; шаг 0,02 с.
-- Атмосфера: USSA76 — 0 км (101 325 Па, 1,225 кг/м³) и 11 км (216,65 К, 22 632 Па, 0,3639 кг/м³).
-- Ракета: масса, TWR, Δv (11,2 км/с), времена работы (144–147 и 322 с) — по §5.2.
-- Эллипсоид WGS84: пересчёт широта/долгота/высота ↔ ECEF; Байконур — радиус ≈ 6367,1 км.
-- Адаптер координат (эклиптика → Unity): ориентация без зеркальности; поворот на известный угол.
-- Headless-прогон: гравитационный разворот «Кара-1» с Байконура на орбиту.
+### §11.1 M0 tests (without Unity)
+- Kepler: round trip between `(r, v)` and elements, error < 1e-9 (ellipse, hyperbola, e≈1).
+- Ephemerides: Earth at J2000 — distance to the Sun ≈ 0.9833 AU; Moon — period 27.32 days; cross-check against JPL Horizons control dates.
+- Universal variables: forward and backward propagation, energy conservation.
+- RK4: circular orbit energy drift < 1e-9 over 100 revolutions; step 0.02 s.
+- Atmosphere: USSA76 — 0 km (101 325 Pa, 1.225 kg/m³) and 11 km (216.65 K, 22 632 Pa, 0.3639 kg/m³).
+- Rocket: mass, TWR, Δv (11.2 km/s), burn times (144–147 and 322 s) — per §5.2.
+- WGS84 ellipsoid: latitude/longitude/height ↔ ECEF conversion; Baikonur — radius ≈ 6367.1 km.
+- Coordinate adapter (ecliptic → Unity): orientation without mirroring; rotation by a known angle.
+- Headless run: a "Kara-1" gravity turn from Baikonur to orbit.
 
-## §12 Риски и открытые вопросы
+## §12 Risks and open questions
 
-### §12.1 Риски
-| Риск | Вероятность / влияние | Меры |
+### §12.1 Risks
+| Risk | Probability / impact | Mitigations |
 |---|---|---|
-| Точность и дрожание на масштабе 1:1 | Средняя / высокое | double везде, floating origin, чанки с локальным нулём, тесты адаптера; замер на M1 |
-| Производительность рельефа | Высокая / среднее | Квадродерево с LOD, Jobs/Burst, бюджет кадра 60 к/с (симуляция ≤ 1 мс, рельеф ≤ 2 мс, рендер ≤ 10 мс, UI ≤ 0,5 мс, запас ≈ 3 мс), кэш чанков, регулировка дальности |
-| Сложность для новичков | Высокая / высокое | Обучение, автопилот выведения (§6.11), упрощённые режимы (§8.5), понятный HUD |
-| Реализм против «фана» | Средняя / среднее | Опциональные упрощения (ускоренная Δv и др.), реалистичный режим по умолчанию |
-| Объём контента (миссии, детали, история) | Высокая / высокое | Данные вместо кода, приоритет миссий 1–10, M5/M6 — по остаточному принципу |
-| Глубина z-буфера и тени при дальней плоскости 10⁷ м | Снята / — | Оболочка §2.7 (far 2·10⁸ ломал тени HDRP) |
-| Правка HDRP Config (`PrecomputedAtmosphericAttenuation`) в локальном пакете | Средняя / среднее | Задокументировать изменение, проверка при каждом обновлении Unity/HDRP |
-| Хиральность и порядок вращений (эклиптика → Unity) | Средняя / среднее | Один адаптер, тесты, визуальная проверка ориентации Солнца/севера |
-| Ошибка эфемерид Луны ~1° | Низкая / низкое | Допустимо для SOI 66 200 км; опциональные возмущения (M5) |
-| Права на данные/текстуры | Низкая / среднее | Только public domain (NASA), проверка правил использования, загрузка по согласию |
-| Численная устойчивость на ускорении 1e7× | Низкая / высокое | Аналитические рельсы, события в очереди, тесты на длинных траекториях |
+| Precision and jitter at 1:1 scale | Medium / high | double everywhere, floating origin, chunks with a local zero, adapter tests; measurement at M1 |
+| Terrain performance | High / medium | Quadtree with LOD, Jobs/Burst, a 60 fps frame budget (simulation ≤ 1 ms, terrain ≤ 2 ms, rendering ≤ 10 ms, UI ≤ 0.5 ms, reserve ≈ 3 ms), chunk cache, distance tuning |
+| Difficulty for newcomers | High / high | Tutorial, ascent autopilot (§6.11), simplified modes (§8.5), a clear HUD |
+| Realism versus "fun" | Medium / medium | Optional simplifications (boosted Δv etc.), realistic mode by default |
+| Content volume (missions, parts, history) | High / high | Data instead of code, priority to missions 1–10, M5/M6 — on a leftover basis |
+| Z-buffer depth and shadows with a 10⁷ m far plane | Resolved / — | The §2.7 shell (far 2·10⁸ broke HDRP shadows) |
+| Editing HDRP Config (`PrecomputedAtmosphericAttenuation`) in the local package | Medium / medium | Document the change, check at every Unity/HDRP update |
+| Handedness and rotation order (ecliptic → Unity) | Medium / medium | One adapter, tests, visual check of the Sun/north orientation |
+| Moon ephemeris error ~1° | Low / low | Acceptable for the 66 200 km SOI; optional perturbations (M5) |
+| Rights to data/textures | Low / medium | Public domain only (NASA), check usage rules, download by consent |
+| Numerical stability at 1e7× acceleration | Low / high | Analytic rails, events in a queue, tests on long trajectories |
 
-### §12.2 Открытые вопросы
-1. Соперник: единый «исторический» (кто первый в мире) или две фракции (СССР/США)? Что делать с миссией «Спутник», дата которой совпадает со стартом игры (§6.1, §7.4)?
-2. Анахронизм «Кара-1»: оставить как отладочную ракету и спрятать в эре V или сделать стартовой с «винтажными» параметрами? Состав и параметры «Кара-0/2/3» (§5.2).
-3. Распад орбит выше 140 км (§4.10): простая таблица термосферы, учёт солнечной активности?
-4. Язык программ бортового компьютера (§6.4): DSL, визуальная шкала, подмножество C#/Lua?
-5. Точность Луны: добавлять ли возмущения Шлайтера (M5)? Для окон на Луну (ошибка до 6700 км) — достаточно ли коррекции на карте?
-6. Эфемериды после 2050 г.: переход между таблицами Standish (скачок), остаётся ли игра ограниченной 2100 г.?
-7. Бюджет и «условные кредиты»: привязка к долларам (эпоха V) или самостоятельная шкала с инфляцией?
-8. Двухслойная камера или одна с reversed-Z — решит замер в M1.
-9. Модель плазмы: насколько подробной она должна быть (по v и h, по форме тела)?
-10. Многопользовательских/модовых сценариев нет в планах; пересмотр после M4?
+### §12.2 Open questions
+1. The rival: a single "historical" one (who is first in the world) or two factions (USSR/USA)? What to do with the "Sputnik" mission, whose date coincides with the game start (§6.1, §7.4)?
+2. The "Kara-1" anachronism: keep it as a debug rocket and hide it in era V, or make it the starting one with "vintage" parameters? The composition and parameters of "Kara-0/2/3" (§5.2).
+3. Orbit decay above 140 km (§4.10): a simple thermosphere table, account for solar activity?
+4. The onboard computer program language (§6.4): DSL, visual timeline, a C#/Lua subset?
+5. Moon accuracy: add Schlyter perturbations (M5)? For lunar windows (error up to 6700 km) — is a correction on the map sufficient?
+6. Ephemerides after 2050: the transition between Standish tables (a jump), does the game remain limited to 2100?
+7. Budget and "conventional credits": tie to dollars (era V) or an independent scale with inflation?
+8. A two-layer camera or a single one with reversed-Z — to be decided by measurement in M1.
+9. Plasma model: how detailed should it be (by v and h, by body shape)?
+10. No multiplayer/mod scenarios are planned; revisit after M4?

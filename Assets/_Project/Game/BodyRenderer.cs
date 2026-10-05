@@ -108,6 +108,18 @@ namespace Kare.Space.Game
         /// Пара: шаг патча в центре ≈ 20 м (PatchN, PatchHalf) — порог меньше двух шагов.
         /// </summary>
         const double PatchNearMove = 30, PatchRebuildPeriod = 1;
+        /// <summary>
+        /// Переход патча в карту тела (§2.8, §9.6): поверх патча — декаль с той же картой, что на сфере (Small), альфа
+        /// растёт от PatchBlendStart до PatchBlendEnd доли полуширины — у края патча альбедо ровно как у сферы, шва нет.
+        /// С высоты (PatchBlendAltLow…High над рельефом) карта ложится и на середину, до PatchBlendAltMax: однотонный
+        /// тайл квадратом 160 км с 20 км читался «генерацией» поверх снимка (05.10.2026).
+        /// Пара: PatchHalf (квадрат декали = квадрат патча) и PatchMaxAltitude (выше патча нет, карта = сфера).
+        /// Борт и стол не красятся: в центре у грунта альфа 0, а над рельефом +PatchDecalMargin борт вне коробки декали.
+        /// </summary>
+        const float PatchBlendStart = 0.45f, PatchBlendEnd = 0.95f, PatchBlendAltMax = 0.85f;
+        const double PatchBlendAltLow = 2000, PatchBlendAltHigh = 15000, PatchDecalMargin = 300;
+        /// <summary>Разрешение текстуры декали: 128² на 160 км — 1,25 км на тексель, мельче карты Small (≈ 20 км).</summary>
+        const int PatchDecalRes = 128;
         /// <summary>Запас дырки сферы от края патча, м: грань сферы вырезается, только если вся лежит в квадрате
         /// патча, уменьшенном на это. Пара: PatchHalf — грань Луны 21 км (512 сегм.), под бортом вырезано ≥ 59 км.</summary>
         const double HoleMargin = 1000;
@@ -206,6 +218,7 @@ namespace Kare.Space.Game
             patchMr = p.AddComponent<MeshRenderer>();
             patchMr.shadowCastingMode = ShadowCastingMode.On;
             patchMf.sharedMesh = new Mesh { name = "Patch", indexFormat = IndexFormat.UInt32 };
+            AddPatchDecal(p.transform);
             p.SetActive(false);
             waterMat = BuildWaterMaterial();
         }
@@ -498,6 +511,100 @@ namespace Kare.Space.Game
             patchTr.SetPositionAndRotation(
                 FloatingOrigin.ToUnity(b.Position + b.Orientation * patchCenterLocal),
                 FloatingOrigin.BodyRotation(b));
+            // Доля карты на середине патча — по высоте над рельефом; альфу перекрашиваем ступенями, без пересборки.
+            // После RebuildPatch decalAlt = −1 — альфа ставится здесь же, в том же кадре.
+            float alt = PatchAltBlend(v.TerrainAltitude);
+            if (decalPx != null && patchDecal.gameObject.activeSelf && Mathf.Abs(alt - decalAlt) > 0.04f) ApplyDecalAlpha(alt);
+        }
+
+        // ---------------------------------------------------------------- декаль-переход патча в карту
+
+        DecalProjector patchDecal;
+        Texture2D decalTex;
+        Color32[] decalPx;
+        float decalAlt = -1;
+
+        static float PatchAltBlend(double alt) =>
+            PatchBlendAltMax * Mathf.Clamp01((float)((alt - PatchBlendAltLow) / (PatchBlendAltHigh - PatchBlendAltLow)));
+
+        /// <summary>Декаль только альбедо (нормали, гладкость, металл — от патча): рельеф и свет остаются свои.</summary>
+        void AddPatchDecal(Transform parent)
+        {
+            var shader = Shader.Find("HDRP/Decal");
+            if (shader == null) return;
+            decalTex = new Texture2D(PatchDecalRes, PatchDecalRes, TextureFormat.RGBA32, false, false)
+                { name = "Patch Map Blend", wrapMode = TextureWrapMode.Clamp };
+            var m = new Material(shader) { name = "Patch Map Blend" };
+            m.SetTexture("_BaseColorMap", decalTex);
+            m.SetFloat("_AffectAlbedo", 1);
+            m.SetFloat("_AffectNormal", 0);
+            m.SetFloat("_AffectMetal", 0);
+            m.SetFloat("_AffectAO", 0);
+            m.SetFloat("_AffectSmoothness", 0);
+            m.SetFloat("_AffectEmission", 0);
+            m.SetFloat("_DecalBlend", 1);
+            HDMaterial.ValidateMaterial(m); // ключи и проходы декали в рантайме сами не ставятся
+            var go = new GameObject("Patch Map Blend");
+            go.transform.SetParent(parent, false);
+            patchDecal = go.AddComponent<DecalProjector>();
+            patchDecal.material = m;
+            // Коробка 160 км: дальность — с запасом (глобальный предел HDRP меряется до сферы коробки, камера внутри).
+            patchDecal.drawDistance = 1e7f;
+            patchDecal.fadeScale = 1;
+        }
+
+        /// <summary>Цвет декали — карта тела в каждом текселе (как на сфере), альфа — ApplyDecalAlpha.</summary>
+        void FillPatchDecal(CelestialBody b, Vector3d centerBf, Vector3d e1, Vector3d e2, double hMin, double hMax)
+        {
+            if (patchDecal == null) return;
+            bool map = smallPx.TryGetValue(b.Id, out var sm);
+            patchDecal.gameObject.SetActive(map && byBody[b].Ground);
+            if (!patchDecal.gameObject.activeSelf) return;
+            // Коробка: от верха рельефа патча (+запас) до низа минус прогиб сферы в углу (диагональ² / 2R).
+            double hc = b.SurfaceHeight(centerBf), sag = 2 * PatchHalf * PatchHalf / (2 * b.Radius);
+            double top = hMax - hc + PatchDecalMargin, bottom = hMin - hc - sag - PatchDecalMargin;
+            var up = FloatingOrigin.ToVector3(centerBf.SwapYZ).normalized;
+            var ax = FloatingOrigin.ToVector3(e1.SwapYZ).normalized;
+            var tr = patchDecal.transform;
+            tr.localPosition = up * (float)top;
+            tr.localRotation = Quaternion.LookRotation(-up, ax);
+            float depth = (float)(top - bottom);
+            patchDecal.size = new Vector3((float)(2 * PatchHalf), (float)(2 * PatchHalf), depth);
+            patchDecal.pivot = new Vector3(0, 0, depth * 0.5f);
+            // Тексель (u, v) → точка касательной плоскости по осям декали (u — её +X, v — +Y) → направление в осях тела.
+            var rx = tr.localRotation * Vector3.right;
+            var ry = tr.localRotation * Vector3.up;
+            var dx = new Vector3d(rx.x, rx.z, rx.y); // обратно из Unity в P (SwapYZ)
+            var dy = new Vector3d(ry.x, ry.z, ry.y);
+            if (decalPx == null) decalPx = new Color32[PatchDecalRes * PatchDecalRes];
+            var px = decalPx;
+            System.Threading.Tasks.Parallel.For(0, PatchDecalRes, j =>
+            {
+                double y = ((j + 0.5) / PatchDecalRes - 0.5) * 2 * PatchHalf;
+                for (int i = 0; i < PatchDecalRes; i++)
+                {
+                    double x = ((i + 0.5) / PatchDecalRes - 0.5) * 2 * PatchHalf;
+                    var d = (centerBf * b.Radius + dx * x + dy * y).normalized;
+                    CelestialBody.BodyFixedToLatLon(d, out double lat, out double lon);
+                    px[j * PatchDecalRes + i] = SampleMap(sm.Px, sm.W, sm.H, lat, lon);
+                }
+            });
+            decalAlt = -1;
+        }
+
+        /// <summary>Альфа: край патча → 1 (PatchBlendStart…End), середина — доля карты по высоте.</summary>
+        void ApplyDecalAlpha(float alt)
+        {
+            decalAlt = alt;
+            for (int j = 0; j < PatchDecalRes; j++)
+            for (int i = 0; i < PatchDecalRes; i++)
+            {
+                float sx = Mathf.Abs((i + 0.5f) / PatchDecalRes * 2 - 1), sy = Mathf.Abs((j + 0.5f) / PatchDecalRes * 2 - 1);
+                float edge = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(PatchBlendStart, PatchBlendEnd, Mathf.Max(sx, sy)));
+                decalPx[j * PatchDecalRes + i].a = (byte)Mathf.RoundToInt(255 * Mathf.Max(edge, alt));
+            }
+            decalTex.SetPixels32(decalPx);
+            decalTex.Apply(false, false);
         }
 
         void RebuildPatch(CelestialBody b, Vector3d centerBf)
@@ -608,6 +715,9 @@ namespace Kare.Space.Game
             patchMf.sharedMesh = mesh;
             if (oldMesh != null) Destroy(oldMesh);
             patchMr.sharedMaterials = ocean ? new[] { e.PatchMat, waterMat } : new[] { e.PatchMat };
+            double hMin = ocean ? 0 : double.MaxValue, hMax = double.MinValue;
+            foreach (var h in hs) { hMin = System.Math.Min(hMin, h); hMax = System.Math.Max(hMax, h); }
+            FillPatchDecal(b, centerBf, e1, e2, hMin, hMax);
             patchTr.gameObject.SetActive(true);
             patchE1 = e1;
             patchE2 = e2;

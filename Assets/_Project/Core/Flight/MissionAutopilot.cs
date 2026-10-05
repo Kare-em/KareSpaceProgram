@@ -79,7 +79,7 @@ namespace Kare.Space.Core
         /// <summary>Прожиги короче этого — на ×1 (точность отсечки и смотреть есть на что). Пара: Universe.AutoBurnWarpMin.</summary>
         const double ShortBurn = 15;
 
-        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station, Winged }
+        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station, Winged, Starship }
 
         public readonly MissionTracker Tracker;
         public readonly ProfileType Profile;
@@ -115,6 +115,7 @@ namespace Kare.Space.Core
         /// <summary>Какой сценарий у миссии — по её целям. Общий с подсказкой (MissionGuide).</summary>
         public static ProfileType Classify(MissionDef def)
         {
+            if (MissionCatalog.IsStarship(def)) return ProfileType.Starship; // MissionAutopilot.Starship.cs
             if (def.StationSection >= 0) return ProfileType.Station; // сближение со станцией — MissionAutopilot.Station.cs
             if (def.Objectives.Exists(o => o.Type == ObjectiveType.Runway)) return ProfileType.Winged; // посадка на полосу — MissionAutopilot.Winged.cs
             bool moonOrbit = false, moonGoal = false, earthOrbit = false;
@@ -143,6 +144,8 @@ namespace Kare.Space.Core
             }
             try
             {
+                // СБ раскрываются сами после отделения от носителя (Vessel.DeployPanels: вне обтекателя и атмосферы).
+                v.DeployPanels(true);
                 if (script.MoveNext()) return false;
             }
             catch (Abort e)
@@ -188,6 +191,7 @@ namespace Kare.Space.Core
                 case ProfileType.LunarProbe: s = LunarProbe(); break;
                 case ProfileType.Station: s = Station(); break;
                 case ProfileType.Winged: s = Winged(); break;
+                case ProfileType.Starship: s = Starship(); break;
                 default: s = Apollo(); break;
             }
             foreach (var x in s) yield return x;

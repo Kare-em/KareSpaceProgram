@@ -26,7 +26,7 @@ namespace Kare.Space.Game
     /// одно и заменяется следующим щелчком, закреплённые остаются (несколько сразу) и обновляются вживую.
     /// Сам себя добавляет в сцены полёта и конструктора — сборщики сцен не трогаем.
     /// </summary>
-    public sealed class PartInspector : MonoBehaviour
+    public sealed partial class PartInspector : MonoBehaviour
     {
         public static PartInspector Instance { get; private set; }
 
@@ -187,6 +187,8 @@ namespace Kare.Space.Game
                 };
                 info.ChuteSet = a => Where()?.SetChuteAltitude(idx, a);
             }
+            // Рули и тормозной парашют крылатых (§4.6) — PartInspector.Controls.
+            if (HasControls(s)) info.Custom = rect => ControlsGui(rect, Where());
             return info;
         }
 

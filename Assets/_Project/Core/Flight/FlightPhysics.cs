@@ -101,11 +101,17 @@ namespace Kare.Space.Core
 
         /// <summary>Превышен ли предел поперечной нагрузки — и для разрушения, и для предупреждения HUD.
         /// Шар капсулы (длина ≤ 4 радиусов) ей не подвержен; ниже 2 кПа не ломается ничего.</summary>
+        /// <summary>С какого угла атаки ступень на решётчатых рулях считается летящей хвостом вперёд, град.</summary>
+        public const double GridFinStableAlpha = 170;
+
         public static bool QAlphaExceeded(double q, double sinA, double length, double radius) =>
             length > 4 * radius && q > 2000 && q * sinA > QAlphaLimit;
 
         static readonly double[] CdMach = { 0, 0.6, 0.85, 1.05, 1.2, 2, 4, 10 };
         static readonly double[] CdValue = { 0.30, 0.30, 0.45, 0.80, 0.70, 0.50, 0.35, 0.30 };
+
+        /// <summary>Cd корпуса по Маху (та же таблица, что в Drag) — для прогнозов автопилотов (BoosterLandingAutopilot).</summary>
+        public static double CdAt(double mach) => MathD.Interp(CdMach, CdValue, mach);
 
         /// <summary>Вектор угловой скорости вращения тела в P, рад/с.</summary>
         public static Vector3d SpinAxis(CelestialBody body, double t) =>
@@ -128,13 +134,16 @@ namespace Kare.Space.Core
                 double target = v.DeployOn[i] ? 1 : 0, was = v.Deployed[i];
                 if (k == DeployKind.None || was == target) continue;
                 double step = dt / (k == DeployKind.Ramps ? RampDeployTime : k == DeployKind.Lid ? LidDeployTime
-                    : k == DeployKind.Gear ? GearDeployTime : LegDeployTime);
+                    : k == DeployKind.Gear ? GearDeployTime : k == DeployKind.Nose ? NoseDeployTime
+                    : k == DeployKind.Panels ? PanelDeployTime : LegDeployTime);
                 v.Deployed[i] = target > was ? Math.Min(1, was + step) : Math.Max(0, was - step);
                 if (!v.Attached[i]) continue;
                 if (v.Deployed[i] == 1)
                     v.Raise(k == DeployKind.Ramps ? "Трапы на грунте" : k == DeployKind.Lid ? "Крышка открыта"
-                        : k == DeployKind.Gear ? "Шасси выпущено" : "Опоры выпущены");
+                        : k == DeployKind.Gear ? "Шасси выпущено" : k == DeployKind.Nose ? "Стыковочный узел открыт"
+                        : k == DeployKind.Panels ? "Солнечные батареи раскрыты" : "Опоры выпущены");
                 else if (v.Deployed[i] == 0 && k == DeployKind.Lid) v.Raise("Крышка закрыта");
+                else if (v.Deployed[i] == 0 && k == DeployKind.Nose) v.Raise("Носовой обтекатель закрыт");
             }
         }
 
@@ -214,6 +223,9 @@ namespace Kare.Space.Core
         public const double LegDeployTime = 2, RampDeployTime = 4, LidDeployTime = 6, StowedCrashSpeed = 2;
         /// <summary>Выпуск шасси орбитера, с (у «Шаттла» ≈10 с пневмоприводом; автопилот выпускает за 100+ м до касания).</summary>
         public const double GearDeployTime = 4;
+        /// <summary>Носовой обтекатель Crew Dragon (электропривод, ≈ 10 с у настоящего — у нас 6, чтобы стыковка не ждала)
+        /// и раскрытие солнечных батарей на пружинах-демпферах. Пара: углы на шарнирах — VesselView.FoldHinge.</summary>
+        public const double NoseDeployTime = 6, PanelDeployTime = 5;
 
         /// <summary>
         /// Высота рельса над грунтом под точкой d (единичный радиус в осях тела), м; 0 — рельса над грунтом нет.
@@ -362,6 +374,7 @@ namespace Kare.Space.Core
         {
             var body = v.Body;
             v.AeroControlTorque = Vector3d.zero;
+            v.ControlDeflection = Vector3d.zero;
             bool rolling = v.RollSpeed > 0 && v.Situation == Situation.Landed;
             if (rolling) StepRollout(v, t, dt);
             else if (v.IsRover && v.Situation == Situation.Landed) DriveRover(v, dt);
@@ -481,10 +494,22 @@ namespace Kare.Space.Core
                 ? Aerodynamics.ControlAuthority(g.Panels, flowLocal, com, v.Density, v.Mach) : Vector3d.zero;
             var tmax = v.MaxTorque(v.StaticPressure);
             var cmd = v.TorqueCommand;
+            // Триммер (§4.6): есть балансировочный щиток — свой момент сверх рулей; нет — смещение команды элевонов в их ходе.
+            double trim = MathD.Clamp(v.PitchTrim, -1, 1), trimFlap = 0;
+            if (trim != 0 && g.Panels != null && v.DynamicPressure > 0)
+            {
+                if (Aerodynamics.HasTrimFlap(g.Panels))
+                    trimFlap = trim * Aerodynamics.TrimAuthority(g.Panels, flowLocal, com, v.Density, v.Mach);
+                else cmd.z += trim * v.AeroControlTorque.z;
+            }
             var torque = new Vector3d(
                 MathD.Clamp(cmd.x, -tmax.x, tmax.x),
                 MathD.Clamp(cmd.y, -tmax.y, tmax.y),
                 MathD.Clamp(cmd.z, -tmax.z, tmax.z));
+            // Фактическая доля хода рулей — то, что физика приложила, к пределу (вид отклоняет по ней поверхности).
+            v.ControlDeflection = new Vector3d(
+                tmax.x > 0 ? torque.x / tmax.x : 0, tmax.y > 0 ? torque.y / tmax.y : 0, tmax.z > 0 ? torque.z / tmax.z : 0);
+            torque.z += trimFlap;
             if (!g.Glider) torque += CapsuleAeroTorque(v, vAir0, g, inertia) + StackAeroTorque(v, vAir0, g);
             var w = v.AngularVelocity;
             // Крылья: каждая плоскость в своём потоке v + ω×r — момент и демпфирование вместе.
@@ -682,13 +707,14 @@ namespace Kare.Space.Core
                 g.SideArea += Math.Min(s.RadialCount, 2) * s.Length * 2 * s.Radius * 0.8;
             }
             g.SideFactor = 1;
+            g.BrakeCdA = v.GridFinCdA();
             Aerodynamics.CollectPanels(v, panelBuf);
             if (panelBuf.Count == 0) return;
             g.Panels = panelBuf;
             g.Glider = Aerodynamics.WingArea(panelBuf) >= GliderWingShare * g.SideArea;
             if (g.Glider) g.SideFactor = GliderSideFactor;
             // Щиток-тормоз: Cd 1 на раскрытую площадь, по команде Vessel.AirBrake.
-            g.BrakeCdA = Aerodynamics.BrakeArea(panelBuf) * MathD.Clamp(v.AirBrake, 0, 1);
+            g.BrakeCdA += Aerodynamics.BrakeArea(panelBuf) * MathD.Clamp(v.AirBrake, 0, 1);
         }
 
         static void CheckStructure(Vessel v, Geometry g, double sinA, SectionDef lead, double dt)
@@ -697,7 +723,11 @@ namespace Kare.Space.Core
             if (q <= 0) return;
 
             // Поперечная нагрузка ломает только длинный пакет; шар капсулы ей не подвержен.
-            if (AeroBreakup && !g.Glider && QAlphaExceeded(q, sinA, g.Length, g.Hull))
+            // Возвращаемая ступень хвостом вперёд (α > 170°) на раскрытых решётчатых рулях устойчива как флюгер: на спуске
+            // напор доходит до 200+ кПа, где лимит q·α ломал бы уже за 1° рассогласования (BoosterLandingAutopilot).
+            bool finStable = v.AngleOfAttack > GridFinStableAlpha && g.BrakeCdA > 0 && v.GridFinCdA() > 0;
+            // Starship «брюхом» (§6.9): поперёк потока его держат закрылки — это штатный режим, а не потеря устойчивости.
+            if (AeroBreakup && !g.Glider && !finStable && !BoosterLandingAutopilot.BellyEntry(v) && QAlphaExceeded(q, sinA, g.Length, g.Hull))
             {
                 v.Destroy($"Разрушение от аэродинамической нагрузки: q = {q / 1000:F1} кПа, α = {v.AngleOfAttack:F0}°");
                 return;
@@ -753,6 +783,13 @@ namespace Kare.Space.Core
         /// нос опускается на переднюю стойку за NoseDownTime; руление A/D — RolloutTurnRate при полном отклонении.
         /// </summary>
         public const double RolloutBrake = 2.5, NoseDownTime = 3, RolloutTurnRate = 3 * Constants.Deg2Rad;
+        /// <summary>
+        /// Тормозной парашют пробега (§4.6): ленточный купол Cd ≈ 0,55 на площадь, наполнение DragChuteFillTime с;
+        /// сброс ниже DragChuteJettisonSpeed (у «Шаттла» 60 уз ≈ 31 м/с — дальше купол ложится на полосу и рвёт сопла),
+        /// выше DragChuteMaxSpeed купол рвёт (выпуск «Шаттла» — до 230 уз ≈ 118 м/с). Пара: JettisonSpeed &lt; GearMaxSpeed.
+        /// С куполом 117 м² от 100 м/с — ≈ 2 м/с² сверх колёс на первых секундах.
+        /// </summary>
+        public const double DragChuteCd = 0.55, DragChuteFillTime = 2.5, DragChuteJettisonSpeed = 30, DragChuteMaxSpeed = 120;
 
         static bool TouchdownOnGear(Vessel v, CelestialBody body, QuaternionD o, Vector3d up, Vector3d vSurf, double height, double t)
         {
@@ -811,6 +848,16 @@ namespace Kare.Space.Core
             // Сопротивление щитка на пробеге (Cd 1 на раскрытую площадь), как в полёте.
             Aerodynamics.CollectPanels(v, panelBuf);
             double drag = 0.5 * v.Density * v.RollSpeed * v.RollSpeed * Aerodynamics.BrakeArea(panelBuf) * MathD.Clamp(v.AirBrake, 0, 1);
+            if (v.DragChute == DragChuteState.Open)
+            {
+                v.DragChuteTime += dt;
+                double fill = Math.Min(1, v.DragChuteTime / DragChuteFillTime);
+                drag += 0.5 * v.Density * v.RollSpeed * v.RollSpeed * DragChuteCd * v.DragChuteArea() * fill * fill;
+                if (v.RollSpeed < DragChuteJettisonSpeed) v.JettisonDragChute();
+            }
+            // На пробеге руль направления ходит вместе с передней стойкой — для вида (ControlSurface).
+            // Руль направления за педалями: D (PilotInput.y > 0) — вокруг −X, как в FlightControl.
+            v.ControlDeflection = new Vector3d(-MathD.Clamp(v.PilotInput.y, -1, 1), 0, 0);
             double acc = (thrust * Vector3d.Dot(noseB, f) - drag) / Math.Max(1, mass) - RolloutBrake;
             v.RollSpeed = Math.Max(0, v.RollSpeed + acc * dt);
             double ds = v.RollSpeed * dt;
@@ -850,6 +897,12 @@ namespace Kare.Space.Core
             if (onGear) offset = g.Radius + v.GearHeight;
             bool water = body.Terrain != null && body.Terrain.Ocean && h <= 0 &&
                          Terrain.RawHeight(body.Terrain, bf.normalized) < 0;
+            // Баржа (§6.9): над палубой — твёрдый настил, а не вода.
+            if (water && BoosterLandingAutopilot.DeckUnder(v, body, bf, out double deck))
+            {
+                water = false;
+                h = deck;
+            }
             if (water) offset -= Draft(g);
             v.TerrainAltitude = rm - body.Radius - h - offset;
             if (v.TerrainAltitude > 0) return;
@@ -867,7 +920,8 @@ namespace Kare.Space.Core
                 v.Destroy($"Удар о поверхность: {body.Name}, {speed:F0} м/с");
                 return;
             }
-            if (!water && speed > StowedCrashSpeed && !v.LegsDown)
+            // Super Heavy без опор: у башни касание держат её «палочки» (RecoveryDef.TowerCatch).
+            if (!water && speed > StowedCrashSpeed && !v.LegsDown && !BoosterLandingAutopilot.CaughtByTower(v, body, bf))
             {
                 v.Destroy($"Посадка на сложенные опоры: {body.Name}, {speed:F1} м/с");
                 return;

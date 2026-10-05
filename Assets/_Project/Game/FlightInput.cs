@@ -85,12 +85,33 @@ namespace Kare.Space.Game
                 if (tr.sqrMagnitude > 0) DropAutopilots(u);
                 if (u.Docking == null) v.RcsTranslate = tr; // автопилот V сам правит РСУ — не перебивать нулём
             }
+            else if (Alt)
+            {
+                // Alt+W/S — триммер тангажа (§4.6, как в KSP): балансировочный щиток или смещение элевонов; W/S не тангаж.
+                // Знак как у W/S (FlightControl: W — нос к брюху = −Z); PitchTrim > 0 — нос вверх, поэтому S — плюс.
+                double trim = v.PitchTrim + Axis(KeyCode.S, KeyCode.W) * TrimRate * Time.deltaTime;
+                v.PitchTrim = System.Math.Max(-1, System.Math.Min(1, trim));
+                pilot = new Vector3d(0, Axis(KeyCode.D, KeyCode.A), Axis(KeyCode.E, KeyCode.Q));
+            }
             else
                 pilot = new Vector3d(
                     Axis(KeyCode.W, KeyCode.S),
                     Axis(KeyCode.D, KeyCode.A),
                     Axis(KeyCode.E, KeyCode.Q));
             v.PilotInput = pilot;
+            // Рули крылатых (§4.6): 1 — воздушный тормоз (расщеп руля), 2 — тормозной парашют на пробеге, 3 — триммер в ноль.
+            if (Input.GetKeyDown(KeyCode.Alpha1))
+            {
+                v.AirBrake = v.AirBrake > 0.5 ? 0 : 1;
+                u.Post(v.AirBrake > 0 ? "Воздушный тормоз выпущен" : "Воздушный тормоз убран");
+            }
+            if (Input.GetKeyDown(KeyCode.Alpha2) && v.DragChuteArea() > 0)
+            {
+                if (v.DragChute == DragChuteState.Open) v.JettisonDragChute();
+                else if (v.DragChute == DragChuteState.Stowed) v.DeployDragChute();
+                else u.Post("Тормозной парашют уже сброшен");
+            }
+            if (Input.GetKeyDown(KeyCode.Alpha3)) { v.PitchTrim = 0; u.Post("Триммер — 0"); }
             if (pilot.sqrMagnitude > 0) DropAutopilots(u);
 
             double thr = v.Throttle;
@@ -236,6 +257,7 @@ namespace Kare.Space.Game
         {
             KeyCode.W, KeyCode.S, KeyCode.A, KeyCode.D, KeyCode.Q, KeyCode.E, KeyCode.Z, KeyCode.X, KeyCode.LeftShift,
             KeyCode.LeftControl, KeyCode.Space, KeyCode.T, KeyCode.F, KeyCode.G, KeyCode.H, KeyCode.R, KeyCode.V, KeyCode.P, KeyCode.B, KeyCode.N, KeyCode.Tab,
+            KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3,
         };
 
         /// <summary>
@@ -263,6 +285,9 @@ namespace Kare.Space.Game
         /// <summary>Ручной режим стыковки (Tab): клавиши — поступательная РСУ, HUD — прибор сближения.</summary>
         public static bool DockMode { get; private set; }
 
+        /// <summary>Скорость триммера, доля хода в секунду: весь ход за 2 с — тонко подстроить успеваешь, держать долго не надо.</summary>
+        const double TrimRate = 0.5;
+        static bool Alt => Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
         static bool Shift => Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         static bool Ctrl => Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
@@ -278,6 +303,7 @@ namespace Kare.Space.Game
             if (v.Target == null || !v.Target.Alive) v.Target = u.NearestDockTarget();
             if (v.Target == null) { u.Post("Нет борта для стыковки"); return; }
             DockMode = true;
+            v.SetNose(true); // узел Crew Dragon под обтекателем — откинуть, иначе причаливание не захватит (§6.6)
             u.Post($"Режим стыковки: цель {v.Target.Name}. WASD — сдвиг, Shift/Ctrl — вперёд/назад, стрелки — поворот"
                 + (v.RcsThrust > 0 ? "" : ". Нет РСУ — сдвиг не работает"));
         }

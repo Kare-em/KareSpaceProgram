@@ -62,7 +62,9 @@ namespace Kare.Space.EditorTools
             var vol = volGo.AddComponent<Volume>();
             vol.isGlobal = true;
             vol.sharedProfile = profile;
-            volGo.AddComponent<SkyController>().Volume = vol;
+            var skyCtl = volGo.AddComponent<SkyController>();
+            skyCtl.Volume = vol;
+            skyCtl.FogRestoreShader = AssetDatabase.LoadAssetAtPath<Shader>(SettingsDir + "/SpaceFogRestoreHDRP.shader");
 
             var sunGo = new GameObject("Sun");
             var sun = sunGo.AddComponent<Light>();
@@ -270,8 +272,9 @@ namespace Kare.Space.EditorTools
             exp.mode.Override(ExposureMode.AutomaticHistogram);
             exp.limitMin.Override(SkyController.EvMin);
             exp.limitMax.Override(SkyController.EvMax);
-            exp.adaptationSpeedDarkToLight.Override(0.5f);
-            exp.adaptationSpeedLightToDark.Override(1.5f);
+            // Скорость адаптации — те же константы, что SkyController ставит в рантайме (§9.3).
+            exp.adaptationSpeedDarkToLight.Override(SkyController.AdaptDarkToLight);
+            exp.adaptationSpeedLightToDark.Override(SkyController.AdaptLightToDark);
 
             Get<Tonemapping>(profile).mode.Override(TonemappingMode.ACES);
             Get<Bloom>(profile).intensity.Override(0.2f);
@@ -361,6 +364,8 @@ namespace Kare.Space.EditorTools
             (SectionModel.SoyuzShroud, "Soyuz_Shroud_Half"), (SectionModel.ISS2000, "ISS_2000"), (SectionModel.ISS2020, "ISS_2020"),
             (SectionModel.Falcon9S1, "Falcon9_S1"), (SectionModel.Falcon9S2, "Falcon9_S2"),
             (SectionModel.DragonTrunk, "Dragon_Trunk"), (SectionModel.CrewDragon, "Crew_Dragon"),
+            // Tools/blender/spacex_parts.py
+            (SectionModel.SuperHeavy, "Super_Heavy"), (SectionModel.Starship, "Starship"),
             // Tools/blender/winged_parts.py
             (SectionModel.ShuttleOrbiter, "Shuttle_Orbiter"), (SectionModel.ShuttleET, "Shuttle_ET"),
             (SectionModel.ShuttleSRB, "Shuttle_SRB"), (SectionModel.Buran, "Buran"),
@@ -372,6 +377,8 @@ namespace Kare.Space.EditorTools
         {
             (SectionModel.Surveyor, "Surveyor_Legs"), (SectionModel.LMDescent, "LM_Legs"), (SectionModel.Luna17KT, "Luna17_Ramps"),
             (SectionModel.Lunokhod, "Lunokhod_Lid"),
+            // Tools/blender/split_station.py: откидной носок Crew Dragon (DeployKind.Nose), створки СБ ПАО (Panels)
+            (SectionModel.CrewDragon, "Crew_Dragon_Nose"), (SectionModel.SoyuzPAO, "Soyuz_PAO_Panels"),
         };
 
         /// <summary>Колёса — отдельный FBX, по объекту на колесо (Tools/blender/lunokhod_wheels.py), вид крутит их по пути.</summary>

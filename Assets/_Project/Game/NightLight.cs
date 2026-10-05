@@ -27,6 +27,8 @@ namespace Kare.Space.Game
         /// Земля неразличимы). 0,04 лк — вдвое слабее свечения неба у земли и в 5 раз слабее полной Луны: ночь остаётся
         /// ночью, но контур борта и материки читаются. Пара: SkyController.EvMin (−7) — при нём это ≈ 0,1 белого.</summary>
         const float SpaceGlowLux = 0.04f;
+        /// <summary>Альбедо грунта, под которое считается подсветка ландшафта ночью. Пара: BrightnessSettings.Night.</summary>
+        const float LandscapeAlbedo = 0.2f;
         /// <summary>Заполняющий свет карты, лк (§9.6). Без него ночная сторона ровно чёрная, и орбита уходила в чёрный диск.
         /// Замер при EV 13: 2500 лк — средний кадр 1,0 из 255 (диск едва виден), 8000 — тёмно-серая ночь. Карта теперь на
         /// EV 15 (кадр вчетверо темнее) — свет ×4, ≈ 25 % Солнца: ночь та же тёмно-серая. Пара: SkyController.MapEv.</summary>
@@ -110,7 +112,14 @@ namespace Kare.Space.Game
             float air = v.Body.HasAtmosphere && !MapView.IsOpen ? 1 - SkyController.AirWeight(v) : 0;
             // Вне воздуха — минимум SpaceGlowLux в тени (Солнце закрыто телом), иначе орбитальная ночь чёрная.
             float space = MapView.IsOpen ? 0 : SpaceGlowLux * (1 - air) * (1 - Mathf.Clamp01((float)SunLight.Visible));
-            Set(skyglow, SkyglowLux * air + space);
+            // Подсветка ландшафта (ползунок «Ночь»): при факеле или прожекторах экспозиция поднимается на 10+ ступеней,
+            // и физичный свет неба (0,02 лк) уходит в чёрное — кадр «пламя в пустоте». Держим грунт с альбедо
+            // LandscapeAlbedo на доле Night от белого при текущей экспозиции: E = W·1,2·2^EV·π/ρ. Без факела EV у пола
+            // EvMin, и при W 0,07 это те же 0,02 лк — обычная ночь не меняется. Петли нет: EV берётся от пределов, а не
+            // от гистограммы.
+            float night = 1 - Mathf.Clamp01((float)SunLight.Visible);
+            float fill = BrightnessSettings.Night * 1.2f * Mathf.Pow(2, SkyController.LandscapeEv) * Mathf.PI / LandscapeAlbedo;
+            Set(skyglow, Mathf.Max(SkyglowLux, fill * night) * air + space);
 
             // Карта: свет из камеры чуть сверху-сбоку, чтобы шар не был плоским диском.
             var cam = Camera.main;

@@ -160,10 +160,10 @@ namespace Kare.Space.Core
             for (int i = 0; i < secs.Count; i++)
             {
                 var s = secs[i];
-                if (!v.Attached[i] || !s.HasEngine || !v.Armed[i] || v.Propellant[i] <= 0) continue;
+                if (!v.Attached[i] || !s.HasEngine || !v.Armed[i] || v.UsablePropellant(i) <= 0) continue;
                 if (!v.Running[i] && !v.CanIgnite(i)) continue;
-                t += s.Engine.ThrustVac * s.EngineCount;
-                massFlow += s.Engine.MassFlow * s.EngineCount;
+                t += s.Engine.ThrustVac * v.EnginesLit(i);
+                massFlow += s.Engine.MassFlow * v.EnginesLit(i);
             }
             return t;
         }
@@ -420,7 +420,7 @@ namespace Kare.Space.Core
                 // Отсечка по выработке: сбросить пустую ступень, следующую запустить.
                 else if (burning && !v.AnyEngineRunning && v.HasNextStage &&
                     (next.Type == StageActionType.Ignite ||
-                     next.Type == StageActionType.Separate && v.Propellant[next.Section] <= 0))
+                     next.Type == StageActionType.Separate && v.UsablePropellant(next.Section) <= 0))
                     return RequestStage();
             }
 

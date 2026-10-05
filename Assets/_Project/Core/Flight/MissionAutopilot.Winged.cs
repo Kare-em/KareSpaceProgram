@@ -341,6 +341,8 @@ namespace Kare.Space.Core
                     Text = $"Вход: {h / 1000:F0} км, {V:F0} м/с, до полосы {range / 1000:F0} км, крен {bank * Constants.Rad2Deg:F0}°, " +
                            $"D {dragAcc:F1}/{dRef:F1} м/с², L/D {ld:F2}, {v.GForce:F1} g";
                     v.AirBrake = 0;
+                    v.PitchTrim = 0;   // ручной триммер сбивал бы балансировку α-профиля входа — автопилот ведёт сам
+
                 }
                 else
                 {
@@ -464,6 +466,9 @@ namespace Kare.Space.Core
             AutopilotRequest Rollout(Vessel v, QuaternionD o)
             {
                 v.AirBrake = 1;
+                // Тормозной парашют — сразу после касания основных стоек (§4.6; у «Шаттла» с STS-49 — до опускания носа),
+                // сбрасывает его само ядро на FlightPhysics.DragChuteJettisonSpeed.
+                if (v.DragChute == DragChuteState.Stowed && v.DragChuteArea() > 0) v.DeployDragChute();
                 rw.Locate(v.Body, v.AnchorBodyFixed, out double along, out double cross);
                 double fx = Vector3d.Dot(v.RollDir, axisBf), fy = Vector3d.Dot(v.RollDir, rightBf);
                 double want = -Math.Atan(cross / RollLead);
@@ -471,7 +476,8 @@ namespace Kare.Space.Core
                 v.PilotInput = new Vector3d(0, MathD.Clamp(RollSteerGain * err, -1, 1), 0);
                 ap.Phase = "Пробег";
                 Text = $"Пробег: {v.RollSpeed:F0} м/с, от порога {along + rw.HalfLength:F0} м, от оси {cross:F0} м" +
-                       (double.IsNaN(v.TouchdownSink) ? "" : $"; касание {v.TouchdownSpeed:F0} м/с, снижение {v.TouchdownSink:F1} м/с");
+                       (double.IsNaN(v.TouchdownSink) ? "" : $"; касание {v.TouchdownSpeed:F0} м/с, снижение {v.TouchdownSink:F1} м/с") +
+                       (v.DragChute == DragChuteState.Open ? "; тормозной парашют" : "");
                 return AutopilotRequest.None;
             }
         }

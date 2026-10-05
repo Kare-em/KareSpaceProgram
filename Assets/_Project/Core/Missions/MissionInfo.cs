@@ -232,6 +232,16 @@ namespace Kare.Space.Core
                        "Других полётов не было: в 1993 году программу закрыли. В игре: выведение, два витка, " +
                        "сход с орбиты и посадка на ВПП.",
             },
+            ["ift5"] = new MissionInfo
+            {
+                Agency = "США · SpaceX", Craft = "Starship S30 / Super Heavy B12",
+                Short = "Пятый испытательный полёт Starship: ловля ускорителя башней",
+                Long = "13 октября 2024 года с Starbase в Техасе стартовала самая мощная ракета в истории — 33 Raptor, " +
+                       "≈ 75 МН тяги. После горячего разделения Super Heavy развернулся, вернулся к старту и впервые был " +
+                       "пойман «палочками» башни Mechazilla. Корабль прошёл по трансатмосферной траектории половину " +
+                       "Земли, вошёл в атмосферу брюхом, перевернулся у воды и мягко приводнился в Индийском океане. " +
+                       "В игре: выведение, возврат ускорителя к башне, вход «брюхом», переворот и приводнение.",
+            },
         };
     }
 
@@ -253,7 +263,7 @@ namespace Kare.Space.Core
 
         public static MissionProfile Of(MissionDef d)
         {
-            var p = new MissionProfile { Splashdown = d.SiteId == "canaveral", StationName = d.StationName };
+            var p = new MissionProfile { Splashdown = d.SiteId == "canaveral" || d.SiteId == "starbase", StationName = d.StationName };
             bool landed = false;
             foreach (var o in d.Objectives)
             {

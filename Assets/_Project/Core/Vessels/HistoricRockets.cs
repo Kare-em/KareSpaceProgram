@@ -424,6 +424,8 @@ namespace Kare.Space.Core
                 Name = "Рейнджер-7", Kind = SectionKind.Stage, DryMass = 366, Propellant = 10,
                 Engine = new EngineDef { Name = "Корректирующая ДУ", ThrustVac = 224, ThrustSL = 150, IspVac = 230, Ignitions = 2 },
                 EngineCount = 1, Length = 3.1, Diameter = 1.5, RcsTorque = 30, MaxHeatFlux = 2e5, Model = SectionModel.Ranger,
+                // Две панели СБ сложены вдоль корпуса под обтекателем, раскрываются после отделения от «Аджены» (§6.12).
+                Deploy = DeployKind.Panels,
             });
             int fairing = d.Sections.Count;
             d.Sections.Add(Fairing(1, 4.8, 1.65, 300));
@@ -516,7 +518,7 @@ namespace Kare.Space.Core
         static SectionDef ApolloCM() => new SectionDef
         {
             Name = "Командный модуль", Kind = SectionKind.Capsule, DryMass = 5560, Length = 3.2, Diameter = 3.9,
-            RcsTorque = 2e3, ParachuteArea = 1520, DragScale = 1.3, MaxHeatFlux = 8e6, Crew = 3, Model = SectionModel.ApolloCM,
+            RcsTorque = 2e3, ParachuteArea = 1520, ChuteCount = 3, DragScale = 1.3, MaxHeatFlux = 8e6, Crew = 3, Model = SectionModel.ApolloCM,
             DockingPort = true,
         };
 

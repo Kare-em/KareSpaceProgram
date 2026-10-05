@@ -11,6 +11,9 @@ namespace Kare.Space.Core
         Destroyed,
     }
 
+    /// <summary>Тормозной парашют пробега (Vessel.DragChute).</summary>
+    public enum DragChuteState { Stowed, Open, Jettisoned }
+
     public enum SasMode
     {
         Off,
@@ -139,6 +142,19 @@ namespace Kare.Space.Core
         public Vector3d AeroControlTorque;
         /// <summary>Щиток-тормоз 0…1 (руль направления «Шаттла» раскрывается веером): ставит автопилот посадки или пилот.</summary>
         public double AirBrake;
+        /// <summary>Триммер тангажа −1…1 (§4.6): ход балансировочного щитка, без щитка — смещение команды элевонов.
+        /// Плюс — нос вверх. Ставит пилот (Alt+W/S, окно детали); SAS его перебарывает, как в KSP.</summary>
+        public double PitchTrim;
+        /// <summary>Доля хода рулей 0…1 (окно детали): режет и предельный угол, и момент (Aerodynamics.CollectPanels).</summary>
+        public double ControlLimit = 1;
+        /// <summary>
+        /// Фактическая команда рулей на шаге, доля хода −1…1 по осям MaxTorque (x — рыскание, y — крен, z — тангаж):
+        /// приложенный момент регулятора к его пределу. Пишет FlightPhysics; вид отклоняет по ней поверхности (ControlSurface).
+        /// </summary>
+        public Vector3d ControlDeflection;
+        /// <summary>Тормозной парашют пробега (§4.6): уложен, раскрыт (DragChuteTime — с момента ввода), сброшен.</summary>
+        public DragChuteState DragChute;
+        public double DragChuteTime;
         /// <summary>Пробег по полосе на шасси, м/с вдоль курса (FlightPhysics.StepRollout); 0 — стоит или не на шасси.</summary>
         public double RollSpeed;
         /// <summary>Курс пробега в осях тела (единичный, касательный к грунту).</summary>
@@ -373,13 +389,20 @@ namespace Kare.Space.Core
                 var s = secs[i];
                 pitch += s.RcsTorque;
                 roll += s.RcsTorque;
+                if (s.Recovery != null && s.Recovery.GridFinArea > 0 && !Stacked(i))
+                {
+                    // Решётчатые рули (§6.9) раскрыты после отделения: момент на напоре, плечо — от ЦМ до верха секции.
+                    double fin = DynamicPressure * s.Recovery.GridFinArea * GridFinLift;
+                    pitch += fin * Math.Max(1, layoutBuf[i] + s.Length - com);
+                    roll += fin * s.Radius;
+                }
                 if (!Running[i] || s.Engine.GimbalDeg <= 0) continue;
-                double t = s.Engine.Thrust(pressure) * s.EngineCount * EffectiveThrottle(i);
+                double t = s.Engine.Thrust(pressure) * EnginesLit(i) * EffectiveThrottle(i);
                 double side = t * Math.Sin(s.Engine.GimbalDeg * Constants.Deg2Rad);
                 pitch += side * Math.Max(0.5, com - layoutBuf[i]);
                 // Крен качанием возможен только у связки из нескольких камер; у радиальных блоков плечо — их вынос от оси.
                 if (s.IsRadial) roll += side * s.RadialOffset;
-                else if (s.EngineCount > 1) roll += side * s.Radius * 0.5;
+                else if (EnginesLit(i) > 1) roll += side * s.Radius * 0.5;
             }
             // Рули (§4.6): бюджет считает физика по напору; бескрылым и на грунте — ноль.
             return new Vector3d(pitch + AeroControlTorque.x, roll + AeroControlTorque.y, pitch + AeroControlTorque.z);
@@ -503,6 +526,62 @@ namespace Kare.Space.Core
 
         // ---------------------------------------------------------------- двигатели
 
+        /// <summary>
+        /// Сколько двигателей связки горит (§6.9): посадка Falcon 9 идёт на 3 и на 1 из 9, Super Heavy — на 13 и 3 из 33.
+        /// 0 — все. Ставит автопилот посадки ступени (BoosterLandingAutopilot), на тягу, расход и качание.
+        /// </summary>
+        public int EngineLimit;
+        /// <summary>Подъёмная сила решётчатого руля на единицу напора и площади (Cy·δ при δ ≈ 20°) — для GridFinTorque.</summary>
+        public const double GridFinLift = 0.6;
+        /// <summary>
+        /// Сопротивление раскрытой решётки (Cd на её площадь). Пара: с GridFinArea 6 м² у Falcon 9 CdA ≈ 8 м² — вместе
+        /// с корпусом β ≈ 3 т/м², предельная скорость у земли ≈ 250 м/с, как у настоящей ступени перед посадочным.
+        /// </summary>
+        public const double GridFinCd = 1.3;
+
+        /// <summary>CdA раскрытых решётчатых рулей, м²: только у одиночной возвращаемой ступени (в связке сложены).</summary>
+        public double GridFinCdA()
+        {
+            double sum = 0;
+            for (int i = 0; i < Attached.Length; i++)
+            {
+                var rec = Design.Sections[i].Recovery;
+                if (Attached[i] && rec != null && rec.GridFinArea > 0 && !Stacked(i)) sum += rec.GridFinArea * GridFinCd;
+            }
+            return sum;
+        }
+
+        public int EnginesLit(int i)
+        {
+            int n = Design.Sections[i].EngineCount;
+            return EngineLimit > 0 ? Math.Min(EngineLimit, n) : n;
+        }
+
+        /// <summary>Над секцией (или под ней) ещё есть присоединённые: ступень в связке.</summary>
+        public bool Stacked(int i)
+        {
+            for (int j = 0; j < Attached.Length; j++)
+                if (j != i && Attached[j]) return true;
+            return false;
+        }
+
+        /// <summary>Запас топлива возвращаемой ступени, который в связке не сжигается (SectionDef.Recovery, §6.9), кг.</summary>
+        public double HeldReserve(int i)
+        {
+            var r = Design.Sections[i].Recovery;
+            return r == null || !Stacked(i) ? 0 : Math.Min(Propellant[i], r.Reserve);
+        }
+
+        /// <summary>Топливо, доступное сейчас: без запаса на посадку, пока ступень в связке.</summary>
+        public double UsablePropellant(int i) => Propellant[i] - HeldReserve(i);
+
+        /// <summary>Тяга секции на полном газе с учётом EngineLimit, Н.</summary>
+        public double EngineThrustLimit(double pressure, int i)
+        {
+            var s = Design.Sections[i];
+            return s.HasEngine ? s.Engine.Thrust(pressure) * EnginesLit(i) : 0;
+        }
+
         public double EffectiveThrottle(int i)
         {
             if (!Running[i]) return 0;
@@ -522,7 +601,7 @@ namespace Kare.Space.Core
             {
                 if (!Attached[i] || !Running[i]) continue;
                 var s = secs[i];
-                double k = EffectiveThrottle(i) * s.EngineCount;
+                double k = EffectiveThrottle(i) * EnginesLit(i);
                 t += s.Engine.Thrust(pressure) * k;
                 massFlow += s.Engine.MassFlow * k;
             }
@@ -552,7 +631,7 @@ namespace Kare.Space.Core
                 }
                 if (Running[i] || ignitionLatch[i]) continue;
                 ignitionLatch[i] = true;
-                if (Propellant[i] <= 0)
+                if (UsablePropellant(i) <= 0)
                 {
                     Raise($"{secs[i].Engine.Name}: нет топлива");
                     continue;
@@ -585,8 +664,16 @@ namespace Kare.Space.Core
             {
                 if (!Attached[i] || !Running[i]) continue;
                 var s = secs[i];
-                Propellant[i] -= s.Engine.MassFlow * s.EngineCount * EffectiveThrottle(i) * dt;
-                if (Propellant[i] <= 0)
+                // Запас на посадку (§6.9): в связке ступень глохнет на нём — это и есть её MECO.
+                double reserve = s.Recovery != null && Stacked(i) ? s.Recovery.Reserve : 0;
+                Propellant[i] -= s.Engine.MassFlow * EnginesLit(i) * EffectiveThrottle(i) * dt;
+                if (reserve > 0 && Propellant[i] <= reserve)
+                {
+                    Propellant[i] = reserve;
+                    Running[i] = false;
+                    Raise($"{s.Engine.Name}: выключение, в баках {reserve / 1000:F0} т на возврат");
+                }
+                else if (Propellant[i] <= 0)
                 {
                     Propellant[i] = 0;
                     Running[i] = false;
@@ -663,6 +750,46 @@ namespace Kare.Space.Core
             ChuteAltitude[section] = FlightPhysics.ClampChuteAltitude(altitude);
         }
 
+        /// <summary>Площадь тормозных парашютов присоединённых секций, м² (SectionDef.DragChuteArea).</summary>
+        public double DragChuteArea()
+        {
+            double a = 0;
+            for (int i = 0; i < Attached.Length; i++) if (Attached[i]) a += Design.Sections[i].DragChuteArea;
+            return a;
+        }
+
+        /// <summary>
+        /// Выпуск тормозного парашюта (§4.6): только на пробеге по полосе. Выше FlightPhysics.DragChuteMaxSpeed купол рвёт —
+        /// он сразу сброшен; ниже DragChuteJettisonSpeed уже бесполезен. true — купол пошёл.
+        /// </summary>
+        public bool DeployDragChute()
+        {
+            if (DragChute != DragChuteState.Stowed || DragChuteArea() <= 0) return false;
+            if (Situation != Situation.Landed || RollSpeed <= FlightPhysics.DragChuteJettisonSpeed)
+            {
+                Raise("Тормозной парашют — только на пробеге");
+                return false;
+            }
+            if (RollSpeed > FlightPhysics.DragChuteMaxSpeed)
+            {
+                DragChute = DragChuteState.Jettisoned;
+                Raise($"Тормозной парашют сорван: {RollSpeed:F0} м/с выше {FlightPhysics.DragChuteMaxSpeed:F0}");
+                return false;
+            }
+            DragChute = DragChuteState.Open;
+            DragChuteTime = 0;
+            Raise("Тормозной парашют выпущен");
+            return true;
+        }
+
+        /// <summary>Сброс раскрытого тормозного парашюта.</summary>
+        public void JettisonDragChute()
+        {
+            if (DragChute != DragChuteState.Open) return;
+            DragChute = DragChuteState.Jettisoned;
+            Raise($"Тормозной парашют сброшен на {RollSpeed:F0} м/с");
+        }
+
         /// <summary>Самая высокая уставка ввода среди непрораскрытых парашютов на борту; 0 — парашютов нет.</summary>
         public double HighestChuteAltitude()
         {
@@ -723,6 +850,60 @@ namespace Kare.Space.Core
             return started;
         }
 
+        /// <summary>Стыковочный узел не закрыт обтекателем: у секций с DeployKind.Nose — только раскрытый до конца.
+        /// Закрытым узлом не причалить (Universe.CheckDocking).</summary>
+        public bool PortOpen
+        {
+            get
+            {
+                for (int i = 0; i < Attached.Length; i++)
+                    if (Attached[i] && Design.Sections[i].Deploy == DeployKind.Nose && Deployed[i] < 1) return false;
+                return true;
+            }
+        }
+
+        /// <summary>Открыть (true) или закрыть носовой обтекатель узла. true — привод запущен сейчас.</summary>
+        public bool SetNose(bool open)
+        {
+            bool started = false;
+            for (int i = 0; i < Attached.Length; i++)
+            {
+                if (!Attached[i] || Design.Sections[i].Deploy != DeployKind.Nose || DeployOn[i] == open) continue;
+                DeployOn[i] = open;
+                started = true;
+            }
+            if (started) Raise(open ? "Носовой обтекатель: открытие" : "Носовой обтекатель: закрытие");
+            return started;
+        }
+
+        /// <summary>
+        /// Солнечные батареи, которые можно раскрыть: вне обтекателя (под ним сложены). auto — ещё и аппарат уже
+        /// отделился от носителя (ниже по связке ничего не прицеплено): «Союз» раскрывает СБ сразу после отделения
+        /// от блока И, «Рейнджер» — от «Аджены»; в атмосфере не раскрываются (скоростной напор их оторвал бы).
+        /// </summary>
+        bool PanelsReady(int i, bool auto)
+        {
+            if (!Attached[i] || Design.Sections[i].Deploy != DeployKind.Panels || DeployOn[i] || IsEnclosed(i)) return false;
+            if (!auto) return true;
+            if (StaticPressure > PanelMaxPressure) return false;
+            // Под тягой не раскрываем: у «Союза» это работа блока И, у «Рейнджера» — разгон «Аджены» (она не отделяется).
+            if (AnyEngineRunning) return false;
+            return true;
+        }
+
+        /// <summary>Давление, выше которого автопилот СБ не раскрывает, Па: ~120 км над Землёй, напор уже ничтожен.</summary>
+        const double PanelMaxPressure = 0.01;
+
+        /// <summary>Раскрыть солнечные батареи (G или автопилот миссии). true — привод запущен сейчас.</summary>
+        public bool DeployPanels(bool auto)
+        {
+            bool started = false;
+            for (int i = 0; i < Attached.Length; i++)
+                if (PanelsReady(i, auto)) DeployOn[i] = started = true;
+            if (started) Raise("Солнечные батареи: раскрытие");
+            return started;
+        }
+
         /// <summary>
         /// Клавиша G (§6.12): трапы на грунте откидываются (обратно не складываются — механика «Луны-17» одноразовая),
         /// опоры выпускаются; повтор убирает только опоры на приводе (Legs) и только в полёте — на грунте борт стоит на них.
@@ -732,12 +913,14 @@ namespace Kare.Space.Core
         public string ToggleDeploy()
         {
             bool legs = false, legsOut = true, pyro = false, ramps = false, rampsOn = true, lid = false, lidOpen = true;
-            bool gear = false, gearOut = true;
+            bool gear = false, gearOut = true, nose = false, noseOpen = true, panels = false, panelsShut = false;
             for (int i = 0; i < Attached.Length; i++)
             {
                 if (!Attached[i]) continue;
                 switch (Design.Sections[i].Deploy)
                 {
+                    case DeployKind.Nose: nose = true; noseOpen &= DeployOn[i]; break;
+                    case DeployKind.Panels: panels = true; panelsShut |= !DeployOn[i]; break;
                     case DeployKind.Legs: legs = true; legsOut &= DeployOn[i]; break;
                     case DeployKind.PyroLegs: legs = pyro = true; legsOut &= DeployOn[i]; break;
                     case DeployKind.Ramps: ramps = true; rampsOn &= DeployOn[i]; break;
@@ -752,6 +935,18 @@ namespace Kare.Space.Core
                 for (int i = 0; i < Attached.Length; i++)
                     if (Attached[i] && Design.Sections[i].Deploy == DeployKind.Gear) DeployOn[i] = !gearOut;
                 return gearOut ? "Шасси: уборка" : "Шасси: выпуск";
+            }
+            // СБ раскрываются один раз (обратно не складываются, как у настоящих) — первым нажатием, дальше G водит
+            // носовой обтекатель узла.
+            if (panels && panelsShut)
+            {
+                if (DeployPanels(false)) return null;
+                if (!nose) return "Солнечные батареи под обтекателем";
+            }
+            if (nose)
+            {
+                SetNose(!noseOpen);
+                return null;
             }
             if (ramps && !rampsOn)
             {

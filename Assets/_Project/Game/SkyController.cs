@@ -14,6 +14,9 @@ namespace Kare.Space.Game
     public sealed class SkyController : MonoBehaviour
     {
         public Volume Volume;
+        /// <summary>Hidden/Kare/SpaceFogRestore — снятие ложного тумана HDRP с борта над атмосферой (SpaceFogFix).
+        /// Ставит FlightSceneBuilder: шейдер без ссылки не попадёт в билд.</summary>
+        public Shader FogRestoreShader;
 
         /// <summary>Пределы EV100 §9.3; на карте экспозиция фиксированная (§9.6). EvMin −6: ночью свет только луна и
         /// свечение неба (NightLight.SkyglowLux, 0,02 лк). При −5 безлунный грунт был ≈ 3 % белого (чёрная ночь), при −7
@@ -56,7 +59,12 @@ namespace Kare.Space.Game
         {
             if (Volume == null) Volume = GetComponent<Volume>();
             if (Volume == null || Volume.sharedProfile == null) { enabled = false; return; }
-            Volume.profile = Instantiate(Volume.sharedProfile); // рантайм-копия
+            // Рантайм-копия. Instantiate(VolumeProfile) копирует только список — компоненты остаются общими с ассетом,
+            // и правки экспозиции/неба в Play утекали в Settings/FlightVolume.asset (fixedExposure 14,9 на диске).
+            // Поэтому каждый компонент копируется отдельно.
+            var runtime = Instantiate(Volume.sharedProfile);
+            for (int i = 0; i < runtime.components.Count; i++) runtime.components[i] = Instantiate(runtime.components[i]);
+            Volume.profile = runtime;
             Volume.profile.TryGet(out env);
             Volume.profile.TryGet(out sky);
             Volume.profile.TryGet(out exposure);
@@ -75,6 +83,7 @@ namespace Kare.Space.Game
             earth = EarthAir.Capture(sky);
             env.centerMode.Override(VisualEnvironment.PlanetMode.Manual);
             env.renderingSpace.Override(RenderingSpace.World);
+            SpaceFogFix.Create(FogRestoreShader, transform);
         }
 
         void LateUpdate()
@@ -94,28 +103,35 @@ namespace Kare.Space.Game
             var c = BodyRenderer.Project(b, out double k);
             env.planetCenter.Override(c / 1000f);
             env.planetRadius.Override((float)(b.Radius * k / 1000));
+            SpaceFogFix.Update(Camera.main, c, (float)(b.Radius * k), SpaceFogFix.AtmosphereTop(sky), sky.atmosphericScattering.value);
 
             if (exposure != null)
             {
                 exposure.mode.Override(MapView.IsOpen ? ExposureMode.Fixed : ExposureMode.AutomaticHistogram);
-                // Яркость игрока (меню Esc): плюс — ярче. В HDRP компенсация вычитается из EV, на карте с фиксированной
-                // экспозицией — тот же знак через fixedExposure.
+                exposure.adaptationSpeedDarkToLight.Override(AdaptDarkToLight);
+                exposure.adaptationSpeedLightToDark.Override(AdaptLightToDark);
+                // Яркость игрока (меню Esc): плюс — ярче. HDRP 17.6 вычитает компенсацию ДО зажима пределами
+                // (HistogramExposure.compute: clamp(avgEV − comp, min, max)), поэтому пределы ниже считаются «без
+                // ползунка» и сдвигаются на −comp целиком — иначе там, где EV стоит на пределе (ночь, факел, стол),
+                // ползунок не работал или работал наоборот (+2 EV у факела ночью давали кадр вчетверо темнее).
                 float comp = BrightnessSettings.Ev;
                 exposure.compensation.Override(comp);
                 exposure.fixedExposure.Override(MapEv - comp);
                 float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(u.Active));
-                float plume = VesselView.PlumePeakNits;
+                // Экспозиция ведётся по факелу «как задуман» (без ползунка «Факел»), а реальная яркость — с ним:
+                // так ползунок меняет факел относительно сцены, а не съедается экспозицией.
+                float plume = VesselView.PlumePeakNits, plumeReal = plume * BrightnessSettings.Plume;
+                float safeEv = EvMin - BrightnessSettings.EvMax;
                 if (plume > 0)
                 {
-                    // Защита half-буфера от переполнения факелом (см. PreExposedMax), плюс компенсация: она сдвигает
-                    // итоговый EV вниз на comp, и множитель кадра растёт во столько же.
-                    evMin = Mathf.Max(evMin, Mathf.Log(plume / (1.2f * PreExposedMax), 2) + comp);
+                    // Защита half-буфера от переполнения факелом (см. PreExposedMax) — по итоговому EV, без ползунка.
+                    safeEv = Mathf.Log(plumeReal / (1.2f * PreExposedMax), 2);
                     // Ночью кадр тёмный, и автоэкспозиция
                     // по тёмному кадру уходит к EvMin и выжигает всё вокруг (замер 03.10.2026: «Спутник» на старте,
                     // 3,8 % кадра белые, дым квадратами). Держим экспозицию такой, чтобы ядро было в PlumeNightWhite раз
                     // белого: ярко, но не заливает. Днём предел EV и так выше — max ничего не меняет.
                     plumeNight = 1 - Mathf.Clamp01((float)SunLight.Visible);
-                    plumeEv = Mathf.Log(plume / (1.2f * PlumeNightWhite), 2) + comp;
+                    plumeEv = Mathf.Log(plume / (1.2f * PlumeNightWhite), 2);
                 }
                 // Плавно: вспышка факела за 1,5 с поднимает экспозицию, после выключения она за 3 с возвращается к
                 // автоматической. Гистограмма сама тянет EV вверх (факел яркий — «темнее»), поэтому верх тоже зажат.
@@ -124,11 +140,16 @@ namespace Kare.Space.Game
                 evMin = Mathf.Max(evMin, Mathf.Lerp(evMin, plumeEv, plumeK));
                 // Прожекторы стола ночью: корпус ракеты в PadHullWhite раз белого, а не выжжен (LaunchPadView.LitNits).
                 float pad = LaunchPadView.LitNits;
-                if (pad > 0) evMin = Mathf.Max(evMin, Mathf.Log(pad / (1.2f * PadHullWhite), 2) + comp);
+                if (pad > 0) evMin = Mathf.Max(evMin, Mathf.Log(pad / (1.2f * PadHullWhite), 2));
                 float plasma = VesselView.PlasmaPeakNits;
                 if (plasma > 0) evMin = Mathf.Max(evMin, Mathf.Log(plasma / (1.2f * PlasmaWhite), 2));
-                exposure.limitMin.Override(evMin);
-                exposure.limitMax.Override(Mathf.Max(evMin, Mathf.Lerp(EvMax, plumeEv + PlumeEvSlack, plumeK)));
+                float evMax = Mathf.Max(evMin, Mathf.Lerp(EvMax, plumeEv + PlumeEvSlack, plumeK));
+                // Подсветка ландшафта ночью (NightLight) — под верх полосы факела: гистограмма с ярким факелом жмётся
+                // к верхнему пределу. Без ползунка «Общая» — иначе он не менял бы яркость грунта.
+                LandscapeEv = MapView.IsOpen ? EvMin : Mathf.Min(evMax, evMin + PlumeEvSlack * plumeK);
+                float lo = Mathf.Max(evMin - comp, safeEv);
+                exposure.limitMin.Override(lo);
+                exposure.limitMax.Override(Mathf.Max(lo, evMax - comp));
                 // Звёзды за экспозицией (§9.3): физичные звёзды видны только при EV ≲ −4 — на свету в космосе и при
                 // факеле ночью небо было чёрным. Множитель держит их такими, как при EV StarsEv, но не тусклее
                 // реальных. Днём в воздухе предел EV низкий — множитель 1, звёзд не видно, как и должно быть.
@@ -167,8 +188,14 @@ namespace Kare.Space.Game
         /// кадр снова заливает светом, меньше — окружение чернеет.
         /// </summary>
         const float PlumeNightWhite = 16f;
-        /// <summary>Запас вверх от ночного EV факела, ступени, и время нарастания/спада зажима, с. Пара: PlumeNightWhite.</summary>
-        const float PlumeEvSlack = 1.5f, PlumeRampUp = 1.5f, PlumeRampDown = 3f;
+        /// <summary>Запас вверх от ночного EV факела, ступени, и время нарастания/спада зажима, с. Пара: PlumeNightWhite и
+        /// AdaptDarkToLight/AdaptLightToDark — зажим не должен быть заметно медленнее самой адаптации (05.10.2026: было
+        /// 1,5/3 с при адаптации 0,5/1,5 — «ISO переключается медленно», ускорено втрое вместе с ней).</summary>
+        const float PlumeEvSlack = 1.5f, PlumeRampUp = 0.5f, PlumeRampDown = 1f;
+        /// <summary>Скорость автоэкспозиции HDRP (§9.3), EV/с-подобный коэффициент: больше — быстрее. Ставится в рантайме,
+        /// чтобы не требовать пересборки сцены; FlightSceneBuilder пишет те же значения в FlightVolume. Было 0,5/1,5 —
+        /// выход из тени/включение факела тянулись секунды; ×4 и ×3,3 — адаптация за доли секунды, но без щелчка.</summary>
+        public const float AdaptDarkToLight = 2f, AdaptLightToDark = 5f;
         /// <summary>Доля bloom ночью при факеле. Пара: PlumeNightWhite — чем ярче ядро относительно белого, тем меньше.</summary>
         const float PlumeNightBloom = 0.25f;
 
@@ -180,6 +207,9 @@ namespace Kare.Space.Game
         /// </summary>
         const float StarsEv = EvMin;
         float plumeK, plumeEv, plumeNight;
+
+        /// <summary>EV100 сцены без ползунка «Общая» — по нему NightLight держит грунт ночью видимым (§9.3).</summary>
+        public static float LandscapeEv { get; private set; } = EvMin;
 
         /// <summary>
         /// Ударный слой на входе — во столько раз ярче белого после экспозиции (§4.6, §9.3). Ночью предел EV — EvMin,

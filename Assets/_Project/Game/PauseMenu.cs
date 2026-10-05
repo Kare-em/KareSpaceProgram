@@ -108,8 +108,12 @@ namespace Kare.Space.Game
             GUI.Label(new Rect(x, y, w, 24), "Яркость", label); y += 30;
             BrightnessSettings.Ev = Slider(x, y, w, "Общая", BrightnessSettings.Ev,
                 BrightnessSettings.EvMin, BrightnessSettings.EvMax, "{0:+0.0;-0.0;0} EV"); y += Row + 6;
-            BrightnessSettings.Plume = Slider(x, y, w, "Факел", BrightnessSettings.Plume,
-                BrightnessSettings.PlumeMin, BrightnessSettings.PlumeMax, "×{0:0.00}"); y += Row + 6 + 20;
+            // Факел — по логарифму: ×0,05…4 — это 6 ступеней EV, линейно весь нижний край ушёл бы в пару пикселей.
+            BrightnessSettings.Plume = SliderLog(x, y, w, "Факел", BrightnessSettings.Plume,
+                BrightnessSettings.PlumeMin, BrightnessSettings.PlumeMax, "×{0:0.00}"); y += Row + 6;
+            // Ночь — подсветка ландшафта (NightLight): грунт виден и при факеле, и у прожекторов стола.
+            BrightnessSettings.Night = Slider(x, y, w, "Ночь", BrightnessSettings.Night,
+                BrightnessSettings.NightMin, BrightnessSettings.NightMax, "{0:P0}"); y += Row + 6 + 20;
             if (Event.current.type == EventType.MouseUp) BrightnessSettings.Save();
 
             // Звук (§9.3): общая громкость синтезированного звука полёта, применяет FlightAudio через AudioListener.
@@ -143,7 +147,7 @@ namespace Kare.Space.Game
         const float CreditsBlock = 22;
 
         /// <summary>Высота блока «Яркость»: заголовок, два ползунка, отступ. Пара: код блока в OnGUI.</summary>
-        const float BrightnessBlock = 30 + 2 * (Row + 6) + 20;
+        const float BrightnessBlock = 30 + 3 * (Row + 6) + 20;
         const float SoundBlock = 30 + (Row + 6) + 20;
         /// <summary>Строка «Детализация» в блоке «Графика» и ширина её подписи. Пара: код строки в OnGUI.</summary>
         const float DetailBlock = Row + 4, DetailLabel = 110;
@@ -155,6 +159,16 @@ namespace Kare.Space.Game
             value = GUI.HorizontalSlider(new Rect(x + 95, y + Row * 0.5f - 6, w - 95 - 80, 20), value, min, max);
             GUI.Label(new Rect(x + w - 75, y, 75, Row), string.Format(format, value), small2);
             return value;
+        }
+
+        /// <summary>Логарифмический ползунок: положение — log2 значения, подпись и результат — само значение.</summary>
+        float SliderLog(float x, float y, float w, string text, float value, float min, float max, string format)
+        {
+            GUI.Label(new Rect(x, y, 90, Row), text, toggle);
+            float v = Mathf.Pow(2, GUI.HorizontalSlider(new Rect(x + 95, y + Row * 0.5f - 6, w - 95 - 80, 20),
+                Mathf.Log(value, 2), Mathf.Log(min, 2), Mathf.Log(max, 2)));
+            GUI.Label(new Rect(x + w - 75, y, 75, Row), string.Format(format, v), small2);
+            return v;
         }
 
         void Quality(float x, float y, float w, ref bool value, bool supported, string text)
