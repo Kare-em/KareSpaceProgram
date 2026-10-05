@@ -32,9 +32,16 @@ namespace Kare.Space.Game
         const float CoreNits = 3e3f, GlowNits = 3e2f;
         /// <summary>В вакууме керосиновый факел тусклее: доля яркости при p = 0.</summary>
         const float VacuumBrightness = 0.3f;
-        /// <summary>Сила света факела на дросселе 1, кд: на 30 м ≈ 2000 лк — подсветка стола и борта ночью
-        /// заметна, днём (Солнце 127 000 лк) почти нет. Пара: PlumeLightRange.</summary>
-        const float PlumeCandela = 2e6f, PlumeLightRange = 600;
+        /// <summary>Дальность света факела, м. Сила света — из яркости и площади струи (PlumeLight), ≈ 10³–10⁵ кд:
+        /// на 600 м это сотые доли люкса.</summary>
+        const float PlumeLightRange = 600;
+        /// <summary>Профиль мешей факела r(t) = 1 + grow·t^power (ProcMesh.Plume): ядро сужается, свечение раздувается.
+        /// Пара: PlumeShape — по тем же числам считается светящаяся площадь для силы света.</summary>
+        const float CoreGrow = -0.55f, CorePower = 1, GlowGrow = 2f, GlowPower = 0.6f;
+        /// <summary>Стенок аддитивного меша на луче зрения сбоку: передняя и задняя складываются (§9.5).</summary>
+        const float PlumeWalls = 2;
+        /// <summary>Свет дрожит слабее струи: им освещены стол и дым, и полная амплитуда читалась миганием сцены.</summary>
+        const float PlumeLightFlicker = 0.3f;
         const double SeaLevelPressure = 101325;
         /// <summary>Купол (GDD §6.4): стропы — столько радиусов полностью раскрытого купола; угол — полураствор
         /// сферического сегмента. Пара: площадь Section.ParachuteArea и рифление FlightPhysics.ChuteFraction —
@@ -81,6 +88,19 @@ namespace Kare.Space.Game
         /// <summary>Сложенная процедурная опора (§6.12, как в KSP): поворот на шарнире вверх, стопа у борта выше шарнира.
         /// Пара: LegModelReach/Drop — стопа под 231° от +X, после поворота — 107°, на 0,5 м снаружи корпуса.</summary>
         const float GenericLegStow = 124f;
+        /// <summary>
+        /// Стойка шасси (Landing_Gear.fbx, §4.6 посадка на полосу): от шарнира до низа колёс GearModelReach, шарнир утоплен
+        /// в брюхо на GearInset — колёса выходят на GearHeight (1,8) за обшивку, ровно на r + GearHeight, где их ищет
+        /// FlightPhysics.CheckContact. Пара: Reach = 1,8 + Inset; меняешь модель — сверяй (winged_parts.b_gear).
+        /// Стойки — у носа и у середины (доли длины, по «Шаттлу»: передняя ~7 м за носом, основные под крылом), колея —
+        /// доля размаха (6,9 м на 23,79). Сложенная — поворот к носу на GearStow: больше 90°, чтобы колесо ушло в брюхо
+        /// целиком (на 90° шина выступала из-под крыла на 0,1 м).
+        /// </summary>
+        const float GearModelReach = 2.4f, GearInset = 0.6f, GearModelHeight = 1.8f, GearStow = 95f;
+        const float NoseGearAt = 0.8f, MainGearAt = 0.35f, GearTrackShare = 0.29f;
+        /// <summary>Связка SSME на орбитере, м: центр — на 0,3 м к брюху от оси орбитера, разнос сопел и радиус среза
+        /// (winged_parts.b_shuttle: верхнее на +1,0, нижние на −0,95 ±1,35; срез 1,12). Факел бака ET ставится сюда.</summary>
+        const float SsmeClusterShift = 0.3f, SsmeClusterR = 1.2f, SsmeExitR = 1.12f;
         /// <summary>Габариты деталей реальных аппаратов, м: шар ПС-1; приборный отсек «Востока» (Ø, высота до
         /// среза ТДУ); станция Е-6; РД-0110 (Ø, высота); ферма горячего разделения (наружный радиус, высота);
         /// створка обтекателя (радиус, высота); корпус хвостового отсека Г-1 под стабилизаторами (радиус).
@@ -180,6 +200,10 @@ namespace Kare.Space.Game
         public static readonly Color TileBlackColor = new Color(0.08f, 0.08f, 0.08f);
         public static readonly Color TileWhiteColor = new Color(0.88f, 0.87f, 0.84f);
         public static readonly Color SilverFoilColor = new Color(0.75f, 0.76f, 0.78f);
+        // Межбаковый отсек ET и пояса блока Ц — та же пена, но темнее (пена по-разному загорает под УФ, у ET заметно).
+        static readonly Color FoamDarkColor = new Color(0.55f, 0.27f, 0.10f);
+        // Углерод-углерод носка и передних кромок орбитера — тёмно-серый.
+        static readonly Color RccColor = new Color(0.32f, 0.32f, 0.33f);
 
         /// <summary>
         /// Отделка слота по его цвету (§9.5): цвета палитр уже различают «что это за поверхность», поэтому отдельного
@@ -269,6 +293,13 @@ namespace Kare.Space.Game
                 case SectionModel.ISS2020: return new[] { WhiteColor, PanelColor, MetalColor, SawColor };
                 case SectionModel.DragonTrunk: return new[] { WhiteColor, PanelColor, MetalColor, BlackColor };
                 case SectionModel.CrewDragon: return new[] { WhiteColor, BlackColor, MetalColor, ShieldColor };
+                // winged_parts.py: орбитеры — белые и чёрные плитки ТЗП, RCC носка и кромок, сопла.
+                case SectionModel.ShuttleOrbiter:
+                case SectionModel.Buran: return new[] { TileWhiteColor, TileBlackColor, RccColor, NozzleColor };
+                case SectionModel.ShuttleET:
+                case SectionModel.EnergiaCore: return new[] { FoamColor, FoamDarkColor, MetalColor, NozzleColor };
+                case SectionModel.ShuttleSRB:
+                case SectionModel.EnergiaBlockA: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
                 default: return new[] { WhiteColor, PolishedColor };
             }
         }
@@ -468,6 +499,16 @@ namespace Kare.Space.Game
                     var palette = new[] { col, MetalColor, NozzleColor };
                     part.AddBody(AddRenderer(f.gameObject, finsFbx, palette), palette);
                 }
+                if (s.Wings != null && model == null)
+                {
+                    // Крылья и киль без своей модели — пластинами по тем же WingDef, что считает аэродинамика (WingMesh).
+                    var wm = WingMesh.Build(s.Wings);
+                    if (wm != null)
+                    {
+                        var palette = new[] { col };
+                        part.AddBody(AddRenderer(AddChild(go, "Wings").gameObject, wm, palette), palette);
+                    }
+                }
                 if (s.LandingLegs && legFbx != null && !craft)
                 {
                     // Четыре опоры по кромке: шарнир поднят на вынос стопы, чтобы стопы стояли в плоскости днища —
@@ -488,6 +529,8 @@ namespace Kare.Space.Game
                         });
                     }
                 }
+                if (s.Deploy == DeployKind.Gear && boot != null && boot.GearMesh != null)
+                    AddGear(go, i, s, r, len, boot.GearMesh);
 
                 if (s.HasEngine)
                 {
@@ -499,9 +542,11 @@ namespace Kare.Space.Game
                     // Сопло уже в модели аппарата (ТДУ «Востока», КТДУ Е-6): факел — от днища секции.
                     bool ownNozzle = model != null && s.Model != SectionModel.Sputnik;
                     if (ownNozzle && s.Model == SectionModel.VostokService) nr = r * ServiceNozzleShare;
+                    var nozzlePos = new Vector3(0, ownNozzle ? (craft ? ownBottom : 0) : -nr * 1.4f, 0);
+                    if (craft) OwnPlume(s, i, ref nozzlePos, ref rr, ref nr);
                     var nozzle = new GameObject("Nozzle");
                     nozzle.transform.SetParent(go.transform, false);
-                    nozzle.transform.localPosition = new Vector3(0, ownNozzle ? (craft ? ownBottom : 0) : -nr * 1.4f, 0);
+                    nozzle.transform.localPosition = nozzlePos;
                     var bell = ProcMesh.Bell(nr, nr * 0.45f, nr * 1.4f, 16);
                     if (ring == 0 && !ownNozzle && i > 0 && interstageFbx != null && !s.IsRadial)
                     {
@@ -549,10 +594,10 @@ namespace Kare.Space.Game
                     // передняя и задняя стенки складываются, к оси струя плотнее, как у объёма.
                     var plume = new GameObject("Plume");
                     plume.transform.SetParent(nozzle.transform, false);
-                    part.CoreR = AddPlume(plume, ProcMesh.Plume(1, -0.55f, 1, 16, 12));
+                    part.CoreR = AddPlume(plume, ProcMesh.Plume(1, CoreGrow, CorePower, 16, 12));
                     var glow = new GameObject("Glow");
                     glow.transform.SetParent(nozzle.transform, false);
-                    part.GlowR = AddPlume(glow, ProcMesh.Plume(1f, 2f, 0.6f, 16, 12));
+                    part.GlowR = AddPlume(glow, ProcMesh.Plume(1f, GlowGrow, GlowPower, 16, 12));
                     var lgo = new GameObject("Plume Light");
                     lgo.transform.SetParent(nozzle.transform, false);
                     lgo.transform.localPosition = new Vector3(0, -nr * 3, 0);
@@ -858,6 +903,70 @@ namespace Kare.Space.Game
             }
         }
 
+        /// <summary>
+        /// Шасси (DeployKind.Gear): передняя стойка и пара основных из Landing_Gear.fbx, масштаб по GearHeight. Шарнир
+        /// у брюха (+X секции), стойка складывается к носу (+Y) вокруг оси размаха и прячется в фюзеляж/крыло.
+        /// </summary>
+        void AddGear(GameObject go, int i, SectionDef s, float r, float len, Mesh gear)
+        {
+            float k = (float)s.GearHeight / GearModelHeight;
+            float track = r;
+            if (s.Wings != null)
+                foreach (var w in s.Wings)
+                    if (!w.Vertical) { track = (float)w.Span * GearTrackShare; break; }
+            float x = r - GearInset * k;
+            var spots = new[]
+            {
+                new Vector3(x, len * NoseGearAt, 0), new Vector3(x, len * MainGearAt, track * 0.5f),
+                new Vector3(x, len * MainGearAt, -track * 0.5f),
+            };
+            foreach (var p in spots)
+            {
+                var g = new GameObject("Gear");
+                g.transform.SetParent(go.transform, false);
+                g.transform.localScale = Vector3.one * k;
+                AddRenderer(g, gear, MetalColor, BlackColor, PolishedColor, NozzleColor);
+                legs.Add(new Hinge
+                {
+                    T = g.transform, Rest = p, Pivot = p, Base = Quaternion.identity, Axis = Vector3.forward,
+                    Stow = GearStow, Section = i, Squeeze = false,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Факел у сопел, нарисованных в модели не по оси секции. Бак ET: его RS-25 стоят на орбитере (Beside, к −X), факел
+        /// — туда, пока орбитер на баке. Орбитер — пара OMS у киля (один факел между гондолами), «Буран» — пара ОДУ.
+        /// Координаты — из winged_parts.py (x Blender = −x Unity).
+        /// </summary>
+        void OwnPlume(SectionDef s, int i, ref Vector3 at, ref float rr, ref float nr)
+        {
+            var secs = Vessel.Design.Sections;
+            switch (s.Model)
+            {
+                case SectionModel.ShuttleET:
+                    for (int j = 0; j < secs.Count; j++)
+                        if (j != i && secs[j].Beside && Vessel.Attached[j])
+                        {
+                            at = new Vector3(-(float)secs[j].BesideOffset + SsmeClusterShift, 0, 0);
+                            rr = SsmeClusterR;
+                            nr = SsmeExitR;
+                            break;
+                        }
+                    break;
+                case SectionModel.ShuttleOrbiter:
+                    at = new Vector3(-1.6f, 1.7f, 0);   // гондолы OMS: 1,6 м к верху, срез на 1,7 м над днищем (b_shuttle)
+                    rr = 0.5f;
+                    nr = 0.4f;
+                    break;
+                case SectionModel.Buran:
+                    at = new Vector3(-1.2f, 0, 0);      // ОДУ: 1,2 м к верху, ±0,95 по размаху, срез на днище (b_buran)
+                    rr = 0.95f;
+                    nr = 0.42f;
+                    break;
+            }
+        }
+
         static Transform AddChild(GameObject parent, string name)
         {
             var t = new GameObject(name).transform;
@@ -970,16 +1079,66 @@ namespace Kare.Space.Game
             gradient = new Texture2D(1, n, TextureFormat.RGBAHalf, false, true) { name = "Plume Gradient", wrapMode = TextureWrapMode.Clamp };
             for (int i = 0; i < n; i++)
             {
-                float t = i / (n - 1f);
-                var c = Color.Lerp(Color.Lerp(new Color(1f, 0.95f, 0.85f), new Color(1f, 0.7f, 0.3f), Mathf.Clamp01(t * 3)),
-                                   new Color(0.9f, 0.3f, 0.1f), Mathf.Clamp01(t * 1.5f - 0.3f));
-                // Срез без резкой кромки, хвост гаснет в ноль.
-                float fade = Mathf.Clamp01(t * 12) * Mathf.Exp(-3.5f * t) * (1 - t);
                 // Альфа = 1: аддитив HDRP умножает цвет на альфу — затухание только в RGB.
-                gradient.SetPixel(0, i, new Color(c.r * fade, c.g * fade, c.b * fade, 1));
+                var c = PlumeGradientColor(i / (n - 1f));
+                c.a = 1;
+                gradient.SetPixel(0, i, c);
             }
             gradient.Apply(false, true);
             return gradient;
+        }
+
+        /// <summary>Цвет и яркость струи на доле длины t (0 — срез). Один источник для текстуры и для силы света.</summary>
+        static Color PlumeGradientColor(float t)
+        {
+            var c = Color.Lerp(Color.Lerp(new Color(1f, 0.95f, 0.85f), new Color(1f, 0.7f, 0.3f), Mathf.Clamp01(t * 3)),
+                               new Color(0.9f, 0.3f, 0.1f), Mathf.Clamp01(t * 1.5f - 0.3f));
+            // Срез без резкой кромки, хвост гаснет в ноль.
+            float fade = Mathf.Clamp01(t * 12) * Mathf.Exp(-3.5f * t) * (1 - t);
+            return c * fade;
+        }
+
+        /// <summary>Светящаяся площадь мешей факела на единицу длины и радиуса среза (∫ 2·r(t)·яркость(t) dt) и центр
+        /// свечения (доля длины). Считается один раз из профиля мешей и градиента — правка любого из них меняет и свет.</summary>
+        static bool shapeReady;
+        static float coreShape, coreCenter, glowShape, glowCenter;
+        static void PlumeShape()
+        {
+            if (shapeReady) return;
+            const int n = 128;
+            float ca = 0, cm = 0, ga = 0, gm = 0;
+            for (int i = 0; i < n; i++)
+            {
+                float t = (i + 0.5f) / n;
+                var c = PlumeGradientColor(t);
+                float lum = (0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b) / n;
+                float rc = 2 * (1 + CoreGrow * Mathf.Pow(t, CorePower)) * lum;
+                float rg = 2 * (1 + GlowGrow * Mathf.Pow(t, GlowPower)) * lum;
+                ca += rc; cm += rc * t;
+                ga += rg; gm += rg * t;
+            }
+            coreShape = ca; coreCenter = cm / ca;
+            glowShape = ga; glowCenter = gm / ga;
+            shapeReady = true;
+        }
+
+        /// <summary>
+        /// Свет факела (§9.5) — как от протяжённого источника: сила света = яркость × светящаяся площадь сбоку,
+        /// точка — в центре свечения струи. Освещённая поверхность у источника яркости L не ярче ≈ ρ·L, поэтому
+        /// борт рядом с факелом не может пересветить сам факел. Было постоянных 2·10⁶ кд в 3 радиусах под срезом
+        /// на любом двигателе: «Сервейор» ночью на Луне получал на опорах ≈ 2·10⁵ лк — корпус в сотни раз ярче
+        /// белого при EV 7,3, а клубы пыли за 20–40 м светились оранжевыми пятнами (замер 05.10.2026).
+        /// Пара: CoreNits/GlowNits, PlumeGradientColor, профиль мешей (CoreGrow…GlowPower), GlowLength.
+        /// </summary>
+        static void PlumeLight(Light light, float coreNits, float glowNits, float coreR, float glowR, float len, float flicker)
+        {
+            PlumeShape();
+            float core = coreNits * coreR * len * coreShape;
+            float glowLen = len * GlowLength;
+            float glow = glowNits * glowR * glowLen * glowShape;
+            light.intensity = PlumeWalls * (core + glow) * (1 + (flicker - 1) * PlumeLightFlicker);
+            float center = (core * len * coreCenter + glow * glowLen * glowCenter) / Mathf.Max(core + glow, 1e-6f);
+            light.transform.localPosition = new Vector3(0, -center, 0);
         }
 
         void SetPlumeColor(Renderer r, float nits) => SetEmissive(r, new Color(nits, nits, nits));
@@ -1107,7 +1266,6 @@ namespace Kare.Space.Game
                 bool on = Vessel.Running[p.Index];
                 float thr = on ? (float)Vessel.EffectiveThrottle(p.Index) : 0;
                 p.Throttle = thr;
-                if (thr > 0.01f) ReportPlume(CoreNits * thr * BrightnessSettings.Plume);
                 bool burning = thr > 0.01f;
                 p.Plume.gameObject.SetActive(burning);
                 p.Glow.gameObject.SetActive(burning);
@@ -1122,12 +1280,14 @@ namespace Kare.Space.Game
                 p.Plume.localScale = new Vector3(coreR, len * flicker, coreR);
                 p.Glow.localScale = new Vector3(p.PlumeRadius * spread, len * GlowLength * flicker, p.PlumeRadius * spread);
                 // Яркость на единицу площади: раздувшаяся струя тусклее (§9.5).
-                float bright = thr * Mathf.Lerp(1, VacuumBrightness, vac) * flicker;
-                SetPlumeColor(p.CoreR, CoreNits * bright * BrightnessSettings.Plume);
-                SetPlumeColor(p.GlowR, GlowNits * bright * BrightnessSettings.Plume / spread);
-                // Свет факела дрожит слабее струи: им освещён весь стол и дым, и та же амплитуда читалась
-                // миганием всей сцены.
-                p.PlumeLight.intensity = PlumeCandela * thr * BrightnessSettings.Plume * (1 + (flicker - 1) * 0.3f);
+                float bright = thr * Mathf.Lerp(1, VacuumBrightness, vac) * BrightnessSettings.Plume;
+                float coreNits = CoreNits * bright, glowNits = GlowNits * bright / spread;
+                // Экспозиции — фактическая яркость ядра, с вакуумным множителем и без дрожания. Раньше шло CoreNits·thr:
+                // в вакууме экспозиция ставилась под ядро втрое ярче нарисованного, и всё вокруг было на 1,7 EV темнее.
+                ReportPlume(coreNits);
+                SetPlumeColor(p.CoreR, coreNits * flicker);
+                SetPlumeColor(p.GlowR, glowNits * flicker);
+                PlumeLight(p.PlumeLight, coreNits, glowNits, coreR, p.PlumeRadius * spread, len, flicker);
             }
         }
 

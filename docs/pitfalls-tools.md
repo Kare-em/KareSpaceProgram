@@ -189,3 +189,21 @@
 - **Вход в Play из MCP рвёт мост на ~20–30 с** (domain reload): `execute_code` сразу после `play` отвечает
   «No Unity Editor instances found» — подождать и повторить, не перезапускать Play.
 - **`execute_code` компилирует CodeDom (C# 6)**: `Object.FindFirstObjectByType<GameBootstrap>()` не собирается («`Object` ambiguous», игровые типы не видны). Работает: тип через `AppDomain...GetAssemblies()` → `GetType("Kare.Space.Game.GameBootstrap")`, `UnityEngine.Object.FindFirstObjectByType(t)`, поле рефлексией. Так снимаются скрины разных миссий: `MissionId` в памяти → `EditorApplication.EnterPlaymode()`, сцену НЕ сохранять (после Stop — `OpenScene` заново, проверено 05.10: вернулся `vostok`).
+- **Полные имена игровых типов в `execute_code` (CodeDom) видны** (05.10.2026): `Kare.Space.Game.GameBootstrap.U.Active`,
+  `Kare.Space.Core.FlightPhysics.PlaceOnSurface(...)` собираются без рефлексии; `QuaternionD.Inverse` — свойство, не метод.
+  Вершины FBX-деталей (не Read/Write) `mesh.vertices` не отдаёт — читать `Mesh.AcquireReadOnlyMeshData(m)[0].GetVertices(NativeArray)`.
+  Длинный замер повторять `execute_code action=replay index=N` (индекс — из `get_history`), а не пересылать код.
+  Кадр без смаза после телепорта: снять паузу, через `EditorApplication.update` выждать ~40 кадров и поставить `isPaused`.
+- **`execute_code` сразу после `refresh_unity`/компиляции может упасть по таймауту MCP, но доработать** (05.10.2026):
+  запекание иконок (~34 с) вернуло timeout, а PNG записались (время файла 10:22:29 при часах 10:22:51). Проверять результат
+  по времени файлов/`isCompiling`, а не перезапускать вслепую.
+
+## Крылатые FBX и скриншоты Flight (05.10.2026, `Tools/blender/winged_parts.py`)
+- Патч-скрипт с кириллицей и кавычками в Bash heredoc падает «unexpected EOF while looking for matching `''» — писать
+  скрипт тулом Write в скретчпад и запускать `python файл.py`.
+- Живой сервер Unity — `mcp__unityMCP__*` (строчные); `mcp__UnityMCP__*` отвечает `no_unity_session`.
+- `manage_camera screenshot` с `view_position`/`view_rotation` в Flight во время Play даёт кадр «в упор в столб»
+  (2 из 2 попыток на buran, хотя борт в (0,0,0) и FOV 60), с `view_target` — завал горизонта (берётся мировой up).
+  Надёжно: снимать без позиции — `camera:"Main Camera"`, кадр игровой камеры, она уже держит борт на столе.
+- Миссию для скриншота менять рефлексией `GameBootstrap.MissionId` без сохранения сцены; после Stop — `OpenScene`
+  заново (вернулось `vostok`, `isDirty=False`).

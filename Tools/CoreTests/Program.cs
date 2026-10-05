@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,6 +54,7 @@ static class Program
         Run("stability", TestStability, only);
         Run("separation", TestSeparation, only);
         Run("craft", TestCraft, only);
+        Run("craftparams", TestCraftParams, only);
         Run("collide", TestCollide, only);
         Run("undock", TestUndock, only);
         Run("craft_fly", TestCraftFly, only);
@@ -544,6 +546,102 @@ static class Program
         Check("Боковушки: импульс сохраняется", (mom - mom0).magnitude / m0 < 1e-6, $"{(mom - mom0).magnitude / m0:E1} м/с");
         Check("Боковушки: уходят наружу", minOut > 1, $"{minOut:F2} м/с");
         Check("Боковушки: двигатели работают дальше", burning == 4, $"{burning}");
+    }
+
+    /// <summary>
+    /// Параметрические детали (§5.4): пересчёт топлива по размерам, JSON с размерами и без, предупреждение о стыке,
+    /// крылья в физике — площадь, размах и угол установки меняют аэродинамическую силу (§4.6).
+    /// </summary>
+    static void TestCraftParams()
+    {
+        var baseTank = PartCatalog.Get("tank-3.7-2");
+        var longTank = PartCatalog.Resolve(new CraftPart("tank-3.7-2") { Length = baseTank.Length * 2 });
+        var wideTank = PartCatalog.Resolve(new CraftPart("tank-3.7-2") { Diameter = 7.4 });
+        Check("Параметры: бак вдвое длиннее — топлива вдвое", Math.Abs(longTank.Propellant - 2 * baseTank.Propellant) <= 10,
+            $"{baseTank.Propellant} → {longTank.Propellant}");
+        Check("Параметры: бак вдвое шире — топлива вчетверо", Math.Abs(wideTank.Propellant - 4 * baseTank.Propellant) <= 20,
+            $"{wideTank.Propellant}");
+        Check("Параметры: пределы обрезают", PartCatalog.Resolve(new CraftPart("tank-1-1") { Length = 500 }).Length == 60);
+        Check("Параметры: двигатель не меняется", PartCatalog.Resolve(new CraftPart("eng-rd107") { Length = 10 }).Length == PartCatalog.Get("eng-rd107").Length);
+
+        // Старое сохранение (без ключей размеров) читается, новое — с ними и туда-обратно.
+        var old = Craft.FromJson("{ \"name\": \"Старая\", \"stack\": [ { \"part\": \"tank-2-1\", \"stage\": -1 } ], \"radials\": [] }");
+        Check("Параметры: старый JSON без размеров", old.Stack.Count == 1 && !old.Stack[0].HasParams);
+
+        // Высота ввода парашюта (§4.8): необязательный ключ chuteAlt у детали стека и у боковой группы; старый JSON — штатная.
+        Check("Парашют: старый JSON без высоты — штатная", double.IsNaN(old.Stack[0].ChuteAltitude));
+        var chuted = new Craft { Name = "С парашютами" };
+        chuted.Stack.Add(new CraftPart("eng-rd107"));
+        chuted.Stack.Add(new CraftPart("tank-2-2"));
+        chuted.Stack.Add(new CraftPart("dec-2"));
+        chuted.Stack.Add(new CraftPart("cmd-mercury") { ChuteAltitude = 4000 });
+        chuted.Radials.Add(new CraftRadial { Parent = 1, Symmetry = 2, Parts = { "srb-1", "chute" }, ChuteAltitude = 3000 });
+        var chutedJson = chuted.ToJson();
+        var chutedBack = Craft.FromJson(chutedJson);
+        Check("Парашют: высота ввода сохраняется в JSON", chutedBack.ToJson() == chutedJson && chutedBack.Stack[3].ChuteAltitude == 4000
+            && chutedBack.Radials[0].ChuteAltitude == 3000 && double.IsNaN(chutedBack.Stack[0].ChuteAltitude), chutedJson.Replace('\n', ' '));
+        Check("Парашют: незаданная высота в JSON не пишется", new Regex(CraftPart.ChuteKey).Matches(chutedJson).Count == 2);
+        var cb = CraftCompiler.Compile(chutedBack);
+        Check("Парашют: компилятор переносит высоту в секции", cb.Design != null
+            && cb.Design.Sections[cb.PartSection[3]].ChuteAltitude == 4000 && cb.Design.Sections[cb.RadialSection[0]].ChuteAltitude == 3000
+            && cb.Design.Sections[cb.PartSection[0]].ChuteAltitude == 0, string.Join("; ", cb.Errors));
+
+        Craft Plane(double span, double incidence)
+        {
+            var c = new Craft { Name = "Ракетоплан" };
+            c.Stack.Add(new CraftPart("eng-rd107"));
+            c.Stack.Add(new CraftPart("wing") { Span = span, Chord = 3, Incidence = incidence, Sweep = 30 });
+            c.Stack.Add(new CraftPart("wing-fin"));
+            c.Stack.Add(new CraftPart("gear"));
+            c.Stack.Add(new CraftPart("tank-2-4") { Length = 10 });
+            c.Stack.Add(new CraftPart("probe-core") );
+            return c;
+        }
+        var plane = Plane(14, 2);
+        var json = plane.ToJson();
+        var back = Craft.FromJson(json);
+        Check("Параметры: JSON с размерами туда-обратно", back.ToJson() == json && back.Stack[1].Span == 14 && back.Stack[4].Length == 10);
+        var pb = CraftCompiler.Compile(plane);
+        foreach (var w in pb.Warnings) Console.WriteLine($"   предупреждение: {w}");
+        Check("Параметры: ракетоплан собирается", pb.Ok, string.Join("; ", pb.Errors));
+        if (!pb.Ok) return;
+        var sec = pb.Design.Sections[0];
+        Check("Параметры: крыло и киль в секции", sec.Wings != null && sec.Wings.Count == 2, $"{sec.Wings?.Count}");
+        Check("Параметры: площадь крыла = размах × хорда", Math.Abs(sec.Wings[0].Area - 42) < 1e-9, $"{sec.Wings[0].Area}");
+        Check("Параметры: шасси", sec.Deploy == DeployKind.Gear && sec.GearHeight > 1);
+        Check("Параметры: топливо бака по длине", Math.Abs(pb.Design.Sections[0].Propellant - PartCatalog.Resolve(plane.Stack[4]).Propellant) < 1);
+
+        // Физика: нормальная сила при α = 5°, 100 м/с у земли — больше размах, больше сила; угол установки даёт силу на α = 0.
+        double Normal(Craft c, double alphaDeg)
+        {
+            var b = CraftCompiler.Compile(c);
+            var v = new Vessel(b.Design, c.Name);
+            v.MassProperties(out _, out _, out _, out _); // SectionBottom — после раскладки
+            var panels = new List<WingPanel>();
+            Aerodynamics.CollectPanels(v, panels);
+            double a = alphaDeg * Constants.Deg2Rad;
+            var f = Aerodynamics.Force(panels, new Vector3d(100 * Math.Sin(a), 100 * Math.Cos(a), 0), 1.225, 0.3);
+            return Math.Abs(f.x);
+        }
+        double f14 = Normal(Plane(14, 0), 5), f20 = Normal(Plane(20, 0), 5);
+        double f0 = Normal(Plane(14, 0), 0), fInc = Normal(Plane(14, 4), 0);
+        Console.WriteLine($"   N(α 5°): размах 14 — {f14 / 1000:F1} кН, 20 — {f20 / 1000:F1} кН; α 0: без установки {f0 / 1000:F2}, установка 4° — {fInc / 1000:F1} кН");
+        Check("Параметры: размах 20 > 14 по силе", f20 > f14 * 1.2, $"{f14:F0} / {f20:F0}");
+        Check("Параметры: угол установки даёт силу на α 0", fInc > 10 * Math.Max(f0, 1), $"{f0:F0} / {fInc:F0}");
+
+        // Стык без переходника — предупреждение.
+        var bad = new Craft { Name = "Ступенька" };
+        bad.Stack.Add(new CraftPart("eng-rd180"));
+        bad.Stack.Add(new CraftPart("tank-3.7-4"));
+        bad.Stack.Add(new CraftPart("tank-2-2"));
+        bad.Stack.Add(new CraftPart("probe-core"));
+        var bb = CraftCompiler.Compile(bad);
+        Check("Параметры: стык Ø3,7 → Ø2 — предупреждение", bb.Warnings.Exists(w => w.StartsWith("Стык")), string.Join("; ", bb.Warnings));
+        int presetJoints = 0;
+        foreach (var c in CraftPresets.All())
+            foreach (var w in CraftCompiler.Compile(c).Warnings)
+                if (w.StartsWith("Стык")) { presetJoints++; Console.WriteLine($"   {c.Name}: {w}"); }
+        Check("Параметры: готовые корабли без ступенек", presetJoints == 0, $"{presetJoints}");
     }
 
     /// <summary>Столкновения бортов: медленный удар — отскок с сохранением импульса, быстрый — гибель обоих.</summary>

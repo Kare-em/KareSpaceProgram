@@ -61,7 +61,7 @@ namespace Kare.Space.Core
                     Name = "RS-25 (SSME)", ThrustVac = 2.09e6, ThrustSL = 1.67e6, IspVac = 452.3, GimbalDeg = 10.5,
                     MinThrottle = 0.65,
                 },
-                EngineCount = 3, Length = 47, Diameter = 8.4, MaxHeatFlux = 2e5, RcsTorque = 0,
+                EngineCount = 3, Length = 47, Diameter = 8.4, MaxHeatFlux = 2e5, RcsTorque = 0, Model = SectionModel.ShuttleET,
             });
             d.Sections.Add(new SectionDef
             {
@@ -70,12 +70,13 @@ namespace Kare.Space.Core
                 Engine = new EngineDef { Name = "SRB", ThrustVac = 12.0e6, ThrustSL = 10.84e6, IspVac = 268, GimbalDeg = 8, Solid = true },
                 EngineCount = 2, Length = 45.5, Diameter = 3.7, MaxHeatFlux = 2e5,
                 RadialCount = 2, RadialParent = 0, RadialOffset = 6.05, RadialPhase = Math.PI / 2, ParachuteArea = 0,
+                Model = SectionModel.ShuttleSRB,
             });
             d.Sections.Add(Orbiter("Орбитер «Колумбия»", orbLen, 5.2, orbSpan, 249.9, orbSweep, 38.4, 8.0,
                 dry: 88000, propellant: 11000,
                 new EngineDef { Name = "OMS", ThrustVac = 26.7e3, ThrustSL = 15e3, IspVac = 316, Ignitions = 10 },
                 // Ось орбитера над осью бака: 4,2 (радиус ET) + 2,6 (радиус фюзеляжа) + ~0,1 зазора.
-                besideOffset: 6.9, crew: 2));
+                besideOffset: 6.9, crew: 2, model: SectionModel.ShuttleOrbiter));
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 1));
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 0, withPrevious: true));
             d.Sequence.Add(new StageAction(StageActionType.Separate, 1));
@@ -106,7 +107,7 @@ namespace Kare.Space.Core
                 {
                     Name = "РД-0120", ThrustVac = 1.96e6, ThrustSL = 1.52e6, IspVac = 455, GimbalDeg = 11, MinThrottle = 0.45,
                 },
-                EngineCount = 4, Length = 58.8, Diameter = 7.75, MaxHeatFlux = 2e5,
+                EngineCount = 4, Length = 58.8, Diameter = 7.75, MaxHeatFlux = 2e5, Model = SectionModel.EnergiaCore,
             });
             d.Sections.Add(new SectionDef
             {
@@ -114,13 +115,13 @@ namespace Kare.Space.Core
                 Name = "Блоки А", Kind = SectionKind.Stage, DryMass = 4 * 35000, Propellant = 4 * 320000,
                 Engine = new EngineDef { Name = "РД-170", ThrustVac = 7.9e6, ThrustSL = 7.26e6, IspVac = 337, GimbalDeg = 8 },
                 EngineCount = 4, Length = 38.3, Diameter = 3.92, MaxHeatFlux = 2e5,
-                RadialCount = 4, RadialParent = 0, RadialOffset = 5.9, RadialPhase = Math.PI / 4,
+                RadialCount = 4, RadialParent = 0, RadialOffset = 5.9, RadialPhase = Math.PI / 4, Model = SectionModel.EnergiaBlockA,
             });
             d.Sections.Add(Orbiter("«Буран»", orbLen, 5.6, orbSpan, 250, orbSweep, 38.5, 8.0,
                 dry: 72000, propellant: 8000,
                 new EngineDef { Name = "ОДУ", ThrustVac = 88e3, ThrustSL = 60e3, IspVac = 362, Ignitions = 10 },
                 // 3,875 (радиус Ц) + 2,8 (радиус фюзеляжа) + ~0,5 на узлы крепления.
-                besideOffset: 7.2, crew: 0));
+                besideOffset: 7.2, crew: 0, model: SectionModel.Buran));
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 1));
             d.Sequence.Add(new StageAction(StageActionType.Ignite, 0, withPrevious: true));
             d.Sequence.Add(new StageAction(StageActionType.Separate, 1));
@@ -134,9 +135,12 @@ namespace Kare.Space.Core
         /// Cd0 крыла 0,02 — толстый профиль с плитками ТЗП, отсюда L/D ≈ 4,5 на дозвуке (у «Шаттла» 4,5–5).
         /// </summary>
         static SectionDef Orbiter(string name, double len, double diam, double span, double area, double sweep,
-            double finArea, double finHeight, double dry, double propellant, EngineDef oms, double besideOffset, int crew) => new SectionDef
+            double finArea, double finHeight, double dry, double propellant, EngineDef oms, double besideOffset, int crew,
+            SectionModel model = SectionModel.None) => new SectionDef
         {
             Name = name, Kind = SectionKind.Stage, DryMass = dry, Propellant = propellant, Engine = oms, EngineCount = 2,
+            // Вид — FBX из winged_parts.py; крыло и киль физики остаются по WingDef ниже, пластины WingMesh не рисуются.
+            Model = model,
             Length = len, Diameter = diam, Crew = crew,
             // РСУ орбитера: 38 основных двигателей по 3,9 кН, плечо ~15 м — по оси ~2·10⁵ Н·м.
             RcsTorque = 2e5,

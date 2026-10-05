@@ -57,6 +57,8 @@ namespace Kare.Space.Core
         // Корабли после «Аполлона» и станции (Tools/blender/station_parts.py): блок И, шлюз «Волга», «Союз ТМ» (ПАО, СА, БО,
         // половина обтекателя с САС), МКС 2000 и 2020, Falcon 9, Crew Dragon. Только в конец: значения пишутся в сцену числами.
         R7BlockI, VoskhodAirlock, SoyuzPAO, SoyuzSA, SoyuzBO, SoyuzShroud, ISS2000, ISS2020, Falcon9S1, Falcon9S2, DragonTrunk, CrewDragon,
+        // Крылатые системы (Tools/blender/winged_parts.py): орбитер «Шаттла», ET, SRB, «Буран», блоки Ц и А «Энергии».
+        ShuttleOrbiter, ShuttleET, ShuttleSRB, Buran, EnergiaCore, EnergiaBlockA,
     }
 
     public enum SectionKind

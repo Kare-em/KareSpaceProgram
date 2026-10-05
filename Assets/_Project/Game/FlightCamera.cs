@@ -35,6 +35,14 @@ namespace Kare.Space.Game
         const float PanSpeed = 0.06f, PanLimit = 3f;
         /// <summary>Щелчок СКМ без сдвига (сумма осей мыши меньше порога) возвращает центр на борт.</summary>
         const float PanClick = 0.2f;
+        /// <summary>
+        /// Камера не опускается ниже стольких метров над рельефом (§10.3). Снизу грунт отсечён по задним граням —
+        /// виден не грунт, а небо, и всё, что лежит на грунте, рисуется поверх борта: при взлёте «Сервейора» ночью
+        /// камера под Луной (Pitch −35°, 6 м) видела клубы пыли под соплом оранжевыми пятнами «сквозь корабль» —
+        /// их принимали за свечение Земли (замер 05.10.2026). Пара: NearClip 1 м — ближняя плоскость не режет грунт
+        /// под камерой; по физике рельефа (Terrain.Height), меш патча совпадает с ней до долей метра.
+        /// </summary>
+        const float GroundClearance = 2f;
 
         Camera cam;
         Quaternion frame = Quaternion.identity;
@@ -122,7 +130,16 @@ namespace Kare.Space.Game
                        // Купол висит над бортом по вертикали: цель на середину связки, иначе купол режется верхним краем
                        // (кадр на 6 км, 01.10.2026). Пара: ChuteReach — та же высота, что и в подгонке дистанции.
                        + up * (float)(VesselView.ChuteReach(v) * 0.5);
-            transform.SetPositionAndRotation(target - rot * Vector3.forward * Distance, rot);
+            var pos = target - rot * Vector3.forward * Distance;
+            // Над рельефом (см. GroundClearance): поднимаем по вертикали и смотрим на ту же цель — кадр «с земли вверх».
+            var rel = pos - FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v));
+            double agl = v.Body.AltitudeAboveTerrain(v.Position + new Vector3d(rel.x, rel.y, rel.z).SwapYZ);
+            if (agl < GroundClearance)
+            {
+                pos += up * (float)(GroundClearance - agl);
+                rot = Quaternion.LookRotation(target - pos, up);
+            }
+            transform.SetPositionAndRotation(pos, rot);
         }
     }
 }

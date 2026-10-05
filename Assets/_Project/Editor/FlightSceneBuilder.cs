@@ -116,6 +116,7 @@ namespace Kare.Space.EditorTools
             boot.CapsuleMesh = ModelMesh("Vostok_Capsule");
             boot.EngineMesh = ModelMesh("RD107_Engine");
             boot.LegMesh = ModelMesh("Lander_Leg");
+            boot.GearMesh = ModelMesh("Landing_Gear");
             boot.TrussMesh = ModelMesh("Pad_Truss_Arm");
             boot.SputnikMesh = ModelMesh("Sputnik_PS1");
             boot.VostokServiceMesh = ModelMesh("Vostok_Service");
@@ -336,7 +337,7 @@ namespace Kare.Space.EditorTools
             "Pad_Saturn_ML", "Pad_Saturn_LUT", "Pad_Arm_Light", "Pad_Arm_Heavy",
         };
 
-        static readonly (SectionModel, string)[] CraftFiles =
+        internal static readonly (SectionModel, string)[] CraftFiles =
         {
             (SectionModel.Lunokhod, "Lunokhod"), (SectionModel.Luna17KT, "Luna17_KT"),
             (SectionModel.LMDescent, "LM_Descent"), (SectionModel.LMAscent, "LM_Ascent"),
@@ -360,6 +361,10 @@ namespace Kare.Space.EditorTools
             (SectionModel.SoyuzShroud, "Soyuz_Shroud_Half"), (SectionModel.ISS2000, "ISS_2000"), (SectionModel.ISS2020, "ISS_2020"),
             (SectionModel.Falcon9S1, "Falcon9_S1"), (SectionModel.Falcon9S2, "Falcon9_S2"),
             (SectionModel.DragonTrunk, "Dragon_Trunk"), (SectionModel.CrewDragon, "Crew_Dragon"),
+            // Tools/blender/winged_parts.py
+            (SectionModel.ShuttleOrbiter, "Shuttle_Orbiter"), (SectionModel.ShuttleET, "Shuttle_ET"),
+            (SectionModel.ShuttleSRB, "Shuttle_SRB"), (SectionModel.Buran, "Buran"),
+            (SectionModel.EnergiaCore, "Energia_BlockTs"), (SectionModel.EnergiaBlockA, "Energia_BlockA"),
         };
 
         /// <summary>Раскладное (§6.12): опоры и трапы — отдельные FBX, по объекту на опору (Tools/blender, split_deploy).</summary>

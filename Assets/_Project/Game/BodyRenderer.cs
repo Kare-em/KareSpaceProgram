@@ -99,6 +99,18 @@ namespace Kare.Space.Game
         const double PatchHalf = 80000;
         /// <summary>Выше этой высоты над рельефом патч не нужен — горизонт дальше полуширины патча.</summary>
         const double PatchMaxAltitude = 40000;
+        /// <summary>
+        /// Сдвиг борта от центра патча, после которого патч перестраивается, м: у грунта PatchNearMove, выше —
+        /// 0,3 высоты, на скорости — путь за PatchRebuildPeriod (низкий бреющий полёт не перестраивает каждый кадр).
+        /// Почему не прежние 300 м: узлы x = L·t·|t| в 300 м от центра стоят через ≈150 м, и детальный шум рельефа
+        /// (волны до DetailFinest = 30 м) меж ними теряется — меш под опорами расходился с ядром до ±3,9 м
+        /// (замер по 9 точкам Луны 05.10.2026), опоры уходили в грунт или висели. В 30 м — ±0,4 м.
+        /// Пара: шаг патча в центре ≈ 20 м (PatchN, PatchHalf) — порог меньше двух шагов.
+        /// </summary>
+        const double PatchNearMove = 30, PatchRebuildPeriod = 1;
+        /// <summary>Запас дырки сферы от края патча, м: грань сферы вырезается, только если вся лежит в квадрате
+        /// патча, уменьшенном на это. Пара: PatchHalf — грань Луны 21 км (512 сегм.), под бортом вырезано ≥ 59 км.</summary>
+        const double HoleMargin = 1000;
 
         sealed class Entry
         {
@@ -115,6 +127,12 @@ namespace Kare.Space.Game
             /// <summary>Земля, Луна, Марс — густая сетка и крупные текстуры, сфера опущена под патч.</summary>
             public bool Detailed;
             public MeshFilter Mf;
+            /// <summary>Сфера для дырки под патчем (CutUnderPatch): направления вершин (оси Unity), все треугольники,
+            /// какие грани сейчас вырезаны. Пересоздаются в BuildLod вместе с сеткой.</summary>
+            public Vector3[] Dirs;
+            public int[] Tris;
+            public bool[] Cut;
+            public int Seg;
             public MeshFilter CloudMf;
             public Material CloudMat;
         }
@@ -209,6 +227,13 @@ namespace Kare.Space.Game
             e.SphereRadius = b.Radius - (e.Detailed ? sag * 1.5 : 0);
             Free(e.Mf.sharedMesh);
             e.Mf.sharedMesh = Own(BuildSphere(b, seg, e.SphereRadius));
+            // Новая сетка — целая; дырку под патчем режем заново, если патч сейчас на этом теле.
+            e.Seg = seg;
+            e.Tris = e.Mf.sharedMesh.triangles;
+            e.Dirs = e.Mf.sharedMesh.vertices;
+            for (int i = 0; i < e.Dirs.Length; i++) e.Dirs[i] = e.Dirs[i].normalized;
+            e.Cut = null;
+            if (patchBody == b && patchTr != null && patchTr.gameObject.activeSelf) CutUnderPatch(e, true);
 
             // Настоящая карта (§9.4): процедурная Луна не совпадала с морями и была вдвое светлее, у планет — полосы
             // вместо облачных поясов. Ассет, не своё — Own/Free не трогают его; уровень детали на него не влияет
@@ -457,13 +482,17 @@ namespace Kare.Space.Game
             bool want = Compression && b.Terrain != null && v.Alive && v.TerrainAltitude < PatchMaxAltitude;
             if (!want)
             {
-                if (patchTr.gameObject.activeSelf) patchTr.gameObject.SetActive(false);
+                if (patchTr.gameObject.activeSelf)
+                {
+                    patchTr.gameObject.SetActive(false);
+                    if (patchBody != null && byBody.TryGetValue(patchBody, out var pe)) CutUnderPatch(pe, false);
+                }
                 return;
             }
             // Положение борта в осях тела: Orientation переводит оси тела в инерциальные P.
             var bf = (b.Orientation.Inverse * v.Position).normalized;
             double moved = Vector3d.Angle(bf, patchCenterBf) * b.Radius;
-            double limit = System.Math.Max(300, v.TerrainAltitude * 0.3);
+            double limit = System.Math.Max(PatchNearMove, System.Math.Max(v.TerrainAltitude * 0.3, v.HorizontalSpeed * PatchRebuildPeriod));
             if (patchBody != b || moved > limit || !patchTr.gameObject.activeSelf)
                 RebuildPatch(b, bf);
             patchTr.SetPositionAndRotation(
@@ -506,14 +535,26 @@ namespace Kare.Space.Game
                 // Средний цвет тайла → цвет тела в точке: с высоты патч не выделяется квадратом.
                 e.PatchMat.SetColor("_BaseColor", new Color(c.r / e.GroundMean.r, c.g / e.GroundMean.g, c.b / e.GroundMean.b, 1));
             }
+            // Рельеф узлов — параллельно: у грунта патч теперь перестраивается каждые PatchNearMove, а 129² отсчётов
+            // рельефа в один поток — ≈ 40 мс (замер Луна, 05.10.2026). Рельеф — чистая функция (как в ConservativeHeights).
+            var dirs = new Vector3d[n * n];
+            var hs = new double[n * n];
+            System.Threading.Tasks.Parallel.For(0, n, j =>
+            {
+                double ty = 2.0 * j / PatchN - 1, y = PatchHalf * ty * System.Math.Abs(ty) / b.Radius;
+                for (int i = 0; i < n; i++)
+                {
+                    double tx = 2.0 * i / PatchN - 1, x = PatchHalf * tx * System.Math.Abs(tx) / b.Radius;
+                    var d = (centerBf + e1 * x + e2 * y).normalized;
+                    dirs[j * n + i] = d;
+                    hs[j * n + i] = b.SurfaceHeight(d);
+                }
+            });
             for (int j = 0; j < n; j++)
             for (int i = 0; i < n; i++)
             {
-                double tx = 2.0 * i / PatchN - 1, ty = 2.0 * j / PatchN - 1;
-                double x = PatchHalf * tx * System.Math.Abs(tx) / b.Radius;
-                double y = PatchHalf * ty * System.Math.Abs(ty) / b.Radius;
-                var dir = (centerBf + e1 * x + e2 * y).normalized;
-                double hgt = b.SurfaceHeight(dir);
+                var dir = dirs[j * n + i];
+                double hgt = hs[j * n + i];
                 if (ocean) verts[wb + j * n + i] = FloatingOrigin.ToVector3((dir * b.Radius - patchCenterLocal).SwapYZ);
                 if (ocean && hgt <= 0)
                 {
@@ -568,6 +609,70 @@ namespace Kare.Space.Game
             if (oldMesh != null) Destroy(oldMesh);
             patchMr.sharedMaterials = ocean ? new[] { e.PatchMat, waterMat } : new[] { e.PatchMat };
             patchTr.gameObject.SetActive(true);
+            patchE1 = e1;
+            patchE2 = e2;
+            foreach (var o in entries)
+                if (o != e && o.Cut != null) CutUnderPatch(o, false);
+            CutUnderPatch(e, true);
+        }
+
+        Vector3d patchE1, patchE2; // оси патча в осях тела (P), как в RebuildPatch
+
+        /// <summary>
+        /// Дырка в дальней сфере под патчем (§2.8). Грань сферы — плоскость между вершинами в 10–20 км, и где рельеф
+        /// под ней проседает (кратер, впадина), она встаёт над патчем наклонной плитой: на Луне (512 сегм.) сфера выше
+        /// рельефа в 0,9 % случайных точек, до +494 м, у вала Тихо +46 м в 10 км (замер 05.10.2026) — борт «садился сквозь
+        /// текстуру»: опоры на патче, а сверху их накрывала грань сферы. Опускать сферу на сотни метров нельзя (у края
+        /// патча откроется щель), поэтому грани, целиком лежащие в квадрате патча, просто не рисуются — там есть патч.
+        /// on = false возвращает сетку целой (патча нет — сфера нужна вся).
+        /// </summary>
+        void CutUnderPatch(Entry e, bool on)
+        {
+            if (e.Tris == null || e.Dirs == null) return;
+            var mesh = e.Mf.sharedMesh;
+            int faces = e.Tris.Length / 6;
+            if (!on)
+            {
+                if (e.Cut == null) return;
+                e.Cut = null;
+                mesh.SetTriangles(e.Tris, 0, false);
+                return;
+            }
+            // Оси патча — в оси сетки сферы (Unity = P с SwapYZ). Скалярные произведения перестановка осей не меняет.
+            var c = FloatingOrigin.ToVector3(patchCenterBf.SwapYZ);
+            var a1 = FloatingOrigin.ToVector3(patchE1.SwapYZ);
+            var a2 = FloatingOrigin.ToVector3(patchE2.SwapYZ);
+            double lim = (PatchHalf - HoleMargin) / e.Body.Radius;
+            int cols = e.Seg + 1;
+            var cut = new bool[faces];
+            bool changed = e.Cut == null;
+            int kept = 0;
+            for (int f = 0; f < faces; f++)
+            {
+                int r = f / e.Seg, s = f % e.Seg, a = r * cols + s;
+                cut[f] = Inside(e.Dirs[a]) && Inside(e.Dirs[a + 1]) && Inside(e.Dirs[a + cols]) && Inside(e.Dirs[a + cols + 1]);
+                if (!cut[f]) kept++;
+                if (!changed && cut[f] != e.Cut[f]) changed = true;
+            }
+            if (!changed) return;
+            e.Cut = cut;
+            var tris = new int[kept * 6];
+            int t = 0;
+            for (int f = 0; f < faces; f++)
+            {
+                if (cut[f]) continue;
+                System.Array.Copy(e.Tris, f * 6, tris, t, 6);
+                t += 6;
+            }
+            mesh.SetTriangles(tris, 0, false);
+
+            // Точка в квадрате патча: проекция на касательную плоскость центра, как узлы патча (centre + e1·x + e2·y).
+            bool Inside(Vector3 d)
+            {
+                double cd = Vector3.Dot(d, c);
+                if (cd <= 0) return false;
+                return System.Math.Abs(Vector3.Dot(d, a1) / cd) < lim && System.Math.Abs(Vector3.Dot(d, a2) / cd) < lim;
+            }
         }
 
         static float Frac(double x) => (float)(x - System.Math.Floor(x));
@@ -857,6 +962,44 @@ namespace Kare.Space.Game
             return Color.Lerp(Color.Lerp(P(x0, y0), P(x0 + 1, y0), tx), Color.Lerp(P(x0, y0 + 1), P(x0 + 1, y0 + 1), tx), ty);
         }
 
+        /// <summary>Сколько текселей Small искать сушу вокруг точки: 2048 по долготе — ≈ 20 км, то есть до ≈ 120 км.</summary>
+        const int LandSearch = 6;
+
+        /// <summary>
+        /// Цвет суши по снимку — только по сухим текселям. Мыс Канаверал (полоса суши 5–10 км между лагунами и океаном)
+        /// на Small 2048 (≈ 20 км тексель) целиком «вода»: у LC-39A выборка давала (50, 71, 93) — синий, и весь грунт
+        /// патча тонировался под воду (замер 05.10.2026; Орландо — (113, 120, 72)). Поэтому водные тексели (синий
+        /// преобладает) отбрасываются, а если сухих рядом нет — берётся среднее ближайшего кольца с сушей.
+        /// null — суши в LandSearch нет (остров в океане), тогда цвет процедурный.
+        /// </summary>
+        static Color? SampleLand(Color32[] px, int w, int h, double lat, double lon)
+        {
+            double fx = (lon + 180) / 360 * w - 0.5, fy = (lat + 90) / 180 * h - 0.5;
+            int x0 = (int)System.Math.Floor(fx), y0 = (int)System.Math.Floor(fy);
+            float tx = (float)(fx - x0), ty = (float)(fy - y0);
+            Color sum = Color.clear;
+            float wsum = 0;
+            void Add(int x, int y, float wt)
+            {
+                var c = px[Mathf.Clamp(y, 0, h - 1) * w + ((x % w) + w) % w];
+                if (c.b >= c.g + 10 && c.b >= c.r + 20) return; // вода: и океан (30, 59, 117), и лагуны (48, 70, 91); тёмная тайга — нет
+                sum += (Color)c * wt;
+                wsum += wt;
+            }
+            Add(x0, y0, (1 - tx) * (1 - ty));
+            Add(x0 + 1, y0, tx * (1 - ty));
+            Add(x0, y0 + 1, (1 - tx) * ty);
+            Add(x0 + 1, y0 + 1, tx * ty);
+            for (int r = 1; wsum <= 0 && r <= LandSearch; r++)
+                for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++)
+                    if (System.Math.Max(System.Math.Abs(dx), System.Math.Abs(dy)) == r) Add(x0 + dx, y0 + dy, 1);
+            if (wsum <= 0) return null;
+            var m = sum / wsum;
+            m.a = 1;
+            return m;
+        }
+
         /// <summary>Цвет тела в точке — им же рисуется сфера (BuildTexture) и тонируется грунт патча.</summary>
         static Color SurfaceColor(CelestialBody b, BodyLook look, double lat, double lon)
         {
@@ -866,7 +1009,7 @@ namespace Kare.Space.Game
                 // Суша — по снимку (его же видно на сфере), вода — своя: патч красит океан по глубине (OceanColor).
                 var c0 = EarthSurface.Sample(b, lat, lon, out _);
                 if (!map || b.SurfaceHeight(CelestialBody.LatLonToBodyFixed(lat, lon)) <= 0) return c0;
-                return SampleMap(sm.Px, sm.W, sm.H, lat, lon);
+                return SampleLand(sm.Px, sm.W, sm.H, lat, lon) ?? c0;
             }
             if (map) return SampleMap(sm.Px, sm.W, sm.H, lat, lon);
             if (look.Bands > 0)

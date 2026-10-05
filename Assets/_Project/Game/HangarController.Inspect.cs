@@ -16,35 +16,6 @@ namespace Kare.Space.Game
         /// <summary>Ширина окна ступеней, px IMGUI (база 1080). Пара: кнопка «Ступени» прижата к тому же правому краю.</summary>
         const float StagesWinW = 440;
 
-        /// <summary>
-        /// Уставки высоты ввода парашюта (§4.8), выставленные в окне детали: CraftPart (ядро) или CraftRadial (блок) →
-        /// м. В Craft поля нет (его формат JSON общий с тестами), поэтому живут до выхода из игры и в _last.json не
-        /// попадают; в проект ракеты ставятся каждый кадр в LateUpdate — после перекомпиляции в Update и до запуска
-        /// из OnGUI (Launch берёт build.Design как есть).
-        /// </summary>
-        static readonly Dictionary<object, double> chuteAlt = new Dictionary<object, double>();
-
-        void LateUpdate()
-        {
-            var d = build?.Design;
-            if (d == null || chuteAlt.Count == 0) return;
-            foreach (var kv in chuteAlt)
-            {
-                int sec = -1;
-                if (kv.Key is CraftPart cp)
-                {
-                    int k = craft.Stack.IndexOf(cp);
-                    if (k >= 0 && build.PartSection != null && k < build.PartSection.Length) sec = build.PartSection[k];
-                }
-                else if (kv.Key is CraftRadial rad)
-                {
-                    int g = craft.Radials.IndexOf(rad);
-                    if (g >= 0 && build.RadialSection != null && g < build.RadialSection.Length) sec = build.RadialSection[g];
-                }
-                if (sec >= 0 && sec < d.Sections.Count) d.Sections[sec].ChuteAltitude = kv.Value;
-            }
-        }
-
         /// <summary>Щелчок здесь выбирает деталь: в предпросмотре, не над панелями и не над окнами.</summary>
         public bool CanInspect(Vector3 m) => build != null && InPreview(m);
 
@@ -73,7 +44,8 @@ namespace Kare.Space.Game
             double y = 0;
             for (int i = 0; i < craft.Stack.Count; i++)
             {
-                var p = PartCatalog.Get(craft.Stack[i].Id);
+                // Размеры детали стека (растянутый бак, обтекатель другого Ø) — как в RebuildPreview, иначе луч промахивается.
+                var p = PartCatalog.Resolve(craft.Stack[i]);
                 if (p == null) continue;
                 if (p.Fairing && d != null && layout != null)
                 {
@@ -173,21 +145,27 @@ namespace Kare.Space.Game
 
         PartInfo StackInfo(CraftPart cp)
         {
-            var p = PartCatalog.Get(cp.Id);
+            var p = PartCatalog.Resolve(cp);
             var info = new PartInfo
             {
                 Key = cp,
-                Title = () => p?.Name ?? cp.Id,
+                // Resolve каждый раз: окно живёт, пока игрок меняет размеры, — имя и массы должны идти за ними.
+                Title = () => PartCatalog.Resolve(cp)?.Name ?? cp.Id,
                 Text = () =>
                 {
+                    var q = PartCatalog.Resolve(cp);
                     int k = craft.Stack.IndexOf(cp);
                     var d = build?.Design;
-                    if (p == null || k < 0 || d == null || build.PartSection == null || k >= build.PartSection.Length)
+                    if (q == null || k < 0 || d == null || build.PartSection == null || k >= build.PartSection.Length)
                         return "<color=#9aa4ad>деталь снята со сборки</color>";
-                    return PartInfoText.Part(p, d.Sections[build.PartSection[k]], cp.Stage);
+                    return PartInfoText.Part(q, d.Sections[build.PartSection[k]], cp.Stage);
                 },
             };
-            if (p != null && p.ParachuteArea > 0) Chute(info, cp);
+            if (p != null && p.ParachuteArea > 0)
+            {
+                info.ChuteGet = () => FlightPhysics.ClampChuteAltitude(cp.ChuteAltitude);
+                info.ChuteSet = a => SetChute(ref cp.ChuteAltitude, a);
+            }
             return info;
         }
 
@@ -208,14 +186,23 @@ namespace Kare.Space.Game
                     return PartInfoText.Part(p, d.Sections[build.RadialSection[g]], rad.EngineStage);
                 },
             };
-            if (p != null && p.ParachuteArea > 0) Chute(info, rad);
+            if (p != null && p.ParachuteArea > 0)
+            {
+                info.ChuteGet = () => FlightPhysics.ClampChuteAltitude(rad.ChuteAltitude);
+                info.ChuteSet = a => SetChute(ref rad.ChuteAltitude, a);
+            }
             return info;
         }
 
-        static void Chute(PartInfo info, object key)
+        /// <summary>
+        /// Уставка высоты ввода парашюта (§4.8) живёт в Craft (CraftPart/CraftRadial.ChuteAltitude, JSON-ключ chuteAlt) и
+        /// попадает в секцию при компиляции — поэтому перекомпиляция. «Штатно» (7 км) хранится как NaN: ключ не пишется.
+        /// </summary>
+        void SetChute(ref double field, double a)
         {
-            info.ChuteGet = () => chuteAlt.TryGetValue(key, out double a) ? a : FlightPhysics.ChuteDeployAltitude;
-            info.ChuteSet = a => chuteAlt[key] = FlightPhysics.ClampChuteAltitude(a);
+            a = FlightPhysics.ClampChuteAltitude(a);
+            field = Math.Abs(a - FlightPhysics.ChuteDeployAltitude) < 1 ? double.NaN : a;
+            dirty = true;
         }
 
         // ---------------------------------------------------------------- ступени подробно

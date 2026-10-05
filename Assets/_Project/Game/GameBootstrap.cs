@@ -54,6 +54,8 @@ namespace Kare.Space.Game
         public Mesh EngineMesh;
         [Tooltip("Посадочная опора: начало — шарнир, стопа на 1,37 м ниже и 1,09 м наружу (−X).")]
         public Mesh LegMesh;
+        [Tooltip("Стойка шасси: начало — шарнир, колёса на 2,4 м по +X (наружу из брюха), ось колёс по Z. Tools/blender/winged_parts.py.")]
+        public Mesh GearMesh;
         [Tooltip("Ферма стола: начало у шарнира, длина 8,2 м по +Y.")]
         public Mesh TrussMesh;
         [Tooltip("ПС-1: начало в центре шара Ø0,58 м, антенны вниз (−Y) на 2,63 м.")]

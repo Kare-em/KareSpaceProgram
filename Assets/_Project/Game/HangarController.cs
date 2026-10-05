@@ -28,6 +28,8 @@ namespace Kare.Space.Game
         const float RefHeight = 1080;
         /// <summary>Ширина каталога слева и колонки сборки справа. Пара: зона мыши камеры (PreviewArea).</summary>
         const float LeftW = 360, RightW = 440, TopH = 52, StatsH = 230, Pad = 8, Row = 30;
+        /// <summary>Иконки деталей (PartIconSet), px IMGUI: в каталоге — в строку высотой 52, в стеке — в строку Row = 30.</summary>
+        const float CatalogIcon = 48, StackIcon = 26, IconPad = 3;
 
         Craft craft;
         CraftBuild build;
@@ -49,7 +51,7 @@ namespace Kare.Space.Game
         Vector3 target = new Vector3(0, 20, 0);
         Vector3 lastMouse;
 
-        GUIStyle head, label, small, btn, btnSmall, tab, rowBtn, err, warn, box;
+        GUIStyle head, label, small, btn, btnSmall, tab, rowBtn, rowIconBtn, stackIconBtn, err, warn, box;
 
         static readonly string[] CategoryNames = { "Командные", "Баки", "Двигатели", "Разделители", "Аэро", "Разное", "Нагрузка" };
         static readonly Color SelColor = new Color(1f, 0.55f, 0.15f);
@@ -169,12 +171,28 @@ namespace Kare.Space.Game
                 new Vessel(d).Layout(layout);
             }
             double y = 0;
+            // Крылья рисуются по WingDef, собранным компилятором (CraftCompiler.AddWings) — в той же точке, где их считает
+            // аэродинамика; k-я крыльевая деталь секции — k-я плоскость в SectionDef.Wings.
+            var wingIdx = new Dictionary<int, int>();
             for (int i = 0; i < craft.Stack.Count; i++)
             {
-                var p = PartCatalog.Get(craft.Stack[i].Id);
+                var p = PartCatalog.Resolve(craft.Stack[i]);
                 if (p == null) continue;
                 double baseY = layout != null && !p.Fairing ? layout[build.PartSection[i]] + build.PartOffset[i] : y;
                 bool sel = selStack == i && selRadial < 0;
+                if (p.Wing != null && layout != null)
+                {
+                    int sec = build.PartSection[i];
+                    wingIdx.TryGetValue(sec, out int k);
+                    wingIdx[sec] = k + 1;
+                    var wings = d.Sections[sec].Wings;
+                    var wm = wings != null && k < wings.Count ? WingMesh.Build(wings[k]) : null;
+                    if (wm != null)
+                    {
+                        Add(p.Name, wm, PartColor(p), sel).localPosition = Vector3.up * (float)layout[sec];
+                        continue;
+                    }
+                }
                 if (p.Fairing && d != null)
                 {
                     int fs = d.Sections.FindIndex(s => s.Kind == SectionKind.Fairing);
@@ -212,64 +230,22 @@ namespace Kare.Space.Game
             }
         }
 
-        static Color PartColor(PartDef p)
-        {
-            switch (p.Category)
-            {
-                case PartCategory.Command: return new Color(0.3f, 0.29f, 0.27f);
-                case PartCategory.Engine: return p.Propellant > 0 ? new Color(0.85f, 0.85f, 0.82f) : new Color(0.25f, 0.24f, 0.23f);
-                case PartCategory.Coupling: return new Color(0.12f, 0.12f, 0.12f);
-                case PartCategory.Payload: return new Color(0.8f, 0.62f, 0.28f);
-                case PartCategory.Utility: return new Color(0.5f, 0.5f, 0.5f);
-                default: return new Color(0.88f, 0.88f, 0.85f);
-            }
-        }
+        static Color PartColor(PartDef p) => PartShapes.ColorOf(p);
 
         void Part(PartDef p, Vector3 at, Quaternion rot, bool sel)
         {
-            float r0 = (float)p.Diameter * 0.5f, r1 = (float)p.Top * 0.5f, len = (float)p.Length;
-            var col = PartColor(p);
             var holder = new GameObject(p.Name).transform;
             holder.SetParent(root, false);
             holder.localPosition = at;
             holder.localRotation = rot;
-            if (len <= 0.01f)
+            // Геометрия общая с иконками каталога (PartShapes, меню Kare/Bake Part Icons): иконка = деталь в сборке.
+            PartShapes.Preview(p, (name, mesh, col, pos, q, scale) =>
             {
-                // Навесные детали (опоры, RCS, стабилизаторы) места в стеке не занимают — метка-кольцо по месту.
-                var ring = Add("Mark", ProcMesh.Frustum(r0 + 0.08f, r0 + 0.08f, 0.12f, 24, true), new Color(0.9f, 0.75f, 0.2f), sel, holder);
-                ring.localPosition = Vector3.zero;
-                return;
-            }
-            if (p.HasEngine && p.Propellant <= 0)
-            {
-                // Двигатель: рама сверху, сопла снизу; связка — кольцом (+ центральное от 5 штук), как в полёте.
-                float frame = len * 0.3f, bellH = len - frame;
-                Add("Frame", ProcMesh.Frustum(r0 * 0.85f, r1, frame, 24, true), col, sel, holder).localPosition = Vector3.up * bellH;
-                int n = p.EngineCount, ring = n >= 5 ? n - 1 : n == 1 ? 0 : n;
-                float rr = ring > 0 ? r0 * 0.62f : 0;
-                float nr = ring > 0 ? Mathf.Min(rr * Mathf.Sin(Mathf.PI / Mathf.Max(ring, 2)) * 0.95f, r0 * 0.35f) : r0 * 0.9f;
-                for (int k = 0; k < n; k++)
-                {
-                    float a = 2 * Mathf.PI * k / Mathf.Max(ring, 1);
-                    var b = Add("Bell", ProcMesh.Bell(nr, nr * 0.4f, bellH, 16), new Color(0.2f, 0.18f, 0.17f), sel, holder);
-                    b.localPosition = k < ring ? new Vector3(rr * Mathf.Cos(a), 0, rr * Mathf.Sin(a)) : Vector3.zero;
-                }
-                return;
-            }
-            if (p.HasEngine)
-            {
-                // РДТТ: корпус с топливом и короткое сопло.
-                float noz = Mathf.Min(len * 0.1f, r0 * 1.2f);
-                Add("Bell", ProcMesh.Bell(r0 * 0.6f, r0 * 0.3f, noz, 16), new Color(0.2f, 0.18f, 0.17f), sel, holder);
-                Add("Case", ProcMesh.Frustum(r0, r1, len - noz, 24, true), col, sel, holder).localPosition = Vector3.up * noz;
-                return;
-            }
-            Mesh mesh;
-            if (p.Sphere) mesh = ProcMesh.Sphere(r0, len * 0.5f, 24, 12);
-            else if (p.NoseCone) mesh = ProcMesh.Frustum(r0, r0 * 0.12f, len, 24, true);
-            else if (p.Category == PartCategory.Command) mesh = ProcMesh.Frustum(r0, Mathf.Max(r1 * 0.35f, 0.2f), len, 24, true);
-            else mesh = ProcMesh.Frustum(r0, r1, len, 24, true);
-            Add("Body", mesh, col, sel, holder);
+                var t = Add(name, mesh, col, sel, holder);
+                t.localPosition = pos;
+                t.localRotation = q;
+                t.localScale = scale;
+            });
         }
 
         void Fairing(SectionDef s, float baseY, bool sel)
@@ -448,7 +424,10 @@ namespace Kare.Space.Game
             {
                 var p = list[i];
                 string line = $"{p.Name}\n<size=12>Ø {p.Diameter:0.##} м · {p.Length:0.##} м · {p.Mass / 1000:0.###} т{EngineText(p)}</size>";
-                if (GUI.Button(new Rect(0, i * (item + 4), w - 20, item), new GUIContent(line, p.Description), rowBtn)) AddPart(p.Id);
+                var icon = PartIconSet.Get(p.Id);
+                var row = new Rect(0, i * (item + 4), w - 20, item);
+                if (GUI.Button(row, new GUIContent(line, p.Description), icon != null ? rowIconBtn : rowBtn)) AddPart(p.Id);
+                if (icon != null) GUI.DrawTexture(new Rect(row.x + IconPad, row.y + (item - CatalogIcon) * 0.5f, CatalogIcon, CatalogIcon), icon, ScaleMode.ScaleToFit);
             }
             GUI.EndScrollView();
         }
@@ -482,7 +461,10 @@ namespace Kare.Space.Game
             GUI.enabled = true;
             y += Row + 6;
 
-            float editorH = selRadial >= 0 ? 150 : 0;
+            // Под списком — либо редактор боковой группы, либо размеры выбранной детали ядра (§5.4).
+            var selPart = selStack >= 0 && selRadial < 0 && selStack < craft.Stack.Count ? PartCatalog.Resolve(craft.Stack[selStack]) : null;
+            int paramRows = selPart != null ? ParamCount(selPart.Params) : 0;
+            float editorH = selRadial >= 0 ? 150 : paramRows > 0 ? 28 + (paramRows + 1) * (Row + 2) : 0;
             var view = new Rect(x, y, w, r.yMax - y - 8 - editorH);
             int rows = craft.Stack.Count + craft.Radials.Count;
             stackScroll = GUI.BeginScrollView(view, stackScroll, new Rect(0, 0, w - 20, rows * (Row + 2)));
@@ -490,11 +472,13 @@ namespace Kare.Space.Game
             for (int i = craft.Stack.Count - 1; i >= 0; i--)
             {
                 var cp = craft.Stack[i];
-                var p = PartCatalog.Get(cp.Id);
+                var p = PartCatalog.Resolve(cp);
                 GUI.color = selStack == i && selRadial < 0 ? SelColor : Color.white;
                 string st = p != null && p.Stageable && cp.Stage >= 0 ? $"[{cp.Stage + 1}] " : "";
-                if (GUI.Button(new Rect(0, ry, iw - 96, Row), st + (p?.Name ?? cp.Id), rowBtn)) { selStack = i; selRadial = -1; dirty = true; }
+                var icon = PartIconSet.Get(cp.Id);
+                if (GUI.Button(new Rect(0, ry, iw - 96, Row), st + (p?.Name ?? cp.Id), icon != null ? stackIconBtn : rowBtn)) { selStack = i; selRadial = -1; dirty = true; }
                 GUI.color = Color.white;
+                if (icon != null) GUI.DrawTexture(new Rect(IconPad, ry + (Row - StackIcon) * 0.5f, StackIcon, StackIcon), icon, ScaleMode.ScaleToFit);
                 if (GUI.Button(new Rect(iw - 94, ry, 30, Row), "▲", btnSmall) && i + 1 < craft.Stack.Count) { craft.Swap(i, i + 1); selStack = i + 1; dirty = true; }
                 if (GUI.Button(new Rect(iw - 62, ry, 30, Row), "▼", btnSmall) && i > 0) { craft.Swap(i, i - 1); selStack = i - 1; dirty = true; }
                 if (GUI.Button(new Rect(iw - 30, ry, 30, Row), "✕", btnSmall)) { craft.RemoveAt(i); selRadial = -1; selStack = Mathf.Min(i, craft.Stack.Count - 1); dirty = true; }
@@ -513,6 +497,64 @@ namespace Kare.Space.Game
             }
             GUI.EndScrollView();
             if (selRadial >= 0) RadialEditor(new Rect(x, r.yMax - editorH - 4, w, editorH));
+            else if (paramRows > 0) ParamEditor(new Rect(x, r.yMax - editorH - 4, w, editorH), craft.Stack[selStack], selPart);
+        }
+
+        static int ParamCount(PartParam f)
+        {
+            int n = 0;
+            foreach (var q in PartCatalog.ParamOrder) if ((f & q) != 0) n++;
+            return n;
+        }
+
+        /// <summary>
+        /// Размеры детали (§5.4): длина/диаметр баков, переходников, конусов; у крыльев — размах, хорда, стреловидность,
+        /// установка и V. Значения хранит CraftPart (в JSON — только заданные), масса, топливо и площади пересчитываются
+        /// в PartCatalog.Resolve, а dirty перекомпилирует проект — Δv, TWR и аэродинамика обновляются сразу.
+        /// Кнопки: шаг PartCatalog.Range(p).Step и десять шагов; пределы — там же.
+        /// </summary>
+        void ParamEditor(Rect r, CraftPart cp, PartDef p)
+        {
+            float x = r.x, y = r.y, w = r.width;
+            GUI.Label(new Rect(x, y, w, 24), $"Размеры: {p.Name}", label);
+            y += 28;
+            const float bw = 40, vw = 80;
+            float lw = w - 4 * (bw + 4) - vw - 4;
+            foreach (var q in PartCatalog.ParamOrder)
+            {
+                if ((p.Params & q) == 0) continue;
+                var range = PartCatalog.Range(q);
+                double v = PartCatalog.Value(p, q);
+                GUI.Label(new Rect(x, y, lw, Row), PartCatalog.ParamName(q), small);
+                float bx = x + lw;
+                double step = range.Step;
+                if (GUI.Button(new Rect(bx, y, bw, Row), new GUIContent("−−", $"−{step * 10:0.##}"), btnSmall)) SetParam(cp, q, v - 10 * step);
+                bx += bw + 4;
+                if (GUI.Button(new Rect(bx, y, bw, Row), new GUIContent("−", $"−{step:0.##}"), btnSmall)) SetParam(cp, q, v - step);
+                bx += bw + 4;
+                GUI.Label(new Rect(bx, y, vw, Row), v.ToString(step < 1 ? "0.00" : "0.0"), label);
+                bx += vw + 4;
+                if (GUI.Button(new Rect(bx, y, bw, Row), new GUIContent("+", $"+{step:0.##}"), btnSmall)) SetParam(cp, q, v + step);
+                bx += bw + 4;
+                if (GUI.Button(new Rect(bx, y, bw, Row), new GUIContent("++", $"+{step * 10:0.##}"), btnSmall)) SetParam(cp, q, v + 10 * step);
+                y += Row + 2;
+            }
+            GUI.enabled = cp.HasParams;
+            if (GUI.Button(new Rect(x, y, 160, Row), new GUIContent("Как в каталоге", "Сбросить размеры детали"), btnSmall))
+            {
+                foreach (var q in PartCatalog.ParamOrder) cp.Set(q, double.NaN);
+                dirty = true;
+            }
+            GUI.enabled = true;
+        }
+
+        void SetParam(CraftPart cp, PartParam q, double v)
+        {
+            var range = PartCatalog.Range(q);
+            // Округление к сетке шага: 0,1 + 0,2 в double даёт 0,30000000000000004 и плодит записи в кеше Resolve.
+            v = Math.Round(v / range.Step) * range.Step;
+            cp.Set(q, range.Clamp(v));
+            dirty = true;
         }
 
         void RadialEditor(Rect r)
@@ -574,7 +616,7 @@ namespace Kare.Space.Game
             for (int i = 0; i < craft.Stack.Count; i++)
             {
                 var cp = craft.Stack[i];
-                var p = PartCatalog.Get(cp.Id);
+                var p = PartCatalog.Resolve(cp);
                 if (p == null || !p.Stageable) continue;
                 string verb = p.HasEngine ? "Запуск" : p.Decoupler ? "Отделение" : p.Fairing ? "Сброс" : "Парашют";
                 items.Add(new StageItem { Text = $"{verb}: {p.Name}", Stage = cp.Stage, Set = s => cp.Stage = s });
@@ -690,6 +732,11 @@ namespace Kare.Space.Game
             tab = new GUIStyle(btnSmall) { fontSize = 12, padding = new RectOffset(2, 2, 2, 2) };
             rowBtn = new GUIStyle(GUI.skin.button) { fontSize = 14, alignment = TextAnchor.MiddleLeft, richText = true, wordWrap = false };
             rowBtn.padding.left = 10;
+            // Строки с иконкой: текст сдвинут за иконку (IconPad + размер + зазор).
+            rowIconBtn = new GUIStyle(rowBtn);
+            rowIconBtn.padding.left = (int)(IconPad + CatalogIcon + 8);
+            stackIconBtn = new GUIStyle(rowBtn);
+            stackIconBtn.padding.left = (int)(IconPad + StackIcon + 6);
             err = new GUIStyle(small);
             err.normal.textColor = new Color(1f, 0.45f, 0.4f);
             warn = new GUIStyle(small);

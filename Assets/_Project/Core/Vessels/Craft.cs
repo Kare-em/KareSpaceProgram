@@ -10,9 +10,81 @@ namespace Kare.Space.Core
     {
         public string Id;
         public int Stage = -1;
+        /// <summary>
+        /// Размеры игрока (§5.4, PartParam): NaN — каталожное значение. В JSON — необязательными ключами, старые сохранения
+        /// открываются как есть. Пересчёт масс и площадей — PartCatalog.Resolve.
+        /// </summary>
+        public double Length = double.NaN, Diameter = double.NaN, Top = double.NaN, Span = double.NaN, Chord = double.NaN,
+            Sweep = double.NaN, Incidence = double.NaN, Dihedral = double.NaN;
+
+        /// <summary>
+        /// Высота ввода парашюта, м (§4.8, окно детали в ангаре): NaN — штатная FlightPhysics.ChuteDeployAltitude. Не размер —
+        /// в HasParams/ParamKey не входит (кеш Resolve от неё не зависит); в JSON — необязательный ключ ChuteKey.
+        /// </summary>
+        public double ChuteAltitude = double.NaN;
+
+        /// <summary>JSON-ключ высоты ввода парашюта у детали стека и у боковой группы; пишется только заданный.</summary>
+        public const string ChuteKey = "chuteAlt";
 
         public CraftPart() { }
         public CraftPart(string id, int stage = -1) { Id = id; Stage = stage; }
+
+        /// <summary>JSON-ключи параметров, в порядке PartCatalog.ParamOrder.</summary>
+        public static readonly string[] ParamKeys = { "length", "diameter", "top", "span", "chord", "sweep", "incidence", "dihedral" };
+
+        public double Get(PartParam p)
+        {
+            switch (p)
+            {
+                case PartParam.Length: return Length;
+                case PartParam.Diameter: return Diameter;
+                case PartParam.Top: return Top;
+                case PartParam.Span: return Span;
+                case PartParam.Chord: return Chord;
+                case PartParam.Sweep: return Sweep;
+                case PartParam.Incidence: return Incidence;
+                case PartParam.Dihedral: return Dihedral;
+                default: return double.NaN;
+            }
+        }
+
+        public void Set(PartParam p, double v)
+        {
+            switch (p)
+            {
+                case PartParam.Length: Length = v; break;
+                case PartParam.Diameter: Diameter = v; break;
+                case PartParam.Top: Top = v; break;
+                case PartParam.Span: Span = v; break;
+                case PartParam.Chord: Chord = v; break;
+                case PartParam.Sweep: Sweep = v; break;
+                case PartParam.Incidence: Incidence = v; break;
+                case PartParam.Dihedral: Dihedral = v; break;
+            }
+        }
+
+        public bool HasParams
+        {
+            get
+            {
+                foreach (var p in PartCatalog.ParamOrder)
+                    if (!double.IsNaN(Get(p))) return true;
+                return false;
+            }
+        }
+
+        /// <summary>Ключ кеша PartCatalog.Resolve: Id и заданные значения.</summary>
+        public string ParamKey()
+        {
+            var sb = new StringBuilder(Id);
+            foreach (var p in PartCatalog.ParamOrder)
+            {
+                double v = Get(p);
+                sb.Append('|');
+                if (!double.IsNaN(v)) sb.Append(v.ToString("R", CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
     }
 
     /// <summary>
@@ -26,6 +98,8 @@ namespace Kare.Space.Core
         public double Lift;
         public List<string> Parts = new List<string>();
         public int EngineStage = -1, SepStage = -1;
+        /// <summary>Высота ввода парашютов блоков, м; NaN — штатная (как CraftPart.ChuteAltitude).</summary>
+        public double ChuteAltitude = double.NaN;
     }
 
     /// <summary>
@@ -79,20 +153,38 @@ namespace Kare.Space.Core
             sb.Append("{\n  \"name\": ").Append(Json.Quote(Name)).Append(",\n  \"stack\": [");
             for (int i = 0; i < Stack.Count; i++)
                 sb.Append(i == 0 ? "\n" : ",\n").Append("    { \"part\": ").Append(Json.Quote(Stack[i].Id))
-                    .Append(", \"stage\": ").Append(Stack[i].Stage).Append(" }");
+                    .Append(", \"stage\": ").Append(Stack[i].Stage).Append(ParamsJson(Stack[i])).Append(" }");
             sb.Append(Stack.Count > 0 ? "\n  ],\n  \"radials\": [" : "],\n  \"radials\": [");
             for (int i = 0; i < Radials.Count; i++)
             {
                 var r = Radials[i];
                 sb.Append(i == 0 ? "\n" : ",\n").Append("    { \"parent\": ").Append(r.Parent).Append(", \"symmetry\": ").Append(r.Symmetry)
                     .Append(", \"lift\": ").Append(r.Lift.ToString("R", CultureInfo.InvariantCulture))
-                    .Append(", \"engineStage\": ").Append(r.EngineStage).Append(", \"sepStage\": ").Append(r.SepStage).Append(", \"parts\": [");
+                    .Append(", \"engineStage\": ").Append(r.EngineStage).Append(", \"sepStage\": ").Append(r.SepStage).Append(ChuteJson(r.ChuteAltitude)).Append(", \"parts\": [");
                 for (int j = 0; j < r.Parts.Count; j++) sb.Append(j == 0 ? "" : ", ").Append(Json.Quote(r.Parts[j]));
                 sb.Append("] }");
             }
             sb.Append(Radials.Count > 0 ? "\n  ]\n}\n" : "]\n}\n");
             return sb.ToString();
         }
+
+        /// <summary>Размеры детали — только заданные: сохранение без них читается и прежним кодом.</summary>
+        static string ParamsJson(CraftPart cp)
+        {
+            var sb = new StringBuilder();
+            for (int k = 0; k < PartCatalog.ParamOrder.Length; k++)
+            {
+                double v = cp.Get(PartCatalog.ParamOrder[k]);
+                if (!double.IsNaN(v))
+                    sb.Append(", ").Append(Json.Quote(CraftPart.ParamKeys[k])).Append(": ").Append(v.ToString("R", CultureInfo.InvariantCulture));
+            }
+            sb.Append(ChuteJson(cp.ChuteAltitude));
+            return sb.ToString();
+        }
+
+        /// <summary>Высота ввода парашюта — тоже только заданная: файлы без ключа открываются со штатной высотой.</summary>
+        static string ChuteJson(double alt) => double.IsNaN(alt) ? ""
+            : ", " + Json.Quote(CraftPart.ChuteKey) + ": " + alt.ToString("R", CultureInfo.InvariantCulture);
 
         public static Craft FromJson(string text)
         {
@@ -101,7 +193,13 @@ namespace Kare.Space.Core
             if (o.TryGetValue("stack", out var st) && st is List<object> sl)
                 foreach (var e in sl)
                     if (e is Dictionary<string, object> p)
-                        c.Stack.Add(new CraftPart(Json.Str(p, "part"), (int)Json.Num(p, "stage", -1)));
+                    {
+                        var cp = new CraftPart(Json.Str(p, "part"), (int)Json.Num(p, "stage", -1));
+                        for (int k = 0; k < PartCatalog.ParamOrder.Length; k++)
+                            cp.Set(PartCatalog.ParamOrder[k], Json.Num(p, CraftPart.ParamKeys[k], double.NaN));
+                        cp.ChuteAltitude = Json.Num(p, CraftPart.ChuteKey, double.NaN);
+                        c.Stack.Add(cp);
+                    }
             if (o.TryGetValue("radials", out var rt) && rt is List<object> rl)
                 foreach (var e in rl)
                     if (e is Dictionary<string, object> p)
@@ -110,6 +208,7 @@ namespace Kare.Space.Core
                         {
                             Parent = (int)Json.Num(p, "parent", 0), Symmetry = (int)Json.Num(p, "symmetry", 2), Lift = Json.Num(p, "lift", 0),
                             EngineStage = (int)Json.Num(p, "engineStage", -1), SepStage = (int)Json.Num(p, "sepStage", -1),
+                            ChuteAltitude = Json.Num(p, CraftPart.ChuteKey, double.NaN),
                         };
                         if (p.TryGetValue("parts", out var pp) && pp is List<object> pl)
                             foreach (var id in pl)
@@ -167,7 +266,7 @@ namespace Kare.Space.Core
             bool enclosePending = false;
             for (int i = 0; i < c.Stack.Count; i++)
             {
-                var p = PartCatalog.Get(c.Stack[i].Id);
+                var p = PartCatalog.Resolve(c.Stack[i]);
                 if (p == null) continue;
                 bool cut = p.Decoupler;
                 if (p.Fairing && fairingPart < 0)
@@ -175,7 +274,7 @@ namespace Kare.Space.Core
                     fairingPart = i;
                     // Разделитель прямо над основанием — груз отделяется от ступени под створками: режем по нему, а
                     // основание остаётся на ступени (как у «Кара-1»: обтекатель на II ступени, ПН — на своём разделителе).
-                    var next = i + 1 < c.Stack.Count ? PartCatalog.Get(c.Stack[i + 1].Id) : null;
+                    var next = i + 1 < c.Stack.Count ? PartCatalog.Resolve(c.Stack[i + 1]) : null;
                     if (next != null && next.Decoupler) enclosePending = true;
                     else cut = true;
                 }
@@ -198,7 +297,7 @@ namespace Kare.Space.Core
             var b = new CraftBuild();
             var c = craft.Clone();
             for (int i = 0; i < c.Stack.Count; i++)
-                if (PartCatalog.Get(c.Stack[i].Id) == null) b.Errors.Add($"Неизвестная деталь «{c.Stack[i].Id}»");
+                if (PartCatalog.Resolve(c.Stack[i]) == null) b.Errors.Add($"Неизвестная деталь «{c.Stack[i].Id}»");
             foreach (var r in c.Radials)
                 foreach (var id in r.Parts)
                     if (PartCatalog.Get(id) == null) b.Errors.Add($"Неизвестная деталь «{id}»");
@@ -209,7 +308,7 @@ namespace Kare.Space.Core
             var blocks = Blocks(c, out int fairingPart, out int firstEnclosed);
             int fairings = 0;
             foreach (var cp in c.Stack)
-                if (PartCatalog.Get(cp.Id).Fairing) fairings++;
+                if (PartCatalog.Resolve(cp).Fairing) fairings++;
             if (fairings > 1) b.Errors.Add("Обтекатель может быть только один");
             if (fairingPart >= 0 && firstEnclosed >= blocks.Count) b.Errors.Add("Над основанием обтекателя пусто — нечего укрывать");
 
@@ -229,11 +328,12 @@ namespace Kare.Space.Core
                 {
                     partBlock[i] = k;
                     b.PartOffset[i] = h;
-                    var p = PartCatalog.Get(c.Stack[i].Id);
+                    var p = PartCatalog.Resolve(c.Stack[i]);
                     parts.Add(p);
                     h += p.Length;
                 }
                 var s = Section(parts, b, $"блок {k + 1}");
+                AddWings(c, bl, s, b);
                 if (s.HasEngine && s.Kind == SectionKind.Stage) s.Name = $"Ступень {++stageNo}";
                 blockSection[k] = d.Sections.Count;
                 for (int i = bl.From; i <= bl.To; i++) b.PartSection[i] = d.Sections.Count;
@@ -262,7 +362,7 @@ namespace Kare.Space.Core
                     encD = Math.Max(encD, s.Diameter);
                     encL += s.Length;
                 }
-                var fp = PartCatalog.Get(c.Stack[fairingPart].Id);
+                var fp = PartCatalog.Resolve(c.Stack[fairingPart]);
                 double fd = Math.Max(fp.Diameter, encD + FairingClearance);
                 double fl = encL + FairingNose * fd;
                 fairingSection = d.Sections.Count;
@@ -284,7 +384,7 @@ namespace Kare.Space.Core
                 int ign = int.MaxValue, chute = int.MaxValue;
                 for (int i = bl.From; i <= bl.To; i++)
                 {
-                    var p = PartCatalog.Get(c.Stack[i].Id);
+                    var p = PartCatalog.Resolve(c.Stack[i]);
                     int st = c.Stack[i].Stage;
                     if (p.HasEngine) ign = Math.Min(ign, st);
                     if (p.ParachuteArea > 0) chute = Math.Min(chute, st);
@@ -331,6 +431,15 @@ namespace Kare.Space.Core
                 i = j;
             }
 
+            // Высота ввода парашюта (§4.8) — в секцию детали; несколько куполов в блоке раскрываются вместе (по последней).
+            for (int i = 0; i < c.Stack.Count; i++)
+                if (!double.IsNaN(c.Stack[i].ChuteAltitude) && PartCatalog.Resolve(c.Stack[i]).ParachuteArea > 0)
+                    d.Sections[b.PartSection[i]].ChuteAltitude = FlightPhysics.ClampChuteAltitude(c.Stack[i].ChuteAltitude);
+            for (int r = 0; r < c.Radials.Count; r++)
+                if (!double.IsNaN(c.Radials[r].ChuteAltitude) && b.RadialSection[r] < d.Sections.Count && d.Sections[b.RadialSection[r]].ParachuteArea > 0)
+                    d.Sections[b.RadialSection[r]].ChuteAltitude = FlightPhysics.ClampChuteAltitude(c.Radials[r].ChuteAltitude);
+
+            CheckJoints(c, fairingPart, b);
             b.Design = d;
             Check(c, b, blocks);
             return b;
@@ -376,6 +485,13 @@ namespace Kare.Space.Core
                     s.EngineCount += p.EngineCount;
                 }
             }
+            // Шасси главнее опор: секция с колёсами садится на полосу пробегом (Vessel.GearOut), а не на опоры.
+            foreach (var p in parts)
+                if (p.GearHeight > 0)
+                {
+                    s.Deploy = DeployKind.Gear;
+                    s.GearHeight = Math.Max(s.GearHeight, p.GearHeight);
+                }
             s.Length = Math.Max(s.Length, 0.3);
             if (s.Diameter <= 0) s.Diameter = 1;
             bool shield = command != null && command.MaxHeatFlux >= 1e6;
@@ -404,6 +520,60 @@ namespace Kare.Space.Core
             return s;
         }
 
+        /// <summary>
+        /// Плоскости блока (§4.6) — из деталей с PartDef.Wing. Корень: задняя кромка — на стыке с деталью ниже в стеке, хорда
+        /// идёт вверх по детали выше, так что фокус корневой хорды (WingDef.Height) — на 3/4 хорды выше стыка. Крыло и
+        /// оперение — среднеплан (корень на оси), киль — на обшивке детали, к которой прижат (к −X, «верх» пакета).
+        /// </summary>
+        static void AddWings(Craft c, Block bl, SectionDef s, CraftBuild b)
+        {
+            for (int i = bl.From; i <= bl.To; i++)
+            {
+                var p = PartCatalog.Resolve(c.Stack[i]);
+                if (p?.Wing == null) continue;
+                // Несущая деталь: ближайшая с длиной выше в блоке, иначе ниже.
+                double r = -1;
+                for (int j = i + 1; j <= bl.To && r < 0; j++)
+                {
+                    var q = PartCatalog.Resolve(c.Stack[j]);
+                    if (q.Length > 0) r = q.Diameter * 0.5;
+                }
+                for (int j = i - 1; j >= bl.From && r < 0; j--)
+                {
+                    var q = PartCatalog.Resolve(c.Stack[j]);
+                    if (q.Length > 0) r = q.Top * 0.5;
+                }
+                if (r < 0) r = s.Radius;
+                var w = p.Wing.Clone();
+                w.Height = b.PartOffset[i] + 0.75 * p.Chord;
+                w.Offset = w.Vertical ? r : 0;
+                if (b.PartOffset[i] + p.Chord > s.Length + 1e-6)
+                    b.Warnings.Add($"«{p.Name}»: хорда {p.Chord:0.##} м длиннее корпуса над стыком — сдвиньте ниже в стеке");
+                (s.Wings ??= new List<WingDef>()).Add(w);
+            }
+        }
+
+        /// <summary>
+        /// Стыки стека: верх детали и низ следующей (детали длиной 0 — навесные, пропускаются) должны совпасть по диаметру,
+        /// иначе ступенька — это лишнее сопротивление и неправильная картинка. Груз под обтекателем и само основание
+        /// обтекателя не проверяются.
+        /// Допуск 0,05 м — меньше шага диаметра в конструкторе (PartCatalog.Range, 0,1 м).
+        /// </summary>
+        static void CheckJoints(Craft c, int fairingPart, CraftBuild b)
+        {
+            PartDef prev = null;
+            for (int i = 0; i < c.Stack.Count; i++)
+            {
+                if (fairingPart >= 0 && i > fairingPart) break;
+                var p = PartCatalog.Resolve(c.Stack[i]);
+                if (p == null || p.Length <= 0) continue;
+                // Основание обтекателя шире ступени — штатная «молотоголовая» компоновка (Ø5,2 на Ø3,7 у «Кара-1»), не ступенька.
+                if (prev != null && !p.Fairing && Math.Abs(prev.Top - p.Diameter) > 0.05)
+                    b.Warnings.Add($"Стык Ø{prev.Top:0.##} → Ø{p.Diameter:0.##} м между «{prev.Name}» и «{p.Name}»: поставьте переходник");
+                prev = p;
+            }
+        }
+
         static SectionDef RadialSection(Craft c, CraftRadial rad, int index, SectionDef parent, int parentSection, double parentOffset, CraftBuild b)
         {
             int n = rad.Symmetry;
@@ -416,6 +586,13 @@ namespace Kare.Space.Core
             foreach (var id in rad.Parts) parts.Add(PartCatalog.Get(id));
             if (rad.Parts.Count == 0) b.Errors.Add($"Боковая группа {index + 1}: пустая");
             var one = Section(parts, b, $"боковая группа {index + 1}");
+            foreach (var p in parts)
+                if (p?.Wing != null)
+                {
+                    // Aerodynamics.Collect пропускает радиальные секции: крыло на боковом блоке было бы мёртвым весом.
+                    b.Warnings.Add($"Боковая группа {index + 1}: «{p.Name}» сбоку не работает — ставьте плоскости в стек ядра");
+                    break;
+                }
             var s = one.Clone();
             s.Name = one.HasEngine ? $"Боковые блоки ×{n}" : $"Боковые детали ×{n}";
             if (one.Kind == SectionKind.Capsule) b.Errors.Add("Командный модуль сбоку не ставится");
@@ -459,19 +636,24 @@ namespace Kare.Space.Core
             // Каждый разделитель с грузом над ним — в списке ступеней.
             for (int k = 0; k + 1 < blocks.Count; k++)
             {
-                var top = PartCatalog.Get(c.Stack[blocks[k].To].Id);
+                var top = PartCatalog.Resolve(c.Stack[blocks[k].To]);
                 if (top.Decoupler && c.Stack[blocks[k].To].Stage < 0) b.Errors.Add($"Разделитель «{top.Name}» не стоит в ступенях");
             }
             bool control = false;
             foreach (var s in d.Sections) control |= s.RcsTorque > 0 || s.HasEngine && s.Engine.GimbalDeg > 0;
             if (!control) b.Warnings.Add("Нечем управлять ориентацией: нет RCS и качающихся двигателей");
             bool crewOrProbe = false;
-            foreach (var cp in c.Stack) crewOrProbe |= PartCatalog.Get(cp.Id).Category == PartCategory.Command;
+            foreach (var cp in c.Stack) crewOrProbe |= PartCatalog.Resolve(cp).Category == PartCategory.Command;
             if (!crewOrProbe) b.Warnings.Add("Нет командного модуля или блока управления");
 
             var v = new Vessel(d, d.Name);
             v.MassProperties(out b.Mass, out b.ComHeight, out b.Height, out double maxR);
             b.Width = 2 * maxR;
+            // Размах крыльев тоже должен пройти между фермами стола (PadMaxWidth).
+            foreach (var s in d.Sections)
+                if (s.Wings != null && !s.IsRadial)
+                    foreach (var w in s.Wings)
+                        b.Width = Math.Max(b.Width, w.Vertical ? maxR + w.Offset + w.Span : w.Span);
             if (b.Height > PadMaxHeight) b.Errors.Add($"Высота {b.Height:F0} м — не помещается на площадку (≤ {PadMaxHeight:F0} м)");
             if (b.Width > PadMaxWidth) b.Errors.Add($"Размах {b.Width:F0} м — не помещается на площадку (≤ {PadMaxWidth:F0} м)");
         }
@@ -508,14 +690,14 @@ namespace Kare.Space.Core
             int firstEngine = -1;
             for (int k = 0; k < blocks.Count && firstEngine < 0; k++)
                 for (int i = blocks[k].From; i <= blocks[k].To; i++)
-                    if (PartCatalog.Get(c.Stack[i].Id)?.HasEngine == true) firstEngine = k;
+                    if (PartCatalog.Resolve(c.Stack[i])?.HasEngine == true) firstEngine = k;
 
             var launch = NewGroup();
             if (firstEngine >= 0)
             {
                 engineDone[firstEngine] = true;
                 for (int i = blocks[firstEngine].From; i <= blocks[firstEngine].To; i++)
-                    if (PartCatalog.Get(c.Stack[i].Id).HasEngine) SetPart(launch, i);
+                    if (PartCatalog.Resolve(c.Stack[i]).HasEngine) SetPart(launch, i);
             }
             foreach (var r in c.Radials)
             {
@@ -535,7 +717,7 @@ namespace Kare.Space.Core
             for (int k = 0; k < blocks.Count; k++)
             {
                 int top = blocks[k].To;
-                var tp = PartCatalog.Get(c.Stack[top].Id);
+                var tp = PartCatalog.Resolve(c.Stack[top]);
                 if (tp == null || !tp.Decoupler || k + 1 >= blocks.Count) continue;
                 var g = NewGroup();
                 SetPart(g, top);
@@ -543,7 +725,7 @@ namespace Kare.Space.Core
                 {
                     engineDone[k + 1] = true;
                     for (int i = blocks[k + 1].From; i <= blocks[k + 1].To; i++)
-                        if (PartCatalog.Get(c.Stack[i].Id).HasEngine) SetPart(g, i);
+                        if (PartCatalog.Resolve(c.Stack[i]).HasEngine) SetPart(g, i);
                 }
                 if (!fairingDone)
                 {
@@ -556,10 +738,10 @@ namespace Kare.Space.Core
             for (int k = 0; k < blocks.Count; k++)
                 if (!engineDone[k])
                     for (int i = blocks[k].From; i <= blocks[k].To; i++)
-                        if (PartCatalog.Get(c.Stack[i].Id)?.HasEngine == true) SetPart(rest, i);
+                        if (PartCatalog.Resolve(c.Stack[i])?.HasEngine == true) SetPart(rest, i);
             var chutes = NewGroup();
             for (int i = 0; i < c.Stack.Count; i++)
-                if (PartCatalog.Get(c.Stack[i].Id)?.ParachuteArea > 0) SetPart(chutes, i);
+                if (PartCatalog.Resolve(c.Stack[i])?.ParachuteArea > 0) SetPart(chutes, i);
 
             int n = 0;
             if (onlyUnset)
