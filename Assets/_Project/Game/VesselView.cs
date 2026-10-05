@@ -10,7 +10,7 @@ namespace Kare.Space.Game
     /// ориентация — Vessel.Attitude (уже в осях Unity, +Y = нос), факел под работающими двигателями.
     /// Отделённые ступени — отдельные Vessel со своим видом (их заводит GameBootstrap).
     /// </summary>
-    public sealed class VesselView : MonoBehaviour
+    public sealed partial class VesselView : MonoBehaviour
     {
         /// <summary>Дальше этого от активного борта обломки не рисуем — на таком расстоянии они меньше пикселя.</summary>
         const float DrawDistance = 50000;
@@ -171,6 +171,9 @@ namespace Kare.Space.Game
         static readonly Color PanelColor = new Color(0.06f, 0.08f, 0.16f);
         static readonly Color ShieldColor = new Color(0.33f, 0.24f, 0.17f);
         static readonly Color WhiteColor = new Color(0.90f, 0.90f, 0.88f);
+        // ЭВТИ «Союза» — серо-зелёная ткань; солнечные батареи американского сегмента МКС — медно-коричневые.
+        static readonly Color MliGreenColor = new Color(0.42f, 0.47f, 0.36f);
+        static readonly Color SawColor = new Color(0.45f, 0.30f, 0.16f);
         // Цвета слотов под отделки без текущих владельцев (Шаттл, Буран, зонды): цвет — то, как слот выглядит без
         // карт отделки (сцена Hangar, нет FinishMaterials); с картами цвет даёт текстура (SelfColored).
         public static readonly Color FoamColor = new Color(0.78f, 0.38f, 0.14f);
@@ -252,7 +255,20 @@ namespace Kare.Space.Game
                 case SectionModel.SaturnSIVB:
                 case SectionModel.ProtonStage1:
                 case SectionModel.ProtonStage2:
-                case SectionModel.ProtonStage3: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
+                case SectionModel.ProtonStage3:
+                case SectionModel.Falcon9S1:
+                case SectionModel.Falcon9S2:
+                case SectionModel.VoskhodAirlock:
+                case SectionModel.SoyuzShroud: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
+                // station_parts.py: смысл слотов у каждой модели — в docstring её функции.
+                case SectionModel.R7BlockI: return new[] { StageColor, BlackColor, MetalColor, NozzleColor };
+                case SectionModel.SoyuzPAO: return new[] { MliGreenColor, PanelColor, MetalColor, NozzleColor };
+                case SectionModel.SoyuzSA: return new[] { MliGreenColor, BlackColor, MetalColor, ShieldColor };
+                case SectionModel.SoyuzBO: return new[] { MliGreenColor, BlackColor, MetalColor, NozzleColor };
+                case SectionModel.ISS2000: return new[] { WhiteColor, PanelColor, MetalColor, BlackColor };
+                case SectionModel.ISS2020: return new[] { WhiteColor, PanelColor, MetalColor, SawColor };
+                case SectionModel.DragonTrunk: return new[] { WhiteColor, PanelColor, MetalColor, BlackColor };
+                case SectionModel.CrewDragon: return new[] { WhiteColor, BlackColor, MetalColor, ShieldColor };
                 default: return new[] { WhiteColor, PolishedColor };
             }
         }
@@ -341,11 +357,14 @@ namespace Kare.Space.Game
                 var part = new Part { Index = i, Tr = go.transform };
                 if (s.IsRadial)
                 {
-                    float ang = 2 * Mathf.PI * copy / s.RadialCount;
+                    float ang = 2 * Mathf.PI * copy / s.RadialCount + (float)s.RadialPhase;
                     part.Radial = new Vector3(Mathf.Cos(ang), 0, Mathf.Sin(ang)) * (float)s.RadialOffset;
                     // Поворот вокруг оси: +X блока смотрит наружу (Euler по Y на −угол переводит +X в (cos, 0, sin)).
                     part.Yaw = Quaternion.Euler(0, -ang * Mathf.Rad2Deg, 0);
                 }
+                // Орбитер на баке (SectionDef.Beside) — сбоку от оси, к −X; после отделения бака стоит на оси сам.
+                else if (s.Beside && i > 0 && Vessel.Attached[0] && !secs[0].IsRadial)
+                    part.Radial = new Vector3(-(float)s.BesideOffset, 0, 0);
                 else if (Vessel.RadialYaw != 0)
                     part.Yaw = Quaternion.Euler(0, -(float)Vessel.RadialYaw * Mathf.Rad2Deg, 0);
                 // Своя модель аппарата целиком заменяет процедурный корпус; у отсеков с двигателем в ней и сопло.

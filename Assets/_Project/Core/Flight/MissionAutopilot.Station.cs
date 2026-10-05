@@ -40,6 +40,10 @@ namespace Kare.Space.Core
                 u.Docking = new DockingAutopilot(u, station);
                 foreach (var x in Await(() => u.Docking == null, () => "Сближение: " + (u.Docking?.Status ?? ""))) yield return x;
                 if (!IsDocked(V)) throw new Abort("стыковка не удалась");
+                // Universe.CheckDocking не гасит последнюю команду причаливания, а тяга РСУ связки — сумма по секциям
+                // (с МКС 2·10^5 Н): остаток RcsTranslate за 10 мин разгонял связку на ~120 м/с (орбита 420×420 → 419×862 км).
+                V.RcsTranslate = Vector3d.zero;
+                V.RcsForward = 0;
             }
 
             if (dockIdx >= 0 && !Tracker.Done[dockIdx])
@@ -61,7 +65,10 @@ namespace Kare.Space.Core
                 Phase = "Расстыковка";
                 StageBefore(undockIdx);
                 var before = new HashSet<Vessel>(u.Vessels);
-                u.Stage();
+                // Как клавиша V, а не шаг последовательности: Vessel.Undock делит толчок по массам (расхождение ровно
+                // UndockPush), а шаг Undock даёт кораблю отдачу 0,3·M/m — от МКС 420 т «Драгону» 11 т +10 м/с, апогей +40 км.
+                // Шаг Undock после этого неприменим (не состыкованы) и пропускается.
+                u.Undock();
                 // Отошедшая станция — снова станция, а не «обломок» (Vessel.Split называет так всё без управления).
                 foreach (var w in u.Vessels)
                     if (!before.Contains(w) && w.Attached[def.StationSection])

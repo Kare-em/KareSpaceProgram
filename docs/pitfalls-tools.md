@@ -173,3 +173,19 @@
 - **`execute_code` в редакторе вне Play не вызывает `Awake`** у `AddComponent` (компонент без `[ExecuteInEditMode]`):
   все поля пустые. Проверка синтеза/инициализации — `GetMethod("Awake", NonPublic|Instance).Invoke(c, null)`.
 - **Скриншот `manage_camera` кладёт png в `Assets/Screenshots`** (+ .meta) — после проверки удалить, это не ассет проекта.
+
+## IMGUI: щелчок «сквозь» панели и имена в partial (05.10.2026)
+- **Выбор детали в 3D ведётся в `Update`, а он идёт раньше `OnGUI`**: на момент щелчка IMGUI ещё не знает, что мышь
+  над панелью, а панели без кнопок (`FlightHud.Fill`) событие не съедают. Решение — `HudHits`: прямоугольники панелей
+  пишутся в Repaint и проверяются в следующем `Update`, плюс `GUIUtility.hotControl != 0` пока кнопка зажата
+  (нажатие поймала кнопка/поле). Щелчок — сдвиг < 6 px и < 0,6 с, иначе это вращение камеры.
+- **В статическом классе поле и метод с одним именем — CS0102** (`Color Fuel` и `void Fuel(...)` в `StageTable`):
+  ошибка одного файла валит сборку всей Assembly-CSharp у всех параллельных агентов — новые файлы с общими
+  именами проверять `refresh_unity` сразу, а не в конце.
+- **Текстура после `Apply(false, true)` нечитаемая** — `GetPixels` в `execute_code` падает (`MissionSketch`).
+  Проверять так: `Graphics.Blit` в `RenderTexture` → `ReadPixels` → PNG в `Temp/Shots` (кадр выйдет перевёрнутым по Y).
+- **IMGUI-hover через MCP не навести** — мыши нет. Подсказку «?» таблицы миссий открывать в Play полем
+  `MissionPicker.DebugTipId = "apollo11"` (+ `PauseMenu.IsOpen` рефлексией, `MissionPicker.Open = true`); после — сбросить.
+- **Вход в Play из MCP рвёт мост на ~20–30 с** (domain reload): `execute_code` сразу после `play` отвечает
+  «No Unity Editor instances found» — подождать и повторить, не перезапускать Play.
+- **`execute_code` компилирует CodeDom (C# 6)**: `Object.FindFirstObjectByType<GameBootstrap>()` не собирается («`Object` ambiguous», игровые типы не видны). Работает: тип через `AppDomain...GetAssemblies()` → `GetType("Kare.Space.Game.GameBootstrap")`, `UnityEngine.Object.FindFirstObjectByType(t)`, поле рефлексией. Так снимаются скрины разных миссий: `MissionId` в памяти → `EditorApplication.EnterPlaymode()`, сцену НЕ сохранять (после Stop — `OpenScene` заново, проверено 05.10: вернулся `vostok`).

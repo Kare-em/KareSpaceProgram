@@ -79,6 +79,11 @@ namespace Kare.Space.Core
         public bool[] ChuteArmed;
         /// <summary>Секунды с ввода парашюта секции — для раскрытия с рифлением.</summary>
         public double[] ChuteOpenTime;
+        /// <summary>
+        /// Высота ввода парашюта секции по барометру, м (GDD §4.8). Из SectionDef.ChuteAltitude, правится окном детали;
+        /// писать только через SetChuteAltitude — он держит безопасный диапазон FlightPhysics.ChuteAltitudeMin..Max.
+        /// </summary>
+        public double[] ChuteAltitude;
         /// <summary>Попытка запуска уже была при этой «подаче газа»: повтор — только после сброса РУД в 0.</summary>
         bool[] ignitionLatch;
         public int NextStage;
@@ -127,6 +132,19 @@ namespace Kare.Space.Core
         public double Throttle = 1;
         /// <summary>Ручки пилота: x — тангаж (W +1), y — рысканье (D +1), z — крен (E +1).</summary>
         public Vector3d PilotInput;
+        /// <summary>
+        /// Момент рулей при полном отклонении, Н·м, по осям MaxTorque (x — рыскание, y — крен, z — тангаж): считает
+        /// FlightPhysics.StepFlying по напору и Маху (Aerodynamics.ControlAuthority), на грунте и в пустоте — ноль (§4.6).
+        /// </summary>
+        public Vector3d AeroControlTorque;
+        /// <summary>Щиток-тормоз 0…1 (руль направления «Шаттла» раскрывается веером): ставит автопилот посадки или пилот.</summary>
+        public double AirBrake;
+        /// <summary>Пробег по полосе на шасси, м/с вдоль курса (FlightPhysics.StepRollout); 0 — стоит или не на шасси.</summary>
+        public double RollSpeed;
+        /// <summary>Курс пробега в осях тела (единичный, касательный к грунту).</summary>
+        public Vector3d RollDir;
+        /// <summary>Последнее касание на шасси: снижение и путевая, м/с (NaN — не было). Для итога миссии и тестов.</summary>
+        public double TouchdownSink = double.NaN, TouchdownSpeed = double.NaN;
         public SasMode Sas = SasMode.Stability;
         public QuaternionD SasHold;
         public bool SasHoldValid;
@@ -172,6 +190,8 @@ namespace Kare.Space.Core
             ChuteFailed = new bool[n];
             ChuteArmed = new bool[n];
             ChuteOpenTime = new double[n];
+            ChuteAltitude = new double[n];
+            for (int i = 0; i < n; i++) ChuteAltitude[i] = FlightPhysics.ClampChuteAltitude(design.Sections[i].ChuteAltitude);
             ignitionLatch = new bool[n];
             Order = new int[n];
             Flipped = new bool[n];
@@ -262,11 +282,19 @@ namespace Kare.Space.Core
         public double Layout(double[] baseHeight)
         {
             var secs = Design.Sections;
-            double h = 0;
+            double h = 0, coreBase = 0;
             foreach (int i in Order)
             {
                 if (!Attached[i] || secs[i].IsRadial) continue;
                 var s = secs[i];
+                if (s.Beside)
+                {
+                    // Орбитер на баке: низ — у низа секции ядра под ним, длину пакета не наращивает (выше бака не торчит).
+                    baseHeight[i] = coreBase;
+                    h = Math.Max(h, coreBase + s.Length);
+                    continue;
+                }
+                coreBase = h;
                 if (s.Kind == SectionKind.Fairing)
                 {
                     double b = h;
@@ -307,7 +335,7 @@ namespace Kare.Space.Core
                 if (!Attached[i]) continue;
                 double m = SectionMass(i);
                 mass += m;
-                moment += m * (layoutBuf[i] + secs[i].Length * 0.5);
+                moment += m * (layoutBuf[i] + secs[i].Length * secs[i].ComFraction);
                 maxRadius = Math.Max(maxRadius, secs[i].Radius + secs[i].RadialOffset);
             }
             comHeight = mass > 0 ? moment / mass : 0;
@@ -318,7 +346,16 @@ namespace Kare.Space.Core
         {
             MassProperties(out double m, out _, out double len, out double r);
             double lateral = m * (len * len / 12 + r * r / 4);
-            return new Vector3d(lateral, Math.Max(m * r * r / 2, 1), lateral);
+            double roll = Math.Max(m * r * r / 2, 1);
+            // Крылья разносят массу по размаху: крену и рысканию — не меньше m·(b/2)²/8 (у «Шаттла» ≈1,6e6 кг·м²).
+            double span = WingSpan();
+            if (span > 0)
+            {
+                double wing = m * span * span / 32;
+                roll = Math.Max(roll, wing);
+                lateral = Math.Max(lateral, wing);
+            }
+            return new Vector3d(lateral, roll, lateral);
         }
 
         /// <summary>Низ секции от низа пакета, м; верно после MassProperties того же кадра.</summary>
@@ -344,7 +381,46 @@ namespace Kare.Space.Core
                 if (s.IsRadial) roll += side * s.RadialOffset;
                 else if (s.EngineCount > 1) roll += side * s.Radius * 0.5;
             }
-            return new Vector3d(pitch, roll, pitch);
+            // Рули (§4.6): бюджет считает физика по напору; бескрылым и на грунте — ноль.
+            return new Vector3d(pitch + AeroControlTorque.x, roll + AeroControlTorque.y, pitch + AeroControlTorque.z);
+        }
+
+        /// <summary>Наибольший размах горизонтальных крыльев присоединённых секций, м; 0 — бескрылый.</summary>
+        public double WingSpan()
+        {
+            double b = 0;
+            var secs = Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!Attached[i] || secs[i].Wings == null) continue;
+                foreach (var w in secs[i].Wings) if (!w.Vertical) b = Math.Max(b, w.Span);
+            }
+            return b;
+        }
+
+        /// <summary>Шасси выпущено (DeployKind.Gear раскрыто): касание полосы — пробег, а не посадка на опоры.</summary>
+        public bool GearDown
+        {
+            get
+            {
+                var secs = Design.Sections;
+                for (int i = 0; i < secs.Count; i++)
+                    if (Attached[i] && secs[i].Deploy == DeployKind.Gear && Deployed[i] >= 0.999) return true;
+                return false;
+            }
+        }
+
+        /// <summary>Высота шасси, м (наибольшая у присоединённых секций с Gear).</summary>
+        public double GearHeight
+        {
+            get
+            {
+                double g = 0;
+                var secs = Design.Sections;
+                for (int i = 0; i < secs.Count; i++)
+                    if (Attached[i] && secs[i].Deploy == DeployKind.Gear) g = Math.Max(g, secs[i].GearHeight);
+                return g;
+            }
         }
 
         /// <summary>
@@ -577,6 +653,25 @@ namespace Kare.Space.Core
         /// Δv оставшихся ступеней: сначала взведённые двигатели с топливом и запусками (заработают по газу,
         /// даже если сейчас заглушены — пассивный участок перед посадкой), затем последовательность.
         /// </summary>
+        /// <summary>
+        /// Высота ввода парашюта секции (окно детали, §4.8). Зажата в безопасный диапазон: ниже 1 км купол с рифлением
+        /// (1 + 4 + 4 с) не успевает погасить скорость, выше 15 км напор и холод — не штатный режим.
+        /// </summary>
+        public void SetChuteAltitude(int section, double altitude)
+        {
+            if (section < 0 || section >= ChuteAltitude.Length) return;
+            ChuteAltitude[section] = FlightPhysics.ClampChuteAltitude(altitude);
+        }
+
+        /// <summary>Самая высокая уставка ввода среди непрораскрытых парашютов на борту; 0 — парашютов нет.</summary>
+        public double HighestChuteAltitude()
+        {
+            double h = 0;
+            for (int i = 0; i < Attached.Length; i++)
+                if (Attached[i] && !ChuteDeployed[i] && Design.Sections[i].ParachuteArea > 0) h = Math.Max(h, ChuteAltitude[i]);
+            return h;
+        }
+
         public List<StageStats> RemainingStats()
         {
             var ready = new bool[Attached.Length];
@@ -604,6 +699,18 @@ namespace Kare.Space.Core
         /// Выпустить раскладные опоры (автопилот посадки, §6.12: LM и «Сервейор» садились только на выпущенных).
         /// true — привод запущен сейчас, false — уже выпущены или выпускаются, либо опор нет.
         /// </summary>
+        public bool ExtendGear()
+        {
+            bool started = false;
+            for (int i = 0; i < Attached.Length; i++)
+            {
+                if (!Attached[i] || Design.Sections[i].Deploy != DeployKind.Gear || DeployOn[i]) continue;
+                DeployOn[i] = started = true;
+            }
+            if (started) Raise("Шасси: выпуск");
+            return started;
+        }
+
         public bool ExtendLegs()
         {
             bool started = false;
@@ -625,6 +732,7 @@ namespace Kare.Space.Core
         public string ToggleDeploy()
         {
             bool legs = false, legsOut = true, pyro = false, ramps = false, rampsOn = true, lid = false, lidOpen = true;
+            bool gear = false, gearOut = true;
             for (int i = 0; i < Attached.Length; i++)
             {
                 if (!Attached[i]) continue;
@@ -634,7 +742,16 @@ namespace Kare.Space.Core
                     case DeployKind.PyroLegs: legs = pyro = true; legsOut &= DeployOn[i]; break;
                     case DeployKind.Ramps: ramps = true; rampsOn &= DeployOn[i]; break;
                     case DeployKind.Lid: lid = true; lidOpen &= DeployOn[i]; break;
+                    case DeployKind.Gear: gear = true; gearOut &= DeployOn[i]; break;
                 }
+            }
+            if (gear)
+            {
+                // Шасси орбитера (§4.6): выпуск в любой момент, уборка — только в полёте (на пробеге борт стоит на нём).
+                if (gearOut && IsLanded) return "Шасси на грунте не убирается";
+                for (int i = 0; i < Attached.Length; i++)
+                    if (Attached[i] && Design.Sections[i].Deploy == DeployKind.Gear) DeployOn[i] = !gearOut;
+                return gearOut ? "Шасси: уборка" : "Шасси: выпуск";
             }
             if (ramps && !rampsOn)
             {
@@ -859,7 +976,7 @@ namespace Kare.Space.Core
                     if (Attached[a.Section] && !ChuteDeployed[a.Section] && !ChuteArmed[a.Section])
                     {
                         ChuteArmed[a.Section] = true;
-                        Raise($"Парашют взведён: раскроется ниже {FlightPhysics.ChuteDeployAltitude / 1000:F0} км");
+                        Raise($"Парашют взведён: раскроется ниже {ChuteAltitude[a.Section] / 1000:0.#} км");
                     }
                     break;
             }
@@ -991,6 +1108,7 @@ namespace Kare.Space.Core
                 d.ChuteFailed[i] = ChuteFailed[i];
                 d.ChuteArmed[i] = ChuteArmed[i];
                 d.ChuteOpenTime[i] = ChuteOpenTime[i];
+                d.ChuteAltitude[i] = ChuteAltitude[i];
                 if (mask[i])
                 {
                     Attached[i] = false;
@@ -1070,7 +1188,7 @@ namespace Kare.Space.Core
             var res = new List<Vessel>();
             for (int c = 0; c < n; c++)
             {
-                double ang = 2 * Math.PI * c / n;
+                double ang = 2 * Math.PI * c / n + s.RadialPhase;
                 // Блок c стоит по направлению (cos, 0, sin) в связанных осях — так же его рисует VesselView.
                 var dir = new Vector3d(Math.Cos(ang), 0, Math.Sin(ang));
                 var r = dir * s.RadialOffset + new Vector3d(0, mid, 0);
@@ -1181,6 +1299,7 @@ namespace Kare.Space.Core
                 ChuteFailed[i] = t.ChuteFailed[i];
                 ChuteArmed[i] = t.ChuteArmed[i];
                 ChuteOpenTime[i] = t.ChuteOpenTime[i];
+                ChuteAltitude[i] = t.ChuteAltitude[i];
                 Deployed[i] = t.Deployed[i];
                 DeployOn[i] = t.DeployOn[i];
             }

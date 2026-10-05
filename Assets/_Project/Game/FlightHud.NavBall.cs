@@ -102,6 +102,7 @@ namespace Kare.Space.Game
 
             PaintBall(nose, right, top, up, north, east);
             GUI.DrawTexture(ball, navTex);
+            HudHits.Add(ball);
 
             // Стороны света на горизонте — ориентир курса.
             var cs = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };

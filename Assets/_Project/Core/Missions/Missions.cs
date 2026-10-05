@@ -29,6 +29,8 @@ namespace Kare.Space.Core
         Drive,
         /// <summary>Причалить к станции и пробыть в связке HoldSeconds (GDD §6.6, «Союз ТМ-31», Demo-2).</summary>
         Dock,
+        /// <summary>Сесть на шасси на полосу Site (Runways) и остановиться, экипаж жив (STS-1, «Буран», GDD §6.4).</summary>
+        Runway,
     }
 
     public sealed class Objective
@@ -37,6 +39,8 @@ namespace Kare.Space.Core
         public string Body = "earth";
         public double Min, Max, HoldSeconds;
         public double MaxSpeed = FlightPhysics.CrashSpeed;
+        /// <summary>Id полосы для ObjectiveType.Runway (Runways.Get).</summary>
+        public string Site;
 
         public string Describe(SolarSystem sys)
         {
@@ -55,6 +59,8 @@ namespace Kare.Space.Core
                 case ObjectiveType.Drive: return $"Проехать {Min:F0} м: {b}";
                 case ObjectiveType.Dock:
                     return "Стыковка со станцией" + (HoldSeconds > 0 ? $", в связке {GameCalendar.FormatDuration(HoldSeconds)}" : "");
+                case ObjectiveType.Runway:
+                    return $"Посадка на полосу: {Runways.Get(Site)?.Name ?? Site}, остановиться";
                 case ObjectiveType.Return:
                     return $"Вернуть капсулу: {b}" + (FlightPhysics.GLoadLimit
                         ? $", экипаж не дольше {FlightPhysics.CrewGTime:F0} с выше {FlightPhysics.CrewGLimit:F0} g" : "");
@@ -248,6 +254,24 @@ namespace Kare.Space.Core
                     }
                     if (double.IsNaN(holdStart[i])) holdStart[i] = t;
                     return t - holdStart[i] >= o.HoldSeconds;
+                }
+
+                case ObjectiveType.Runway:
+                {
+                    // Засчитывается после остановки: на пробеге борт ещё может уйти с полосы или взлететь.
+                    if (!launched || !onBody || v.Situation != Situation.Landed || v.RollSpeed > 0) return false;
+                    if (v.CrewLost)
+                    {
+                        fail = "Экипаж погиб от перегрузки";
+                        return false;
+                    }
+                    var rw = Runways.At(body, v.AnchorBodyFixed);
+                    if (rw == null || o.Site != null && rw.Id != o.Site)
+                    {
+                        fail = rw == null ? "Посадка вне полосы" : $"Посадка не на ту полосу: {rw.Name}";
+                        return false;
+                    }
+                    return true;
                 }
 
                 case ObjectiveType.Return:
@@ -458,6 +482,7 @@ namespace Kare.Space.Core
             list.Add(apollo11);
 
             AddModern(list); // после «Аполлона» — StationMissions.cs
+            AddWinged(list); // крылатые: STS-1, «Буран» — WingedMissions.cs
             return list;
         }
     }

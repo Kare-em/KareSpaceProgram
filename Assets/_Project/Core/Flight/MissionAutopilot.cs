@@ -79,7 +79,7 @@ namespace Kare.Space.Core
         /// <summary>Прожиги короче этого — на ×1 (точность отсечки и смотреть есть на что). Пара: Universe.AutoBurnWarpMin.</summary>
         const double ShortBurn = 15;
 
-        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station }
+        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station, Winged }
 
         public readonly MissionTracker Tracker;
         public readonly ProfileType Profile;
@@ -116,6 +116,7 @@ namespace Kare.Space.Core
         public static ProfileType Classify(MissionDef def)
         {
             if (def.StationSection >= 0) return ProfileType.Station; // сближение со станцией — MissionAutopilot.Station.cs
+            if (def.Objectives.Exists(o => o.Type == ObjectiveType.Runway)) return ProfileType.Winged; // посадка на полосу — MissionAutopilot.Winged.cs
             bool moonOrbit = false, moonGoal = false, earthOrbit = false;
             foreach (var o in def.Objectives)
             {
@@ -170,6 +171,8 @@ namespace Kare.Space.Core
             if (u.Docking != null && u.Docking.Close || u.Lunar != null && u.Lunar.Close) return false;
             if (u.Landing != null && u.Landing.Phase == LandingAutopilot.PhaseType.Terminal) return false;
             if (v.AnyEngineRunning && v.Node != null && FlightControl.BurnTime(v, v.Node.Total) < ShortBurn) return false;
+            // Заход и посадка планера: крен и α меняются за секунды, шаг ×10 раскачивает наведение.
+            if (Profile == ProfileType.Winged && NeedsPhysics && v.Altitude < WingedNoWarpAltitude) return false;
             return true;
         }
 
@@ -184,6 +187,7 @@ namespace Kare.Space.Core
                 case ProfileType.Orbital: s = Orbital(); break;
                 case ProfileType.LunarProbe: s = LunarProbe(); break;
                 case ProfileType.Station: s = Station(); break;
+                case ProfileType.Winged: s = Winged(); break;
                 default: s = Apollo(); break;
             }
             foreach (var x in s) yield return x;
@@ -210,10 +214,12 @@ namespace Kare.Space.Core
             Phase = "Спуск";
             u.Stage(); // отделение головной части
             yield return null;
-            // Капсула с автоматикой: парашют взводится сразу, раскрывает FlightPhysics по высоте.
+            // Капсула с автоматикой: парашют взводится сразу, раскрывает FlightPhysics по высоте. Взводим не ниже уставки
+            // игрока (окно детали, §4.8) — иначе поднятая уставка молча съезжала бы до 6 км; опущенную FlightPhysics выдержит сам.
+            double chuteArm = Math.Max(ChuteAltitude, V.HighestChuteAltitude());
             if (!V.HasCrew())
-                foreach (var x in Await(() => V.Altitude < ChuteAltitude && V.DynamicPressure < ChuteMaxQ,
-                                        () => $"Спуск: {V.Altitude / 1000:F0} км, парашют на {ChuteAltitude / 1000:F0} км")) yield return x;
+                foreach (var x in Await(() => V.Altitude < chuteArm && V.DynamicPressure < ChuteMaxQ,
+                                        () => $"Спуск: {V.Altitude / 1000:F0} км, парашют на {chuteArm / 1000:0.#} км")) yield return x;
             u.Stage();
             foreach (var x in Await(() => false, () => $"Спуск на парашюте: {V.Altitude / 1000:F1} км")) yield return x;
         }

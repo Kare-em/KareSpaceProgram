@@ -138,6 +138,8 @@ namespace Kare.Space.Game
         public TextAsset EarthLand;
         [Tooltip("Карты высот тел (Tools/bake-dem.py, §2.8): ETOPO, LOLA, MOLA, MESSENGER, Magellan. Нет — рельеф процедурный.")]
         public TextAsset EarthHeight, MoonHeight, MarsHeight, MercuryHeight, VenusHeight;
+        [Tooltip("Подробные вставки DEM Земли вокруг площадок (Tools/bake-dem.py patches, 15″): без них мыс Канаверал в море.")]
+        public TextAsset EarthPatches;
 
         Universe universe;
         public MissionTracker Tracker { get; private set; }
@@ -163,6 +165,9 @@ namespace Kare.Space.Game
             // Карту читаем один раз: статическое поле переживает перезагрузку сцены (выбор миссии в Esc).
             if (EarthLand != null && SolarSystem.EarthLand == null) SolarSystem.EarthLand = new LandMap(EarthLand.bytes);
             LoadHeight("earth", EarthHeight);
+            // Вставки — до CreateReal (MaxWithDetail в Amplitude); карта статическая, вставки добавляются один раз.
+            if (EarthPatches != null && SolarSystem.HeightMaps.TryGetValue("earth", out var earthMap) && earthMap.Patches.Count == 0)
+                earthMap.AddPatches(EarthPatches.bytes);
             LoadHeight("moon", MoonHeight);
             LoadHeight("mars", MarsHeight);
             LoadHeight("mercury", MercuryHeight);
@@ -235,6 +240,8 @@ namespace Kare.Space.Game
                 var view = go.AddComponent<VesselView>();
                 if (PlasmaShader != null) VesselView.SheathShader = PlasmaShader;
                 view.Init(v, VesselMaterial, PlumeMaterial);
+                // Струи РСУ (§4.9, §9.5) — отдельным компонентом на том же объекте, горят только по команде борта.
+                go.AddComponent<RcsJets>().Init(view, PlumeMaterial);
                 if (!v.IsDebris && SmokeMaterial != null)
                     new GameObject($"Trail {v.Name}").AddComponent<ExhaustTrail>().Init(view, SmokeMaterial);
                 views.Add(v, view);

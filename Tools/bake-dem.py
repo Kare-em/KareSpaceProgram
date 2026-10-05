@@ -12,7 +12,8 @@
 #   'KDEM', int32 W, int32 H, float32 scale, float32 offset, затем W·H int16 (LE); высота = offset + scale·v, м.
 #   Строка 0 — северный полюс, x = 0 — 180° з. д. (центры текселей), как у EarthLand.bytes.
 # Запуск: python Tools/bake-dem.py [earth moon mars mercury venus] [--check]   (--check — только сверка с текстурами)
-import os, sys, struct, urllib.request
+#         python Tools/bake-dem.py patches   — вставки ETOPO 15″ вокруг земных площадок → Data/EarthPatches.bytes
+import os, sys, math, struct, urllib.request
 import numpy as np
 from PIL import Image
 
@@ -241,8 +242,130 @@ def check(body):
                   f'пик {c[k]:+.3f} при сдвиге {shift:+.1f}°')
 
 
+# ---------------------------------------------------------------- вставки Земли (режим patches)
+# Глобальная карта 0,1° (11 км) не видит мыс Канаверал: билинейно в LC-39A −4 м, площадка — остров в море
+# (замер 05.10.2026). Вокруг земных площадок и полос — вставки ETOPO 2022 15″ (≈ 460 м), Core HeightMap.AddPatches.
+# Площадки — копия SolarSystem.CreateReal (космодромы) и Runways.AddSites (полосы). Пара: добавил там — добавь тут.
+EARTH_SITES = [
+    ('baikonur', 45.920, 63.342), ('canaveral', 28.608, -80.604), ('kourou', 5.239, -52.768),
+    ('plesetsk', 62.927, 40.575), ('vostochny', 51.884, 128.334),
+    ('edwards', 34.935, -117.835), ('slf', 28.615, -80.695), ('yubileyny', 45.958, 63.650),
+]
+# Окно вставки, °. Пара: Core DemPatch.FadeDeg = 0,2° — край смешивания с глобальной картой; ядро без смешивания
+# 1,5 − 2·0,2 = 1,1° ≈ 120 км по широте покрывает BlendRadius·6 = 54 км и узнаваемый берег вокруг площадки.
+PATCH_DEG = 1.5
+# Площадки ближе этого (°) — одно общее окно (LC-39A и SLF — 9 км, Байконур и «Юбилейный» — 25 км).
+PATCH_MERGE = 0.6
+ETOPO15 = ('https://www.ngdc.noaa.gov/thredds/dodsC/global/ETOPO2022/15s/15s_surface_elev_netcdf/'
+           'ETOPO_2022_v1_15s_{}_surface.nc')
+PPD15 = 240  # текселей на градус у 15″
+
+
+def tile_name(lat_n, lon_w):
+    """Тайл 15″ — 15°×15°, имя по северо-западному углу: N30W090 — широта 15…30, долгота −90…−75."""
+    ns = f'N{lat_n:02d}' if lat_n >= 0 else f'S{-lat_n:02d}'
+    ew = f'E{lon_w:03d}' if lon_w >= 0 else f'W{-lon_w:03d}'
+    return ns + ew
+
+
+def opendap_z(url, r0, r1, c0, c1):
+    q = f'{url}.dods?z.z[{r0}:1:{r1}][{c0}:1:{c1}]'
+    d = urllib.request.urlopen(q, timeout=600).read()
+    i = d.find(b'Data:\n') + 6
+    n = struct.unpack('>i', d[i:i + 4])[0]
+    return np.frombuffer(d, '>f4', n, i + 8).reshape(r1 - r0 + 1, c1 - c0 + 1)
+
+
+def fetch_etopo15(lat_s, lon_w, rows, cols):
+    """Окно ETOPO 2022 15″ surface: юго-западный угол (lat_s, lon_w) по сетке 15″, rows×cols текселей; строка 0 — юг.
+    Окно может пересекать тайлы — собирается по кускам. Кеш — int16 .npy в Tools/dem_src/."""
+    path = SRC + f'etopo2022_15s_{lat_s:+.4f}_{lon_w:+.4f}_{rows}x{cols}.npy'
+    if os.path.exists(path):
+        return np.load(path)
+    out = np.zeros((rows, cols), np.int16)
+    i0 = int(round((lat_s + 90) * PPD15)); j0 = int(round((lon_w + 180) * PPD15))  # глобальные индексы 15″
+    i = i0
+    while i < i0 + rows:
+        tile_lat_s = (i // (15 * PPD15)) * 15 - 90
+        i_end = min(i0 + rows, (tile_lat_s + 105) * PPD15)
+        j = j0
+        while j < j0 + cols:
+            tile_lon_w = (j // (15 * PPD15)) * 15 - 180
+            j_end = min(j0 + cols, (tile_lon_w + 195) * PPD15)
+            url = ETOPO15.format(tile_name(tile_lat_s + 15, tile_lon_w))
+            r0 = i - (tile_lat_s + 90) * PPD15; c0 = j - (tile_lon_w + 180) * PPD15
+            print('   opendap', url.rsplit('/', 1)[1], r0, c0, i_end - i, j_end - j)
+            z = opendap_z(url, r0, r0 + i_end - i - 1, c0, c0 + j_end - j - 1)
+            out[i - i0:i_end - i0, j - j0:j_end - j0] = np.clip(np.round(z), -32000, 32000).astype(np.int16)
+            j = j_end
+        i = i_end
+    np.save(path, out)
+    return out
+
+
+def patch_groups():
+    groups = []
+    for sid, la, lo in EARTH_SITES:
+        for g in groups:
+            if abs(g[0][1] - la) < PATCH_MERGE and abs(g[0][2] - lo) < PATCH_MERGE:
+                g.append((sid, la, lo)); break
+        else:
+            groups.append([(sid, la, lo)])
+    return groups
+
+
+def bake_patches():
+    """Assets/_Project/Data/EarthPatches.bytes (читает Core HeightMap.AddPatches):
+    'KDPT', int32 N; на вставку: float64 lat_s, lat_n, lon_w, lon_e (края, °), int32 W, H, float32 scale, offset,
+    W·H int16 (LE); строка 0 — север, центры текселей; высота = offset + scale·v, м над радиусом Земли в ядре."""
+    d = open(DST + 'EarthLand.bytes', 'rb').read()
+    mw, mh = struct.unpack('<ii', d[:8])
+    field = np.frombuffer(d, np.uint8, mw * mh, 8).reshape(mh, mw) / 255.0
+    n = int(round(PATCH_DEG * PPD15))
+    blobs = []
+    for g in patch_groups():
+        la = sum(s[1] for s in g) / len(g); lo = sum(s[2] for s in g) / len(g)
+        # Угол — на сетку 15″, чтобы тексели вставки совпали с тексельями ETOPO без пересэмплинга.
+        lat_s = math.floor((la - PATCH_DEG / 2) * PPD15) / PPD15
+        lon_w = math.floor((lo - PATCH_DEG / 2) * PPD15) / PPD15
+        print('patch', '+'.join(s[0] for s in g), f'{lat_s:.3f}…{lat_s + n / PPD15:.3f}, {lon_w:.3f}…{lon_w + n / PPD15:.3f}')
+        h = fetch_etopo15(lat_s, lon_w, n, n).astype(np.float32)[::-1]  # строка 0 — север
+        h += 0  # ETOPO над геоидом, R Земли в ядре — средний 6371 км: как у глобальной карты, без сдвига
+        # Как earth_fix_inland: суша ниже нуля глубоко в материке (поле ≥ 0,75, |широта| < 60°) — +1 м, иначе озеро.
+        lats = lat_s + n / PPD15 - (np.arange(n) + 0.5) / PPD15
+        lons = lon_w + (np.arange(n) + 0.5) / PPD15
+        ys = np.clip(((90 - lats) / 180 * mh).astype(int), 0, mh - 1)
+        xs = (((lons + 180) / 360 * mw).astype(int)) % mw
+        f = field[ys][:, xs]
+        fix = (h < 1) & (f >= 0.75) & (np.abs(lats) < 60)[:, None]
+        h[fix] = 1
+        v = np.clip(np.round(h), -32767, 32767).astype('<i2')
+        blobs.append(struct.pack('<ddddiiff', lat_s, lat_s + n / PPD15, lon_w, lon_w + n / PPD15, n, n, 1.0, 0.0) + v.tobytes())
+        for sid, sla, slo in g:
+            print(f'   {sid}: {sample_patch(h, lat_s, lon_w, sla, slo):.1f} м (15″, билинейно); поднято низин {fix.sum()}')
+    path = DST + 'EarthPatches.bytes'
+    with open(path, 'wb') as fo:
+        fo.write(b'KDPT' + struct.pack('<i', len(blobs)))
+        for b in blobs:
+            fo.write(b)
+    print(f'EarthPatches: {len(blobs)} вставок {n}×{n}, {os.path.getsize(path) / 1e6:.2f} МБ')
+
+
+def sample_patch(h, lat_s, lon_w, lat, lon):
+    """Билинейно по центрам текселей, как Core DemPatch.Sample. h — строка 0 север."""
+    n = h.shape[0]
+    fy = (lat_s + n / PPD15 - lat) * PPD15 - 0.5; fx = (lon - lon_w) * PPD15 - 0.5
+    y0, x0 = int(math.floor(fy)), int(math.floor(fx)); ty, tx = fy - y0, fx - x0
+    a = h[y0, x0] + (h[y0, x0 + 1] - h[y0, x0]) * tx
+    b = h[y0 + 1, x0] + (h[y0 + 1, x0 + 1] - h[y0 + 1, x0]) * tx
+    return float(a + (b - a) * ty)
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if args == ['patches']:
+        bake_patches()
+        return
     bodies = args or ['earth', 'moon', 'mars', 'mercury', 'venus']
     only_check = '--check' in sys.argv
     for body in bodies:

@@ -106,6 +106,7 @@ namespace Kare.Space.EditorTools
             boot.EarthLand = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthLand.bytes");
             // Карты высот (Tools/bake-dem.py, §2.8); нет файла — поле пустое, тело на процедурном рельефе.
             boot.EarthHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthHeight.bytes");
+            boot.EarthPatches = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/EarthPatches.bytes");
             boot.MoonHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MoonHeight.bytes");
             boot.MarsHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MarsHeight.bytes");
             boot.MercuryHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MercuryHeight.bytes");
@@ -353,6 +354,12 @@ namespace Kare.Space.EditorTools
             (SectionModel.SaturnSIC, "Saturn_SIC"), (SectionModel.SaturnSII, "Saturn_SII"), (SectionModel.SaturnSIVB, "Saturn_SIVB"),
             (SectionModel.ProtonStage1, "Proton_Stage1"), (SectionModel.ProtonStage2, "Proton_Stage2"),
             (SectionModel.ProtonStage3, "Proton_Stage3"), (SectionModel.BlokD, "BlokD"),
+            // Tools/blender/station_parts.py
+            (SectionModel.R7BlockI, "R7_BlockI"), (SectionModel.VoskhodAirlock, "Voskhod_Airlock"),
+            (SectionModel.SoyuzPAO, "Soyuz_PAO"), (SectionModel.SoyuzSA, "Soyuz_SA"), (SectionModel.SoyuzBO, "Soyuz_BO"),
+            (SectionModel.SoyuzShroud, "Soyuz_Shroud_Half"), (SectionModel.ISS2000, "ISS_2000"), (SectionModel.ISS2020, "ISS_2020"),
+            (SectionModel.Falcon9S1, "Falcon9_S1"), (SectionModel.Falcon9S2, "Falcon9_S2"),
+            (SectionModel.DragonTrunk, "Dragon_Trunk"), (SectionModel.CrewDragon, "Crew_Dragon"),
         };
 
         /// <summary>Раскладное (§6.12): опоры и трапы — отдельные FBX, по объекту на опору (Tools/blender, split_deploy).</summary>

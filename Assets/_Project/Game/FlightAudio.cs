@@ -358,11 +358,9 @@ namespace Kare.Space.Game
             lPlasma.Cut = 600 + 2500 * pl;
             lPlasma.Pitch = 0.5f + 0.2f * pl;
 
-            // РСУ: шипение по доле команды от момента РСУ и по поступательной тяге. Маховики беззвучны.
-            double rcs = 0;
-            for (int i = 0; i < a.Attached.Length; i++) if (a.Attached[i]) rcs += a.Design.Sections[i].RcsTorque;
-            float cmd = rcs > 0 ? Mathf.Clamp01((float)(a.TorqueCommand.magnitude / rcs)) + Mathf.Clamp01((float)a.RcsTranslate.magnitude)
-                + Mathf.Clamp01((float)System.Math.Abs(a.RcsForward)) : 0;
+            // РСУ: шипение по той же доле команды, что зажигает струи (RcsJets.Command): момент сверх качания сопел
+            // и рулей плюс поступательная тяга. Раньше считалась доля полного момента — шипело на взлёте при качании.
+            float cmd = RcsJets.Level(a);
             lRcs.Vol = 0.45f * Mathf.Clamp01(cmd) * (inAir ? 1 : 0.7f);
             lRcs.Cut = inAir ? 9000 : 2500;
 

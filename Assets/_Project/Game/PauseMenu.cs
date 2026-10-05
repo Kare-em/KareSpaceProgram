@@ -20,7 +20,10 @@ namespace Kare.Space.Game
 
         void Update()
         {
-            if (Input.GetKeyDown(KeyCode.Escape)) IsOpen = !IsOpen;
+            if (!Input.GetKeyDown(KeyCode.Escape)) return;
+            // Esc из таблицы миссий возвращает в меню, а не в полёт.
+            if (IsOpen && MissionPicker.Open) MissionPicker.Open = false;
+            else { IsOpen = !IsOpen; MissionPicker.Open = false; }
         }
 
         void OnGUI()
@@ -34,8 +37,14 @@ namespace Kare.Space.Game
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            int missionRows = (MissionCatalog.All.Count + MissionCols - 1) / MissionCols;
-            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + missionRows * (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
+            // Выбор миссии — отдельная таблица (MissionPicker) поверх затемнения вместо панели паузы.
+            if (MissionPicker.Open)
+            {
+                MissionPicker.Draw(boot.Mission, SelectMission);
+                return;
+            }
+
+            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -67,25 +76,11 @@ namespace Kare.Space.Game
             }
             y += Row + 20;
 
-            // Выбор миссии: перезапуск сцены с другой миссией (MissionCatalog), например «Луна-9» для посадки.
+            // Выбор миссии: таблица с описаниями и схемами полёта (MissionPicker), перезапуск сцены с другой миссией.
             GUI.Label(new Rect(x, y, w, 24), "Миссия (перезапуск)", label); y += 30;
-            float bw = (w - (MissionCols - 1) * 4) / MissionCols;
-            for (int i = 0; i < MissionCatalog.All.Count; i++)
-            {
-                var m = MissionCatalog.All[i];
-                var br = new Rect(x + (i % MissionCols) * (bw + 4), y + (i / MissionCols) * (Row + 4), bw, Row);
-                bool cur = boot.Mission != null && boot.Mission.Id == m.Id;
-                GUI.color = cur ? new Color(1f, 0.8f, 0.4f) : Color.white;
-                if (GUI.Button(br, m.Title, small) && !cur)
-                {
-                    GameBootstrap.NextMissionId = m.Id;
-                    GameBootstrap.NextDesign = null; // миссия со своим историческим носителем
-                    IsOpen = false;
-                    Reload();
-                }
-                GUI.color = Color.white;
-            }
-            y += missionRows * (Row + 4) + 16;
+            if (GUI.Button(new Rect(x, y, w, Row), $"{boot.Mission?.Title ?? "—"}  —  выбрать из таблицы…", button))
+                MissionPicker.Open = true;
+            y += Row + 4 + 16;
 
             // Графика (GDD §9): RT и DLSS — RenderQuality применяет на лету, без перезапуска.
             GUI.Label(new Rect(x, y, w, 24), "Графика", label); y += 30;
@@ -170,8 +165,15 @@ namespace Kare.Space.Game
             GUI.enabled = true;
         }
 
-        /// <summary>Сколько кнопок миссий в ряду. Пара: Width — подписи «Пролёт Луны» должны влезать.</summary>
-        const int MissionCols = 4;
+        /// <summary>Перезапуск сцены с выбранной миссией и её историческим носителем.</summary>
+        static void SelectMission(string id)
+        {
+            GameBootstrap.NextMissionId = id;
+            GameBootstrap.NextDesign = null; // миссия со своим историческим носителем
+            MissionPicker.Open = false;
+            IsOpen = false;
+            Reload();
+        }
 
         void Jump(Universe u, CelestialBody body, double alt, bool orbital)
         {

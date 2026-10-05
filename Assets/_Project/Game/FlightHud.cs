@@ -203,43 +203,7 @@ namespace Kare.Space.Game
             float by = y + count * (cell + 6);
             var tip = new GUIStyle(small) { alignment = TextAnchor.UpperRight, wordWrap = true };
             GUI.Label(new Rect(w - 230, by, 218, 40), "Пробел: " + v.NextStageLabel, tip);
-            DeltaVList(v, w, by + 44);
-        }
-
-        /// <summary>Строк Δv в списке под стеком — пакет «Сатурна-5» с LM даёт 6 прожигов, больше не влезает над навболом.</summary>
-        const int DvRows = 7;
-
-        /// <summary>
-        /// Δv по оставшимся прожигам (§5.4), как в KSP: вакуум и у земли (у безатмосферного тела — одно число),
-        /// время работы. Тот же расчёт, что у конструктора и автопилотов, — RemainingStats с учётом остатка топлива.
-        /// </summary>
-        void DeltaVList(Vessel v, float w, float y)
-        {
-            var stats = v.RemainingStats();
-            if (stats.Count == 0) return;
-            const float pw = 300, row = 20;
-            int rows = Mathf.Min(stats.Count, DvRows);
-            var r = new Rect(w - pw - 12, y, pw, 28 + (rows + 1) * row);
-            Fill(r, Panel);
-            bool air = v.Body.HasAtmosphere && v.Altitude < v.Body.Atmosphere.Top;
-            double total = 0;
-            foreach (var s in stats) total += s.DeltaVVac;
-            GUI.color = Dim;
-            GUI.Label(new Rect(r.x + 10, r.y + 4, pw - 20, row), air ? "Δv ВАК. (У ЗЕМЛИ) · РАБОТА" : "Δv · РАБОТА", small);
-            GUI.color = Color.white;
-            for (int i = 0; i < rows; i++)
-            {
-                var s = stats[i];
-                float ry = r.y + 26 + i * row;
-                GUI.color = i == 0 ? Accent : Color.white;
-                string name = s.Name.Length > 16 ? s.Name.Substring(0, 15) + "…" : s.Name;
-                GUI.Label(new Rect(r.x + 10, ry, 120, row), name, small);
-                string dv = air ? $"{s.DeltaVVac:0} ({s.DeltaVSL:0})" : s.DeltaVVac.ToString("0");
-                GUI.Label(new Rect(r.x + 128, ry, 112, row), dv + " м/с", small);
-                GUI.Label(new Rect(r.x + 244, ry, 50, row), s.BurnTime.ToString("0") + " с", small);
-            }
-            GUI.color = Color.white;
-            GUI.Label(new Rect(r.x + 10, r.y + 26 + rows * row, pw - 20, row), $"<b>Всего {total:0} м/с</b>", small);
+            StagePanel(v, w, h, by + 44);
         }
 
         static Icon StageIcon(StageActionType t)
@@ -267,10 +231,15 @@ namespace Kare.Space.Game
         const double AutoSurfaceBelow = 30000;
         SpeedFrame speedFrame = (SpeedFrame)(-1);
 
-        /// <summary>Левая колонка снизу вверх: газ и топливо (ThrustFuel), полётная панель, узел манёвра (NodePanel).
-        /// Пара: меняешь высоту одной — колонка сдвигается через FlightPanelTop.</summary>
+        /// <summary>Левая колонка снизу вверх: газ и топливо (ThrustFuel), узел манёвра (NodePanel).
+        /// Пара: меняешь высоту одной — колонка сдвигается через NodePanelTop.</summary>
         const float FlightPanelHeight = 150, ThrustFuelTop = 138, NodePanelHeight = 166;
-        static float FlightPanelTop(float h) => h - ThrustFuelTop - 6 - FlightPanelHeight;
+        static float NodePanelTop(float h) => h - ThrustFuelTop - 6 - NodePanelHeight;
+        /// <summary>
+        /// Высота и скорость — сверху по центру, сразу под временем миссии (TopCenter: y 8, высота 74): главные цифры
+        /// полёта там, куда игрок и так смотрит. Пара: сообщения ядра (Messages) — под ней, с MessageTop.
+        /// </summary>
+        const float FlightPanelTopY = 8 + 74 + 6, MessageTop = FlightPanelTopY + FlightPanelHeight + 8;
 
         void Bottom(Universe u, Vessel v, float w, float h)
         {
@@ -279,7 +248,7 @@ namespace Kare.Space.Game
 
             const float pw = 250;
             // Перетаскивается за любое место, кроме кнопки системы отсчёта (её прямоугольник ниже — та же пара).
-            var r = Draggable(flightDrag, new Rect(12, FlightPanelTop(h), pw, FlightPanelHeight), w, h,
+            var r = Draggable(flightDrag, new Rect((w - pw) / 2, FlightPanelTopY, pw, FlightPanelHeight), w, h,
                 new Rect(6, 78, pw - 12, 22));
             Fill(r, Panel);
             float x = r.x + 12, y = r.y;
@@ -394,7 +363,7 @@ namespace Kare.Space.Game
                 nodePredictAt = Time.unscaledTime + NodePredictPeriod;
                 nodePatches = u.PredictActive();
             }
-            var r = new Rect(12, FlightPanelTop(h) - NodePanelHeight - 6, 250, NodePanelHeight);
+            var r = new Rect(12, NodePanelTop(h), 250, NodePanelHeight);
             Fill(r, Panel);
             float y = r.y + 6, x = r.x + 12;
             GUI.color = Accent;
@@ -668,7 +637,7 @@ namespace Kare.Space.Game
             for (int i = Mathf.Max(0, list.Count - 3); i < list.Count; i++) sb.Append(list[i]).Append('\n');
             var st = new GUIStyle(label) { alignment = TextAnchor.UpperCenter, wordWrap = true };
             GUI.color = new Color(1, 1, 1, a);
-            GUI.Label(new Rect((w - 640) / 2, 96, 640, 80), sb.ToString(), st);
+            GUI.Label(new Rect((w - 640) / 2, MessageTop, 640, 80), sb.ToString(), st);
             GUI.color = Color.white;
         }
 
@@ -727,6 +696,7 @@ namespace Kare.Space.Game
             GUI.color = c;
             GUI.DrawTexture(r, Texture2D.whiteTexture);
             GUI.color = old;
+            HudHits.Add(r); // панель HUD: щелчок по ней не выбирает деталь за ней (PartInspector)
         }
 
         static string Km(double m) =>

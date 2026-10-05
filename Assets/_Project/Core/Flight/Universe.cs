@@ -427,6 +427,7 @@ namespace Kare.Space.Core
         void AdvancePhysics(double dt)
         {
             if (Active != null && Active.OnRails) LeaveRails(Active);
+            double t0 = Time; // положения бортов вне физики относятся к началу кадра
             int n = Math.Max(1, (int)Math.Ceiling(dt / FlightPhysics.MaxStep - 1e-9));
             double h = dt / n;
             var physics = new List<Vessel>();
@@ -452,7 +453,7 @@ namespace Kare.Space.Core
             {
                 if (v == Active || !v.Alive) continue;
                 if (v.IsLanded) FlightPhysics.UpdateLandedPose(v, Time);
-                else if (!physics.Contains(v)) MovePassive(v, Time, passive.Contains(v) || passive.Count < MaxPassivePhysics);
+                else if (!physics.Contains(v)) MovePassive(v, Time, passive.Contains(v) || passive.Count < MaxPassivePhysics, t0);
             }
             eventValid = false;
         }
@@ -647,10 +648,13 @@ namespace Kare.Space.Core
 
         // ---------------------------------------------------------------- рельсы
 
-        void EnterRails(Vessel v)
+        void EnterRails(Vessel v) => EnterRails(v, Time);
+
+        /// <summary>epoch — момент, к которому относится v.Position (не обязательно Time: см. AdvancePhysics).</summary>
+        void EnterRails(Vessel v, double epoch)
         {
             if (v.OnRails) return;
-            v.Orbit = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, Time);
+            v.Orbit = KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, epoch);
             v.OnRails = true;
             if (v == Active) eventValid = false;
         }
@@ -722,6 +726,12 @@ namespace Kare.Space.Core
                 // Причалили к борту миссии (или он сам пришёл к нам) — дальше он и есть активный.
                 if (MissionVessel == a || MissionVessel == t) MissionVessel = null;
                 host.Dock(guest);
+                // Тяга РСУ связки — сумма по секциям (с МКС 2·10^5 Н): невыключенная команда сближения за 10 мин
+                // разгоняла связку на ~120 м/с (420×420 → 419×862 км, гибель на 9,3 g). Захват — конец манёвра.
+                host.RcsTranslate = Vector3d.zero;
+                host.RcsForward = 0;
+                guest.RcsTranslate = Vector3d.zero;
+                guest.RcsForward = 0;
                 host.Target = null;
                 if (host.Sas >= SasMode.Target) host.Sas = SasMode.Stability; // цели больше нет — держим, что есть
                 guest.Event -= OnVesselEvent;
@@ -933,8 +943,11 @@ namespace Kare.Space.Core
         /// <summary>
         /// Неактивный корабль в полёте: рельсы. Провалившийся под «пол» в полной физике (keep) сходит с рельсов и со
         /// следующего кадра падает по физике; на ускорении (или сверх MaxPassivePhysics) — потерян.
+        /// Борт, сходящий на рельсы, стоит там, где был в момент since (по умолчанию Time). В AdvancePhysics Time к этому
+        /// моменту уже ушло на кадр вперёд: орбита с эпохой Time переносила отошедший борт на кадр по орбите — замер
+        /// расстыковки на 300 км, кадр 0,1 с: цель прыгала на 773 м (7,73 км/с × 0,1 с) и «уходила» на 1,2 м/с.
         /// </summary>
-        void MovePassive(Vessel v, double t, bool keep = false)
+        void MovePassive(Vessel v, double t, bool keep = false, double since = double.NaN)
         {
             double floor = PatchedConics.RailsFloorRadius(v.Body);
             if (!v.OnRails)
@@ -944,7 +957,7 @@ namespace Kare.Space.Core
                     LoseVessel(v);
                     return;
                 }
-                EnterRails(v);
+                EnterRails(v, double.IsNaN(since) ? Time : since);
             }
             // Перицентр под «полом»: если за шаг прошли его — корабль вошёл в атмосферу вне зоны физики.
             if (v.Orbit.PeriapsisRadius < floor)

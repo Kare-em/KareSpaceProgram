@@ -12,7 +12,7 @@ namespace Kare.Space.Game
     /// ступени, Δv/TWR, проверки перед стартом, JSON-сохранения и запуск в Flight. Сборка и проверки — в ядре
     /// (Craft, CraftCompiler, те же, что гоняют тесты); здесь только IMGUI и предпросмотр из примитивов.
     /// </summary>
-    public sealed class HangarController : MonoBehaviour
+    public sealed partial class HangarController : MonoBehaviour
     {
         public const string SceneName = "Hangar", FlightScene = "Flight";
         /// <summary>Миссия, из которой пришли (Esc → «В конструктор»): цель и стол для запуска.</summary>
@@ -113,7 +113,8 @@ namespace Kare.Space.Game
         bool InPreview(Vector3 m)
         {
             float x = m.x / scale, y = (Screen.height - m.y) / scale;
-            return x > LeftW + Pad && x < vw - RightW - Pad && y > TopH && y < vh - StatsH - Pad && !showFiles;
+            return x > LeftW + Pad && x < vw - RightW - Pad && y > TopH && y < vh - StatsH - Pad && !showFiles
+                && !PartInspector.OverWindow(m); // окно детали над предпросмотром: тащим окно, а не крутим камеру
         }
 
         void OrbitCamera()

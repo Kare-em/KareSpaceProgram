@@ -101,6 +101,7 @@ namespace Kare.Space.Core
             if (b.Terrain == null || !HeightMaps.TryGetValue(b.Id, out var map) || map == null) return;
             b.Terrain.Map = map;
             b.Terrain.DetailOctaves = Terrain.DetailOctaves(map, b.Radius);
+            foreach (var p in map.Patches) p.DetailOctaves = Terrain.DetailOctaves(p.CellSize(b.Radius));
             // Amplitude — ещё и граница «выше любых гор»: FlightPhysics.CheckContact, LandingAutopilot.PredictGate и
             // PatchedConics.RailsFloorRadius берут 1,5·Amplitude. С картой это высшая точка плюс шум деталей
             // (Олимп 21,2 км: прежние 7 км у Марса отсекали бы касание на его склонах).
@@ -212,6 +213,7 @@ namespace Kare.Space.Core
                 Terrain.Sites.Add(new LaunchSite("kourou", "Куру, ELA-3", "earth", 5.239, -52.768, 15));
                 Terrain.Sites.Add(new LaunchSite("plesetsk", "Плесецк", "earth", 62.927, 40.575, 120));
                 Terrain.Sites.Add(new LaunchSite("vostochny", "Восточный", "earth", 51.884, 128.334, 230));
+                Runways.AddSites(Terrain.Sites);
             }
             return s;
         }

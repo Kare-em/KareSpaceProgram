@@ -39,6 +39,12 @@ static class Program
                 var f = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(land), name + "Height.bytes");
                 if (System.IO.File.Exists(f)) SolarSystem.HeightMaps[id] = new HeightMap(System.IO.File.ReadAllBytes(f));
             }
+        // Подробные вставки DEM у земных площадок (bake-dem.py patches): нет файла — как раньше, только 0,1°.
+        if (land != null && SolarSystem.HeightMaps.TryGetValue("earth", out var earthMap))
+        {
+            var f = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(land), "EarthPatches.bytes");
+            if (System.IO.File.Exists(f)) earthMap.AddPatches(System.IO.File.ReadAllBytes(f));
+        }
         Run("math", TestMath, only);
         Run("orbit", TestOrbit, only);
         Run("moon", TestEphemeris, only);
@@ -48,8 +54,10 @@ static class Program
         Run("separation", TestSeparation, only);
         Run("craft", TestCraft, only);
         Run("collide", TestCollide, only);
+        Run("undock", TestUndock, only);
         Run("craft_fly", TestCraftFly, only);
         Run("karman", TestKarman, only);
+        Run("chutealt", TestChuteAltitude, only);
         Run("sputnik", TestSputnik, only);
         Run("mechta", () => TestLunar("mechta", 30e6), only);
         Run("vympel", () => TestLunar("vympel", 1000e3), only);
@@ -68,6 +76,7 @@ static class Program
         Run("apollo11", () => TestApollo("apollo11"), only);
         Run("planets", TestPlanets, only);
         Run("autoplan", TestAutoPlan, only);
+        Run("patches", TestPatches, only);
         // Миссии целиком автопилотом Y без рук и с автоускорением: «auto» — все, «auto_<id>» — одна.
         foreach (var id in AutoMissions)
             Run("auto_" + id, () => TestAuto(id), only == "auto" ? "auto_" + id : only);
@@ -209,7 +218,7 @@ static class Program
     {
         "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
         "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
-        "voskhod2", "soyuz_tm31", "crew_dragon",
+        "voskhod2", "soyuz_tm31", "crew_dragon", "sts1", "buran",
     };
 
     /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
@@ -267,9 +276,74 @@ static class Program
         }
         var v = u.Active;
         if (inAir) Console.WriteLine($"   спуск: пик {maxG:F1} g, выше {FlightPhysics.CrewGLimit:F0} g — {maxGTimer:F1} с");
+        // Крылатые: касание полосы (предел снижения — FlightPhysics.GearMaxSink).
+        if (v != null && !double.IsNaN(v.TouchdownSink))
+            Console.WriteLine($"   касание: {v.TouchdownSpeed:F0} м/с, снижение {v.TouchdownSink:F1} м/с");
         Console.WriteLine($"   итог: {(v != null ? OrbitText(v, u.Time) : "нет борта")}; статус миссии: {u.Mission?.Status}");
         Check($"auto_{id}: миссия выполнена без рук", tr.Status == MissionStatus.Success,
             $"{tr.Status} {tr.FailReason}; кадров {frames} ({frames * 0.1 / 60:F1} мин реального времени), макс. ×{maxWarp:G}");
+    }
+
+    /// <summary>Вставки DEM 15″ у площадок (bake-dem.py patches): мыс Канаверал — суша, океан к востоку — вода. В 0,1° LC-39A
+    /// билинейно −4 м, и площадка торчала островом в море (05.10.2026). Нет файла — пропуск.</summary>
+    static void TestPatches()
+    {
+        var earth = SolarSystem.CreateReal().Get("earth");
+        var map = earth.Terrain.Map;
+        if (map == null || map.Patches.Count == 0) { Console.WriteLine("   EarthPatches.bytes нет — пропуск"); return; }
+        double kmDeg = Math.PI * earth.Radius / 180 / 1000;
+        double At(double lat, double lon, double north, double east, bool raw = false)
+        {
+            var d = CelestialBody.LatLonToBodyFixed(lat + north / kmDeg, lon + east / (kmDeg * Math.Cos(lat * Constants.Deg2Rad)));
+            return raw ? Terrain.RawHeight(earth.Terrain, d) : Terrain.Height(earth, d);
+        }
+        var c = SolarSystem.GetSite("canaveral");
+        var slf = SolarSystem.GetSite("slf");
+        // Таблица сырого рельефа (без выравнивания площадок) вокруг LC-39A: строки — север, км; столбцы — восток, км.
+        var xs = new[] { -10.0, -8, -6, -4, -2, -1, 0, 1, 2, 3, 4, 5 };
+        Console.WriteLine("   сырой рельеф у LC-39A, м (строки — к северу, км; столбцы — к востоку, км):");
+        Console.WriteLine("        " + string.Concat(Array.ConvertAll(xs, x => $"{x,6:F0}")));
+        foreach (var y in new[] { 4.0, 2, 1, 0, -1, -2, -4 })
+            Console.WriteLine($"   {y,4:F0} " + string.Concat(Array.ConvertAll(xs, x => $"{At(c.Latitude, c.Longitude, y, x, true),6:F1}")));
+        Console.WriteLine("   итоговый рельеф (с выравниванием площадки, < 0 — вода):");
+        foreach (var y in new[] { 4.0, 2, 1, 0, -1, -2, -4 })
+            Console.WriteLine($"   {y,4:F0} " + string.Concat(Array.ConvertAll(xs, x => $"{At(c.Latitude, c.Longitude, y, x),6:F1}")));
+        double pad = At(c.Latitude, c.Longitude, 0, 0, true), padSlf = At(slf.Latitude, slf.Longitude, 0, 0, true);
+        Check("patches: LC-39A на суше (сырой рельеф > 0)", pad > 0, $"{pad:F1} м");
+        Check("patches: SLF на суше (сырой рельеф > 0)", padSlf > 0, $"{padSlf:F1} м");
+        // Суша вокруг — по итоговому рельефу, который видит игрок: к западу, юго-западу, югу от 39A (океан — к востоку
+        // и северо-востоку в 0,5–1 км, как в жизни); по оси полосы SLF (курс 150°) ±2 км. Сырой ETOPO 15″ местами даёт
+        // −1 м у берега (лагуны, артефакт сшивки суша/батиметрия) — их держит выравнивание площадки (PatchSeaCut = −2 м).
+        double minLand = double.MaxValue;
+        foreach (var (n, e) in new[] { (0.0, -1.0), (0, -2), (-1, -1), (-1.4, -1.4), (-1, 0), (-2, 0), (1, -2), (2, -2) })
+            minLand = Math.Min(minLand, At(c.Latitude, c.Longitude, n, e));
+        for (double a = -2; a <= 2; a += 0.5)
+            minLand = Math.Min(minLand, At(slf.Latitude, slf.Longitude, a * Math.Cos(150 * Constants.Deg2Rad), a * Math.Sin(150 * Constants.Deg2Rad)));
+        Check("patches: на 1–2 км к З/Ю от 39A и вдоль SLF — суша", minLand > 0, $"мин {minLand:F1} м");
+        double sea = Math.Max(At(c.Latitude, c.Longitude, 0, 4), At(c.Latitude, c.Longitude, 0, 5));
+        double seaRaw = Math.Max(At(c.Latitude, c.Longitude, 0, 4, true), At(c.Latitude, c.Longitude, 0, 5, true));
+        Check("patches: океан в 4–5 км к востоку от 39A — вода (выравнивание площадки его не поднимает)", seaRaw < 0 && sea <= 0,
+            $"сырой {seaRaw:F1} м, с площадкой {sea:F1} м");
+        double padH = At(c.Latitude, c.Longitude, 0, 0);
+        Check("patches: стол 39A на отметке", Math.Abs(padH - c.Elevation) < 0.01, $"{padH:F2} м");
+        // Край вставки: шаг 200 м поперёк полосы смешивания — без ступеньки (перепад порядка соседних точек вне вставки).
+        var pt = map.Patches.Find(p => p.LatS < c.Latitude && c.Latitude < p.LatN && p.LonW < c.Longitude && c.Longitude < p.LonE);
+        double maxStep = 0, prev = double.NaN;
+        for (double lat = pt.LatN - 2 * DemPatch.FadeDeg; lat < pt.LatN + DemPatch.FadeDeg; lat += 0.2 / kmDeg)
+        {
+            double hh = Terrain.RawHeight(earth.Terrain, CelestialBody.LatLonToBodyFixed(lat, -81.2));
+            if (!double.IsNaN(prev)) maxStep = Math.Max(maxStep, Math.Abs(hh - prev));
+            prev = hh;
+        }
+        Check("patches: край вставки без ступеньки (шаг 200 м)", maxStep < 5, $"макс. перепад {maxStep:F2} м");
+        foreach (var id in new[] { "baikonur", "kourou", "plesetsk", "vostochny", "edwards", "yubileyny" })
+        {
+            var s = SolarSystem.GetSite(id);
+            double r = At(s.Latitude, s.Longitude, 0, 0, true);
+            bool inside = map.PatchAt(s.Latitude, s.Longitude, out double cw) != null && cw >= 1;
+            Check($"patches: {s.Name} — во вставке, сырой рельеф у отметки", inside && Math.Abs(r - s.Elevation) < 60,
+                $"{r:F0} м при отметке {s.Elevation:F0}");
+        }
     }
 
     /// <summary>План перелёта к планетам с опорной орбиты Земли: прогноз склейки коник доходит до цели.</summary>
@@ -509,6 +583,55 @@ static class Program
         }
     }
 
+    /// <summary>
+    /// Ручная расстыковка (V, §6.6): отошедший борт не причаливает обратно сам (пара «свежая» до расхождения
+    /// на SeparationClear), импульс сохраняется, пружины UndockPush; после расхождения связка снова собирается.
+    /// </summary>
+    static void TestUndock()
+    {
+        var (u, _) = StartMission("apollo11");
+        var v = u.Active;
+        v.Situation = Situation.Flying;
+        double R = v.Body.Radius + 300e3;
+        var up = v.Position.normalized;
+        v.Position = up * R;
+        v.Velocity = Vector3d.Cross(new Vector3d(0, 0, 1), up).normalized * Math.Sqrt(v.Body.Mu / R);
+        Vessel lm = null;
+        for (int k = 0; k < 30 && lm == null && u.Active == v && v.HasNextStage; k++)
+        {
+            u.Stage();
+            FlightControl.Cutoff(v);
+            foreach (var x in u.Vessels) if (x != v && Universe.CanDock(v, x)) lm = x;
+        }
+        if (lm == null) { Check("Расстыковка: ЛМ на переходнике", false); return; }
+        u.Vessels.Remove(lm);
+        v.Dock(lm);
+        Check("Расстыковка: связка собрана", v.IsDocked);
+        v.MassProperties(out double m0, out _, out _, out _);
+        var mom0 = v.Velocity * m0;
+        int n0 = u.Vessels.Count;
+        u.Undock();
+        var t = v.Target;
+        bool ok = t != null && !v.IsDocked && u.Vessels.Count == n0 + 1;
+        Check("Расстыковка: отдельный борт, он же цель", ok, $"{u.Vessels.Count - n0} новых");
+        if (!ok) return;
+        v.MassProperties(out double m1, out _, out _, out _);
+        t.MassProperties(out double m2, out _, out _, out _);
+        double dm = ((v.Velocity * m1 + t.Velocity * m2) - mom0).magnitude / m0;
+        Check("Расстыковка: импульс сохраняется", dm < 1e-6, $"{dm:E1} м/с");
+        double push = (t.Velocity - v.Velocity).magnitude;
+        Check("Расстыковка: пружины разводят на 0,3 м/с", Math.Abs(push - 0.3) < 0.02, $"{push:F3} м/с");
+        for (int i = 0; i < 100; i++) u.Advance(0.1);
+        Universe.StateOf(t, u.Time, out var rt, out _);
+        Universe.StateOf(v, u.Time, out var rv, out _);
+        double gap = (rt - rv).magnitude;
+        Check("Расстыковка: не причалил обратно сам, цель не прыгает", !v.IsDocked && u.Vessels.Contains(t) && gap < 40, $"центры в {gap:F1} м");
+        u.Docking = new DockingAutopilot(u, t);
+        double t0 = u.Time;
+        while (u.Time - t0 < 1800 && !u.Active.IsDocked && u.Active.Alive) u.Advance(0.1);
+        Check("Расстыковка: автопилот снова собирает связку", u.Active.IsDocked, $"{u.Time - t0:F0} с");
+    }
+
     /// <summary>Ракета из конструктора летит: «Семёрка» сама выходит на орбиту 200 км и сбрасывает боковушки.</summary>
     static void TestCraftFly()
     {
@@ -605,6 +728,50 @@ static class Program
         });
         Console.WriteLine($"   апогей {apex / 1000:F1} км, итог: {v.Situation}, {v.DestroyReason}");
         Check("Линия Кармана выполнена", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+    }
+
+    /// <summary>
+    /// Уставка высоты ввода парашюта (§4.8, окно детали): «Карман» с куполом на 4 км вместо штатных 7 — взводим сразу
+    /// после отделения, раскрыться он должен у 4 км, а капсула — сесть целой. Плюс зажим уставки и баки в строках ступеней.
+    /// </summary>
+    static void TestChuteAltitude()
+    {
+        Check("Парашют: уставка 0 — штатные 7 км", FlightPhysics.ClampChuteAltitude(0) == FlightPhysics.ChuteDeployAltitude);
+        Check("Парашют: уставка зажата сверху", FlightPhysics.ClampChuteAltitude(50000) == FlightPhysics.ChuteAltitudeMax);
+        Check("Парашют: уставка зажата снизу", FlightPhysics.ClampChuteAltitude(10) == FlightPhysics.ChuteAltitudeMin);
+
+        var (u, tr) = StartMission("karman");
+        var v = u.Active;
+        var st = v.RemainingStats();
+        bool secs = st.Count > 0;
+        foreach (var x in st) secs &= x.Sections.Count > 0 && x.Propellant > 0;
+        Check("Строки ступеней знают свои секции и топливо", secs, $"{st.Count} строк");
+
+        const double Target = 4000;
+        u.Stage(); // зажигание
+        bool separated = false, armed = false;
+        double deployAlt = double.NaN;
+        Fly(u, tr, 2, 3000, () => tr.Status == MissionStatus.Active, () =>
+        {
+            v = u.Active;
+            if (!separated && v.VerticalSpeed < 0 && v.Altitude > 50000)
+            {
+                u.Stage();
+                separated = true;
+                v = u.Active;
+                for (int i = 0; i < v.Attached.Length; i++)
+                    if (v.Attached[i] && v.Design.Sections[i].ParachuteArea > 0) v.SetChuteAltitude(i, Target);
+            }
+            // Взвод сразу после отделения (на 50+ км): штатный купол раскрылся бы на 7 км, этот — должен ждать 4 км.
+            if (separated && !armed && v == u.Active) { u.Stage(); armed = true; }
+            if (armed && double.IsNaN(deployAlt))
+                for (int i = 0; i < v.Attached.Length; i++)
+                    if (v.Attached[i] && v.ChuteDeployed[i]) { deployAlt = v.Altitude; break; }
+        });
+        Console.WriteLine($"   купол раскрыт на {deployAlt:F0} м, итог: {v.Situation}, {v.DestroyReason}");
+        // Шаг физики на спуске ~0,02 с × 200 м/с — купол раскрывается в пределах пары сотен метров под уставкой.
+        Check("Парашют раскрылся у уставки 4 км", deployAlt <= Target && deployAlt > Target - 300, $"{deployAlt:F0} м");
+        Check("Капсула с низким вводом села целой", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
     }
 
     static void TestSputnik()
@@ -964,8 +1131,8 @@ static class Program
         var (u, tr) = StartMission("freedom7");
         var v = u.Active;
         u.Stage();
-        double apex = 0, maxG = 0, t0 = u.Time;
-        bool separated = false, chute = false;
+        double apex = 0, maxG = 0, t0 = u.Time, touch = 0;
+        bool separated = false, chute = false, opened = false;
         Fly(u, tr, 2, 3000, () => tr.Status == MissionStatus.Active, () =>
         {
             v = u.Active;
@@ -987,9 +1154,16 @@ static class Program
             }
             if (!separated && v.VerticalSpeed < 0 && v.Altitude > 50000) { u.Stage(); separated = true; }
             else if (separated && !chute) { u.Stage(); chute = true; }
+            // Регрессия «Шепард гибнет при касании»: скорость последнего кадра в полёте ≈ скорость касания.
+            if (v.Situation == Situation.Flying) touch = v.SurfaceSpeed;
+            for (int i = 0; i < v.ChuteDeployed.Length; i++) opened |= v.Attached[i] && v.ChuteDeployed[i] && !v.ChuteFailed[i];
         });
-        Console.WriteLine($"   апогей {apex / 1000:F1} км, max {maxG:F1} g, итог: {v.Situation}, {v.DestroyReason}");
+        Console.WriteLine($"   апогей {apex / 1000:F1} км, max {maxG:F1} g, итог: {v.Situation}, касание {touch:F1} м/с, {v.DestroyReason}");
         Check("Фридом-7 выполнен", tr.Status == MissionStatus.Success, tr.FailReason ?? "");
+        // Настоящий «Меркурий» приводнялся на ≈ 9 м/с; порог гибели — FlightPhysics.CrashSpeed (10 м/с).
+        Check("Фридом-7: капсула цела, купол раскрыт, приводнение мягче порога удара",
+            v.Alive && !v.CrewLost && v.Situation == Situation.Splashed && opened && touch < FlightPhysics.CrashSpeed,
+            $"{v.Situation} купол {opened} касание {touch:F1} м/с {v.DestroyReason}");
     }
 
     /// <summary>

@@ -40,7 +40,7 @@ namespace Kare.Space.Core
     /// с КТ «Луны-17», откидываются только на грунте; Lid — крышка лунохода с солнечной батареей: на грунте
     /// открывается и закрывается (луноход закрывал её на лунную ночь). Опоры КТ и Е-6 неподвижные — None.
     /// </summary>
-    public enum DeployKind { None, Legs, PyroLegs, Ramps, Lid }
+    public enum DeployKind { None, Legs, PyroLegs, Ramps, Lid, Gear }
 
     /// <summary>Деталь вида секции из Tools/blender. Физики не касается: ядро о мешах не знает, только об имени детали.</summary>
     public enum SectionModel
@@ -54,6 +54,9 @@ namespace Kare.Space.Core
         ApolloLES, ApolloSLA,
         // Процедурные тела вращения «семёрки» по профилю VesselPresets.R7*RadiusAt: блок А с «талией», конусы боковых.
         R7BlockA, R7Booster,
+        // Корабли после «Аполлона» и станции (Tools/blender/station_parts.py): блок И, шлюз «Волга», «Союз ТМ» (ПАО, СА, БО,
+        // половина обтекателя с САС), МКС 2000 и 2020, Falcon 9, Crew Dragon. Только в конец: значения пишутся в сцену числами.
+        R7BlockI, VoskhodAirlock, SoyuzPAO, SoyuzSA, SoyuzBO, SoyuzShroud, ISS2000, ISS2020, Falcon9S1, Falcon9S2, DragonTrunk, CrewDragon,
     }
 
     public enum SectionKind
@@ -86,6 +89,11 @@ namespace Kare.Space.Core
         public double FinArea;
         /// <summary>Площадь купола, м² (0 — парашюта нет).</summary>
         public double ParachuteArea;
+        /// <summary>
+        /// Высота ввода парашюта по барометру, м (§4.8); 0 — штатная FlightPhysics.ChuteDeployAltitude. В полёте её правит
+        /// игрок окном детали (Vessel.ChuteAltitude), сюда пишет конструктор.
+        /// </summary>
+        public double ChuteAltitude;
         /// <summary>Множитель Cd: тупое тело капсулы тормозит сильнее ракеты.</summary>
         public double DragScale = 1;
         /// <summary>Предельный тепловой поток, Вт/м²: выше секция разрушается (GDD §4.6).</summary>
@@ -119,16 +127,42 @@ namespace Kare.Space.Core
         public int RadialCount;
         public int RadialParent;
         public double RadialOffset;
+        /// <summary>
+        /// Азимут первого блока группы, рад (0 — к +X, брюху пакета). Орбитер стоит на −X (Beside), поэтому ускорители
+        /// «Шаттла» — на ±Z (π/2), блоки А «Энергии» — по диагоналям (π/4). Пара: Vessel.SplitRadial и VesselView.
+        /// </summary>
+        public double RadialPhase;
         /// <summary>Подъём низа блока над низом родителя, м.</summary>
         public double RadialLift;
         /// <summary>Толчок разделителя под этой секцией, м/с; 0 — штатный (Vessel.StagePush, у радиальных — Vessel.RadialPush).</summary>
         public double DecouplerPush;
+        /// <summary>
+        /// Несущие поверхности (§4.6, Aerodynamics): крыло, киль, стабилизаторы с рулями. null — бескрылая секция, для неё
+        /// прежняя модель корпуса и FinArea. Площадь крыльев в FinArea не входит.
+        /// </summary>
+        public List<WingDef> Wings;
+        /// <summary>
+        /// Секция сбоку от ядра, а не над ним (орбитер «Шаттла»/«Бурана» на баке): низ — у низа предыдущей секции ядра,
+        /// ось смещена на BesideOffset к −X («верх» пакета), длину пакета не добавляет (Vessel.Layout).
+        /// </summary>
+        public bool Beside;
+        public double BesideOffset;
+        /// <summary>Высота шасси (DeployKind.Gear), м: на столько борт выше полосы на пробеге.</summary>
+        public double GearHeight;
+        /// <summary>Центр масс секции — доля длины от низа (0,5 — однородный цилиндр). У орбитера ≈0,35: двигатели и крыло
+        /// в хвосте. Пара: фокус крыла (WingDef.Height) ставится на 0,5–1 м позади этой точки — запас устойчивости.</summary>
+        public double ComFraction = 0.5;
 
         public double Mass => DryMass + Propellant;
         public double Radius => Diameter * 0.5;
         public bool HasEngine => Engine != null && EngineCount > 0;
         public bool IsRadial => RadialCount >= 2;
-        public SectionDef Clone() => (SectionDef)MemberwiseClone();
+        public SectionDef Clone()
+        {
+            var c = (SectionDef)MemberwiseClone();
+            if (Wings != null) c.Wings = Wings.ConvertAll(w => w.Clone());
+            return c;
+        }
     }
 
     public enum StageActionType
@@ -167,6 +201,10 @@ namespace Kare.Space.Core
     {
         public string Name;
         public double DeltaVVac, DeltaVSL, TwrSL, TwrVac, BurnTime, StartMass, EndMass;
+        /// <summary>Топливо, сжигаемое в этой строке, кг (из текущего остатка баков).</summary>
+        public double Propellant;
+        /// <summary>Секции, чьи двигатели работают в этой строке, — по ним HUD и конструктор показывают баки ступени.</summary>
+        public readonly List<int> Sections = new List<int>();
     }
 
     /// <summary>Проект ракеты: секции снизу вверх и последовательность ступеней (пробел).</summary>
@@ -234,6 +272,7 @@ namespace Kare.Space.Core
             p.RcsTorque /= n;
             p.FinArea /= n;
             p.ParachuteArea /= n;
+            if (p.Wings != null) foreach (var w in p.Wings) { w.Area /= n; w.Span /= Math.Sqrt(n); w.BrakeArea /= n; }
             var d = new VesselDesign { Name = s.Name };
             d.Sections.Add(p);
             return d;
@@ -283,7 +322,9 @@ namespace Kare.Space.Core
                     TwrVac = tv / (m0 * Constants.G0),
                     TwrSL = ts / (m0 * Constants.G0),
                     BurnTime = prop[idx] / (s.Engine.MassFlow * s.EngineCount),
+                    Propellant = prop[idx],
                 });
+                res[res.Count - 1].Sections.Add(idx);
                 prop[idx] = 0;
             }
 
@@ -337,6 +378,7 @@ namespace Kare.Space.Core
             {
                 StageStats st = null;
                 var names = new List<string>();
+                var idxs = new List<int>();
                 while (true)
                 {
                     double tv = 0, ts = 0, flow = 0, dt = double.PositiveInfinity;
@@ -350,6 +392,7 @@ namespace Kare.Space.Core
                         flow += f;
                         dt = Math.Min(dt, prop[i] / f);
                         if (!names.Contains(s.Name)) names.Add(s.Name);
+                        if (!idxs.Contains(i)) idxs.Add(i);
                     }
                     if (flow <= 0) break;
                     double m0 = AttachedMass(), m1 = m0 - flow * dt;
@@ -366,6 +409,7 @@ namespace Kare.Space.Core
                     st.DeltaVSL += ts / flow * ln;
                     st.BurnTime += dt;
                     st.EndMass = m1;
+                    st.Propellant += flow * dt;
                     for (int i = 0; i < n; i++)
                     {
                         if (!running[i]) continue;
@@ -377,6 +421,7 @@ namespace Kare.Space.Core
                 }
                 if (st == null) return;
                 st.Name = string.Join(" + ", names);
+                st.Sections.AddRange(idxs);
                 res.Add(st);
             }
 
@@ -524,7 +569,7 @@ namespace Kare.Space.Core
                 case "surveyor": return AtlasCentaurSurveyor();
                 case "apollo8": return SaturnApollo8();
                 case "apollo11": return SaturnApollo11();
-                default: return ModernById(id) ?? Kara1Heavy(); // корабли после «Аполлона» — StationRockets.cs
+                default: return ModernById(id) ?? WingedById(id) ?? Kara1Heavy(); // после «Аполлона» — StationRockets.cs, крылатые — WingedRockets.cs
             }
         }
     }

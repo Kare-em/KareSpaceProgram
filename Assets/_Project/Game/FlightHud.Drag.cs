@@ -23,8 +23,9 @@ namespace Kare.Space.Game
             }
         }
 
-        /// <summary>Панель высоты и скорости.</summary>
-        readonly HudDrag flightDrag = new HudDrag("hud.flight");
+        /// <summary>Панель высоты и скорости. Ключ «2»: место по умолчанию переехало вниз-влево → наверх по центру (04.10),
+        /// а сдвиг хранится от места по умолчанию — старый сдвиг унёс бы панель с экрана.</summary>
+        readonly HudDrag flightDrag = new HudDrag("hud.flight2");
 
         /// <summary>
         /// Место панели с учётом сдвига; ловит перетаскивание. <paramref name="hole"/> — кнопка внутри панели
