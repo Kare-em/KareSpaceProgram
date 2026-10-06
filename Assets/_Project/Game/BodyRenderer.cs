@@ -1111,7 +1111,7 @@ namespace Kare.Space.Game
         }
 
         /// <summary>Цвет тела в точке — им же рисуется сфера (BuildTexture) и тонируется грунт патча.</summary>
-        static Color SurfaceColor(CelestialBody b, BodyLook look, double lat, double lon)
+        public static Color SurfaceColor(CelestialBody b, BodyLook look, double lat, double lon)
         {
             bool map = smallPx.TryGetValue(b.Id, out var sm);
             if (b.Id == "earth")

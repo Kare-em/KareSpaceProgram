@@ -571,8 +571,9 @@ namespace Kare.Space.Core
                 var vh = vs.normalized;
                 var belly = (e1 - vh * Vector3d.Dot(e1, vh)).normalized;
                 if (belly.sqrMagnitude < 0.5) belly = e1;
-                // Брюхо (+X) — навстречу потоку, иначе α 90° набегает на бок (крен прежним PointAt не держался).
-                FlightControl.PointAt(v, (belly * Math.Sqrt(bellyShare) + vh * Math.Sqrt(1 - bellyShare)).normalized, -vh);
+                // Брюхо (+X, плитки) — навстречу потоку, т. е. по скорости vh. Было −vh: плитки смотрели в небо, брюхо·поток
+                // −0,68 (замер auto_starship_landing 06.10.2026). Без крена α 90° набегает на бок.
+                FlightControl.PointAt(v, (belly * Math.Sqrt(bellyShare) + vh * Math.Sqrt(1 - bellyShare)).normalized, vh);
                 if (hBottom < Def.FlopAltitude)
                 {
                     Phase = PhaseType.Flop;

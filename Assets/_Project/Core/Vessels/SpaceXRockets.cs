@@ -155,9 +155,13 @@ namespace Kare.Space.Core
         /// </summary>
         public const double ShipPerigee = 70e3;
 
-        /// <summary>Скорость привода закрылков, °/с (складывание на ≈ 100° — 2–3 с), угол «убрано» носовых, °, и усиление
-        /// команды для вида: ControlDeflection = момент/РСУ, у корабля обычно ≪ 1 — без усиления закрылки не видны.</summary>
-        const double FlapRateDeg = 45, FlapStowDeg = 100, FlapVisualGain = 6;
+        /// <summary>Скорость привода закрылков, °/с (складывание ≈ 1,3 с), угол «убрано» носовых, ° (кормовые — на
+        /// FlapStowAft больше), и усиление команды для вида: ControlDeflection = момент/РСУ, у корабля ≪ 1 — без усиления
+        /// закрылки не видны. Предел складывания — касательная к корпусу: шарнир стоит на азимуте ≈ 80° от брюха (+X), и
+        /// при StowDeg больше ≈ 80° створка уходит внутрь цилиндра. Было 100/110°: у кормовой середина хорды на 3,85 м при
+        /// радиусе 4,5 м — закрылки «исчезали» на подъёме, в вакууме и на посадочном импульсе (06.10.2026).
+        /// Пара: HingeA/HingeB (азимут шарнира) ↔ FlapStowDeg + FlapStowAft &lt; 80°.</summary>
+        const double FlapRateDeg = 45, FlapStowDeg = 55, FlapStowAft = 5, FlapVisualGain = 6;
 
         /// <summary>
         /// Закрылки корабля (§4.6): 2 носовых и 2 кормовых по бокам корпуса, шарнир вдоль оси, хорда — наружу.
@@ -196,7 +200,7 @@ namespace Kare.Space.Core
                     Aft = new Vector3d(0, 0, side), Up = new Vector3d(-1, 0, 0),
                     ChordA = 5.4, ChordB = 2.6, TipShiftA = 0, TipShiftB = -3.2, Thickness = 0.4,
                     MixPitch = -1, MixRoll = side, MaxDeg = 35, RateDeg = FlapRateDeg, DarkBelly = true,
-                    StowDeg = FlapStowDeg + 10, VisualGain = FlapVisualGain,
+                    StowDeg = FlapStowDeg + FlapStowAft, VisualGain = FlapVisualGain,
                 });
             }
             return w;

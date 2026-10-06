@@ -55,6 +55,29 @@ namespace Kare.Space.Core
             buran.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Min = 200000, HoldSeconds = -1 });
             buran.Objectives.Add(new Objective { Type = ObjectiveType.Runway, Site = "yubileyny" });
             list.Add(buran);
+
+            // Тренировка посадки (§10.2): только орбитер, сразу на рубеже TAEM — дозвуковой заход, конус HAC, выравнивание.
+            // Пара: Speed < WingedGuidance.TaemSpeed (900) — автопилот начинает с TAEM, а не с гиперзвукового входа;
+            // Range ≈ TaemRange (80 км) + запас на разворот по конусу.
+            list.Add(WingedLanding("sts1_landing", "STS-1: заход и посадка", "sts1", "edwards", "edwards23",
+                "«Колумбия» на высоте 25 км, в 85 км от озера Роджерс: заход по конусу, выпуск шасси (G), посадка " +
+                "на полосу 23 и пробег с тормозами.", GameCalendar.ToGameTime(1981, 4, 14, 18, 15, 0), "14 апр 1981"));
+            list.Add(WingedLanding("buran_landing", "«Буран»: заход и посадка", "buran", "yubileyny", "yubileyny",
+                "«Буран» на высоте 25 км над степью: заход на «Юбилейный» с разворотом, выпуск шасси (G), посадка " +
+                "и тормозной парашют (2).", GameCalendar.ToGameTime(1988, 11, 15, 6, 19, 0), "15 ноя 1988"));
+        }
+
+        /// <summary>Рубеж TAEM: 25 км, 800 м/с, траектория −6°, угол атаки 10° (STS: ~Mach 2,5 на 25 км).</summary>
+        static MissionDef WingedLanding(string id, string title, string design, string site, string runway, string brief,
+                                        double start, string rival)
+        {
+            var m = new MissionDef
+            {
+                Id = id, Title = title, DesignId = design, SiteId = site, Brief = brief, StartTime = start, Rival = rival,
+                Approach = new ApproachStart { Altitude = 25000, Range = 85000, Speed = 800, PathDeg = -6, AlphaDeg = 10 },
+            };
+            m.Objectives.Add(new Objective { Type = ObjectiveType.Runway, Site = runway });
+            return m;
         }
     }
 }

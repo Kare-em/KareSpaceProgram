@@ -1,4 +1,4 @@
-# Project state (detailed, as of 03.10.2026)
+# Project state (detailed, as of 06.10.2026)
 
 The short version is in `CLAUDE.md`. Here: what is already done.
 
@@ -341,3 +341,23 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   (left: main view, right: the other vessel, cloned main camera). A prompt with the three keys shows 20 s after separation.
   `FlightView.Main` drives FloatingOrigin, terrain patch, sky, sun, night light, audio; `FlightView.Near` keeps pads/barge/vessels
   visible near the second view. Test `booster_defer`: 40 min pause (warp up to ×1000), landing 3.0 m/s, 8 m — same as `booster`.
+
+## Landing training, pad surroundings (06.10.2026)
+- **Approach start** (`Core/Missions/ApproachStart.cs`, `MissionDef.Approach`): `CreateUniverse` cuts the design to the top section
+  (`TopOnly`) and `Place` puts it in the air before the landing target (runway of the `Runway` objective or `Recovery` target),
+  range back along the approach course, air speed, path angle, AoA (90° = belly), optional propellant.
+  Missions: `sts1_landing`, `buran_landing` (25 km, 85 km out, 800 m/s, path −6°, α 10°), `starship_landing`
+  (15 km, 1 km out, 200 m/s, path −75°, belly, 100 t, caught by tower B). Starship with `Approach` starts at `StartDescent`.
+  Tests `auto_sts1_landing`, `auto_buran_landing`, `auto_starship_landing` — Success.
+- Landing tutor (`MissionGuide.cs`): «Вход», «Заход на полосу», «Выравнивание», «Пробег»; Starship — «Падение брюхом»,
+  «Посадочный импульс». H while descending (vertical speed < −20 m/s) no longer starts the ascent autopilot (`FlightInput.cs`).
+- Starship flaps: stow 55° fwd / 5° aft (were 100/110° — flaps folded into the hull and vanished), rate 45°/s; belly (+X, tiles)
+  faces the flow (`BoosterLanding` roll target `vh`).
+- **Pad surroundings** (`Game/LaunchPadView.Surroundings.cs`, partial): road north + bypass, 6 buildings with window bands and
+  parapets (`Layout`), tank farm per kind (Starbase 2×4 vertical, Saturn two spheres on legs, others 3 tanks), 4000 ellipsoid
+  bushes within 600 m (colour = biome at the site shifted to olive, seed = hash of `Site.Id`, Earth only), `occupied` rects keep
+  them off roads/buildings. Concrete: `Tools/gen-concrete.py` → `Textures/Ground/Concrete.png` + `ConcreteNormal.png`
+  (8 m tile, 4 m plates, periodic FFT noise; `GameBootstrap.PadNormal`, set by FlightSceneBuilder).
+- Sky ground tint near the surface = local biome hue at `BodyLook.Low` luminance (`SkyController.LocalGround`).
+- Checked in Play: Baikonur, Starbase, Saturn pads; `starship_landing` flop with visible flaps; `sts1_landing` spawn.
+  Not checked in Play: the full shuttle glide to touchdown with the view (core auto tests only).

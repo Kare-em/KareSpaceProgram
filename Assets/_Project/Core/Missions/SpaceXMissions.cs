@@ -43,6 +43,21 @@ namespace Kare.Space.Core
             cat.Objectives.Add(new Objective { Type = ObjectiveType.Orbit, Min = 200000, HoldSeconds = -1 });
             cat.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Site = Objective.TowerSite });
             list.Add(cat);
+
+            // Тренировка ловли (§10.2): только корабль, уже «брюхом» над заливом — переворот, посадочное зажигание, палочки.
+            // Пара: Altitude/Speed ↔ установившееся падение плашмя (сопротивление sin²α), Range — на запад от башни B.
+            var land = new MissionDef
+            {
+                Id = "starship_landing", Title = "Starship: ловля башней", DesignId = "starship_catch", SiteId = "starbase",
+                Brief = "Корабль падает брюхом с 15 км в километре от Starbase: удержать курс, на 2,5 км перевернуться, " +
+                        "зажечь Raptor и повиснуть на «палочках» башни B.",
+                StartTime = GameCalendar.ToGameTime(2026, 6, 16, 18, 0, 0),
+                Rival = "—",
+                Approach = new ApproachStart { Altitude = 15000, Range = 1000, Speed = 200, PathDeg = -75, AlphaDeg = 90,
+                                               Propellant = 100000 },
+            };
+            land.Objectives.Add(new Objective { Type = ObjectiveType.Landing, Site = Objective.TowerSite });
+            list.Add(land);
         }
     }
 }

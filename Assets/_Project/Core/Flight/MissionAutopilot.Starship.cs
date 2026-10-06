@@ -135,7 +135,8 @@ namespace Kare.Space.Core
                 foreach (var x in Burn("Тормозной импульс")) yield return x;
                 V.Throttle = 0;
             }
-            ship = ship ?? BoosterLandingAutopilot.StartReturn(V);
+            // Старт перед посадкой (ApproachStart): уже в плотных слоях — без переворота и разворотного импульса, сразу «брюхом».
+            ship = ship ?? (Tracker.Def.Approach != null ? BoosterLandingAutopilot.StartDescent(V) : BoosterLandingAutopilot.StartReturn(V));
             if (ship == null) throw new Abort("корабль не может сесть");
             if (!u.Recoveries.Contains(ship)) u.Recoveries.Add(ship);
             Phase = "Возврат к башне B";

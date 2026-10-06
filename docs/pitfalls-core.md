@@ -287,3 +287,9 @@ Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`
   check `Vessel.TowerCaught` / autopilot status instead. Trace with env `KSP_CATCH=1`.
 - **New core file not seen by Unity:** `refresh_unity` scope "scripts" left CS0234 "TowerCatch does not exist" (no .meta yet);
   `refresh_unity mode=force scope=all compile=request` fixed it.
+
+## Landing from the air (06.10.2026, `ApproachStart.cs`, `BoosterLanding.cs`)
+- **Belly roll sign:** the belly (+X) must point along `vh` (horizontal air velocity), not `-vh` — with `-vh` the ship flew back
+  side first. `auto_ift5` / `starship_catch` unchanged after the fix.
+- **Belly-fall spawn range ≈ 1 km:** a belly-flopping Starship barely glides horizontally; at 10+ km out it never reached the
+  tower (`starship_landing` Range 1000 m from 15 km works).

@@ -415,3 +415,13 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
 - Keep `ReportPlasma(PlasmaNits*k)` — night exposure depends on it. Keep `MaterialPropertyBlock.Clear()` and use `SetVector`
   for tints (SetColor would gamma-convert them).
 - Not checked in Play (visual): FBX parts are approximated by the procedural profiles of `Rebuild`.
+
+## Starship flaps, pad colours, ground ambient (06.10.2026)
+- **Flap stow angle < hinge azimuth (~80°):** at 100/110° the flaps rotated into the hull and "disappeared" in flight. Now 55°/5°.
+- **Palette colours are sRGB:** `SetColor("_BaseColor", 0.16)` = 0.02 linear — R-7 equipment shelters read as black cubes
+  (19, 19, 17) next to sunlit concrete (111, 106, 94). Dark slot 0.36 → (55, 52, 46) with visible faces.
+- **groundTint = ambient of shadowed vertical faces:** Earth `BodyLook.Low` (green) painted the pad walls at Baikonur swamp green
+  (26, 41, 28). Fix: `SkyController.LocalGround` — biome hue under the vessel at Low's luminance (keep luminance: groundTint
+  also brightens the haze) → (40, 39, 38).
+- **Old concrete atlas** had big black stains that repeated as "dirt" every tile on a 44 m pad — replaced by the procedural
+  `Tools/gen-concrete.py` (periodic FFT noise, seamless).

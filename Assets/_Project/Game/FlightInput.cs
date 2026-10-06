@@ -18,6 +18,8 @@ namespace Kare.Space.Game
         public const double NodeDvRate = 2, NodeAccel = 1.5, NodeFine = 0.1;
         /// <summary>Сдвиг узла [ ] — доля периода в секунду (у гиперболы — от NodePlanner.AheadTime).</summary>
         public const double NodeTimeRate = 0.02;
+        /// <summary>Скорость снижения, м/с, при которой H не включает выведение (борт на спуске, а не на взлёте).</summary>
+        const double DescentNoAscent = 20;
         /// <summary>Орбита взлёта к цели стыковки, м: у LM ~18 км × 83 км под КСМ на 110 км. Пара: DockingAutopilot.MinClearance 15 км.</summary>
         const double LmAscentAltitude = 30000;
 
@@ -148,6 +150,9 @@ namespace Kare.Space.Game
             {
                 if (!v.Body.HasAtmosphere && !v.IsLanded)
                     u.Landing = u.Landing == null ? new LandingAutopilot(v.Body) : null;
+                // На спуске в атмосфере выведение не нужно (крылатый на заходе, Starship брюхом): посадку ведёт Y.
+                else if (!v.IsLanded && v.VerticalSpeed < -DescentNoAscent && u.Ascent == null)
+                    u.Post("Снижение: H — автопилот выведения не включён. Посадку ведёт Y — автопилот миссии");
                 else if (u.Ascent == null)
                 {
                     u.Ascent = new AscentAutopilot { TargetAltitude = 200000 };

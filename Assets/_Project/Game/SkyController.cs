@@ -97,7 +97,7 @@ namespace Kare.Space.Game
             // выше воздуха — весь диск планеты: тот же вес высоты, что у предела EV (DarkSkyAltitude).
             var look = BodyVisuals.Get(b.Id);
             var disc = look.Disc.a > 0 ? look.Disc : look.Low;
-            sky.groundTint.Override(Color.Lerp(look.Low, disc, AirWeight(FlightView.Main)));
+            sky.groundTint.Override(Color.Lerp(LocalGround(FlightView.Main, look), disc, AirWeight(FlightView.Main)));
 
             // HDRP ждёт центр и радиус планеты в КИЛОМЕТРАХ (VisualEnvironment), сцена — в метрах.
             var c = BodyRenderer.Project(b, out double k);
@@ -236,6 +236,33 @@ namespace Kare.Space.Game
         /// (rayBias) штатное — иначе пропадает тень ракеты на столе.
         /// </summary>
         const float DistantRayBias = 50f;
+
+        /// <summary>
+        /// Цвет грунта под бортом для groundTint (подсветка снизу): оттенок местного биома при яркости BodyLook.Low.
+        /// Общий Low Земли — зелень, и теневые стены стола у Байконура (степь) красились в болотный (26, 41, 28),
+        /// при солнечном бетоне (111, 106, 94) — Play 06.10.2026. Яркость держим как у Low: альбедо groundTint
+        /// уходит и в рассеяние дымки (см. BodyVisuals, Disc), светлая степь 0,6 высветлила бы небо у земли.
+        /// Пересчёт — при сдвиге подспутниковой точки на GroundCacheDeg: биом на таком шаге не меняется.
+        /// </summary>
+        Color LocalGround(Vessel v, BodyLook look)
+        {
+            var b = v.Body;
+            var bf = (b.OrientationAt(GameBootstrap.U.Time).Inverse * v.Position).normalized;
+            CelestialBody.BodyFixedToLatLon(bf, out double lat, out double lon);
+            if (b == groundBody && System.Math.Abs(lat - groundLat) < GroundCacheDeg && System.Math.Abs(lon - groundLon) < GroundCacheDeg)
+                return groundColor;
+            groundBody = b; groundLat = lat; groundLon = lon;
+            var c = BodyRenderer.SurfaceColor(b, look, lat, lon);
+            float lum = c.r * 0.2126f + c.g * 0.7152f + c.b * 0.0722f;
+            float target = look.Low.r * 0.2126f + look.Low.g * 0.7152f + look.Low.b * 0.0722f;
+            groundColor = lum > 1e-3f ? new Color(c.r, c.g, c.b) * (target / lum) : look.Low;
+            return groundColor;
+        }
+
+        const double GroundCacheDeg = 0.05;
+        CelestialBody groundBody;
+        double groundLat, groundLon;
+        Color groundColor;
 
         static float SunlitWeight(Vessel v) => (float)SunLight.Visible * AirWeight(v);
 

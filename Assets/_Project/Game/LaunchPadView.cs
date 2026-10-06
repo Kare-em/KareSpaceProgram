@@ -16,7 +16,7 @@ namespace Kare.Space.Game
     /// поворотные стрелы башни (Swing — вокруг вертикали у шарнира).
     /// Ночью стол освещают четыре прожекторные мачты (Floodlights): свет — на корпус, включаются по Солнцу над столом.
     /// </summary>
-    public sealed class LaunchPadView : MonoBehaviour
+    public sealed partial class LaunchPadView : MonoBehaviour
     {
         enum Kind { R7, Proton, Redstone, Atlas, Titan, Saturn, Starbase }
 
@@ -130,7 +130,8 @@ namespace Kare.Space.Game
         /// (замер 03.10.2026: средняя яркость 58, корпус сплошь 255).</summary>
         public static float LitNits { get; private set; }
 
-        public void Init(Vessel v, Texture2D concrete, Material baseMat, Mesh truss = null, Func<string, Mesh> padMeshes = null)
+        public void Init(Vessel v, Texture2D concrete, Material baseMat, Mesh truss = null, Func<string, Mesh> padMeshes = null,
+            Texture2D concreteNormal = null)
         {
             vessel = v;
             body = v.Body;
@@ -154,9 +155,7 @@ namespace Kare.Space.Game
             }
 
             var shader = baseMat != null ? baseMat.shader : Shader.Find("HDRP/Lit");
-            var concreteMat = new Material(shader) { name = "Pad Concrete" };
-            concreteMat.SetTexture("_BaseColorMap", concrete != null ? concrete : Texture2D.grayTexture);
-            concreteMat.SetFloat("_Smoothness", 0.2f);
+            var concreteMat = ConcreteMaterial(shader, concrete, concreteNormal, Color.white, "Pad Concrete");
             steel = Palette(kind, shader);
             var pitMat = new Material(shader) { name = "Pad Pit" };
             pitMat.SetColor("_BaseColor", PitColor);
@@ -176,7 +175,8 @@ namespace Kare.Space.Game
             AddPart("Pad", slab.Build(), concreteMat, transform);
             // Дно газоотвода — тёмное, чтобы проём читался ямой, а не травой под ракетой.
             AddPart("Flame Pit", pit.Build(), pitMat, transform);
-            Floodlights(z, shader, concreteMat);
+            float apron = Floodlights(z, shader, concreteMat);
+            Surroundings(kind, apron, shader, concrete, concreteNormal);
             renderers = GetComponentsInChildren<Renderer>();
             Pose();
         }
@@ -381,7 +381,8 @@ namespace Kare.Space.Game
 
         /// <summary>Четыре прожекторные мачты на диагоналях (по 45°): ствол, голова с панелью ламп и Spot-светом,
         /// нацеленным в середину ракеты; конус охватывает корпус от стола до верха. h — высота ракеты, м.</summary>
-        void Floodlights(float h, Shader shader, Material concreteMat)
+        /// <summary>Возвращает полуширину бетонной площадки, м — от её края начинается окружение.</summary>
+        float Floodlights(float h, Shader shader, Material concreteMat)
         {
             lampColor = Mathf.CorrelatedColorTemperatureToRGB(FloodTemperature);
             lampMat = new Material(shader) { name = "Pad Lamp" };
@@ -440,6 +441,7 @@ namespace Kare.Space.Game
                 l.enabled = false;
                 floods.Add(l);
             }
+            return apron;
         }
 
         /// <summary>Доля «ночи» над столом 0…1 по высоте Солнца над горизонтом стола — не у борта: ракета уже на свету,
@@ -547,7 +549,10 @@ namespace Kare.Space.Game
             var red = new Color(0.55f, 0.13f, 0.08f);
             if (kind == Kind.Proton) steelC = new Color(0.50f, 0.53f, 0.55f);
             if (kind == Kind.Saturn) { steelC = new Color(0.58f, 0.59f, 0.60f); red = new Color(0.64f, 0.17f, 0.07f); }
-            var cols = new[] { steelC, new Color(0.08f, 0.08f, 0.08f), red, new Color(0.78f, 0.78f, 0.75f) };
+            // Тёмный слот — 0,36 sRGB (≈0,1 линейно, тёмно-серый металл). Цвет задаётся в sRGB: 0,16 → 0,02 линейно,
+            // и укрытия на столе R7 под солнцем читались чёрными кубами (19, 19, 17) рядом с бетоном (111, 106, 94),
+            // Play 06.10.2026.
+            var cols = new[] { steelC, new Color(0.36f, 0.36f, 0.34f), red, new Color(0.78f, 0.78f, 0.75f) };
             var names = new[] { "Steel", "Dark", "Red", "White" };
             var mats = new Material[4];
             for (int i = 0; i < 4; i++)
@@ -687,9 +692,69 @@ namespace Kare.Space.Game
                 t.Add(i0); t.Add(i0 + 2); t.Add(i0 + 3);
             }
 
+            /// <summary>Вертикальный цилиндр с верхней крышкой: c — центр основания, seg граней, нормали гладкие.</summary>
+            public void Cylinder(Vector3 c, float r, float h, int seg)
+            {
+                int i0 = v.Count;
+                for (int k = 0; k <= seg; k++)
+                {
+                    float a = 2 * Mathf.PI * k / seg;
+                    var d = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                    v.Add(c + d * r); n.Add(d); uv.Add(new Vector2(r * a, c.y) / tile);
+                    v.Add(c + d * r + Vector3.up * h); n.Add(d); uv.Add(new Vector2(r * a, c.y + h) / tile);
+                }
+                // Наружу (см. Face): (низ k, верх k, низ k+1) и (верх k, верх k+1, низ k+1).
+                for (int k = 0; k < seg; k++)
+                {
+                    int b0 = i0 + 2 * k, t0 = b0 + 1, b1 = b0 + 2, t1 = b0 + 3;
+                    t.Add(b0); t.Add(t0); t.Add(b1);
+                    t.Add(t0); t.Add(t1); t.Add(b1);
+                }
+                int ic = v.Count;
+                var top = c + Vector3.up * h;
+                v.Add(top); n.Add(Vector3.up); uv.Add(new Vector2(top.x, top.z) / tile);
+                for (int k = 0; k <= seg; k++)
+                {
+                    float a = 2 * Mathf.PI * k / seg;
+                    var p = top + new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a)) * r;
+                    v.Add(p); n.Add(Vector3.up); uv.Add(new Vector2(p.x, p.z) / tile);
+                }
+                for (int k = 0; k < seg; k++) { t.Add(ic); t.Add(ic + 2 + k); t.Add(ic + 1 + k); }
+            }
+
+            /// <summary>Эллипсоид (шар-резервуар, куст): полуоси radii, lat колец, lon меридианов, поворот yaw° вокруг вертикали.</summary>
+            public void Ellipsoid(Vector3 c, Vector3 radii, int lat, int lon, float yaw)
+            {
+                var q = Quaternion.Euler(0, yaw, 0);
+                int i0 = v.Count;
+                for (int i = 0; i <= lat; i++)
+                {
+                    float phi = Mathf.PI * i / lat - Mathf.PI / 2;
+                    for (int j = 0; j <= lon; j++)
+                    {
+                        float a = 2 * Mathf.PI * j / lon;
+                        var d = new Vector3(Mathf.Cos(phi) * Mathf.Cos(a), Mathf.Sin(phi), Mathf.Cos(phi) * Mathf.Sin(a));
+                        v.Add(c + q * Vector3.Scale(d, radii));
+                        // Нормаль эллипсоида — градиент: d / radii.
+                        n.Add((q * new Vector3(d.x / radii.x, d.y / radii.y, d.z / radii.z)).normalized);
+                        uv.Add(new Vector2((float)j / lon, (float)i / lat));
+                    }
+                }
+                // Кольцо i снизу вверх, меридиан j по +z: обход как у цилиндра — наружу.
+                for (int i = 0; i < lat; i++)
+                    for (int j = 0; j < lon; j++)
+                    {
+                        int p00 = i0 + i * (lon + 1) + j, p10 = p00 + lon + 1, p01 = p00 + 1, p11 = p10 + 1;
+                        t.Add(p00); t.Add(p10); t.Add(p01);
+                        t.Add(p10); t.Add(p11); t.Add(p01);
+                    }
+            }
+
             public Mesh Build()
             {
                 var m = new Mesh { name = "Pad" };
+                // Кусты — до сотни тысяч вершин: 16-битного индекса не хватает.
+                if (v.Count > 65000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
                 m.SetVertices(v);
                 m.SetNormals(n);
                 m.SetUVs(0, uv);

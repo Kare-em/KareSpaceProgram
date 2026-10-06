@@ -114,6 +114,7 @@ namespace Kare.Space.EditorTools
             boot.MercuryHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/MercuryHeight.bytes");
             boot.VenusHeight = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/_Project/Data/VenusHeight.bytes");
             boot.PadTexture = GroundTexture("Concrete", false);
+            boot.PadNormal = NormalTexture("ConcreteNormal");
             // Лоу-поли детали из Blender (Tools/blender); нет файла — вид берёт процедурный меш.
             boot.CapsuleMesh = ModelMesh("Vostok_Capsule");
             boot.EngineMesh = ModelMesh("RD107_Engine");

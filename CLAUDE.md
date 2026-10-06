@@ -29,6 +29,7 @@ Library/, Temp/, Logs/, UserSettings/ — do not touch or commit.
 ## State (05.10.2026) — details in `docs/STATE.md`
 - Core (M0) done, 24 test groups ✅ (presets — `Core/Vessels/HistoricRockets.cs`, `StationRockets.cs`, `WingedRockets.cs`, `SpaceXRockets.cs`).
 - SpaceX: Falcon 9 booster landing on OCISLY, Starship IFT-5 (`ift5`), `starship_catch` (both stages on Mechazilla chopsticks — contact model `TowerCatch.cs`); shuttles land on physical runways (`Runways.cs`, `RunwayView.cs`) — `docs/STATE.md`, `BoosterLanding.cs`.
+- Landing training: `sts1_landing`, `buran_landing`, `starship_landing` start in the air (`ApproachStart.cs`); pad surroundings — `LaunchPadView.Surroundings.cs`.
 - Game layer: scene `Scenes/Flight.unity` is built by menu **Kare/Build Flight Scene** (idempotent); default mission —
   `GameBootstrap.MissionId = "vostok"`; input — legacy Input Manager.
 - Rocket builder — `Scenes/Hangar.unity` (**Kare/Build Hangar Scene**), Esc → "To builder".

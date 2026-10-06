@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &677570159
+--- !u!1 &320574093
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,174 +127,12 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 677570161}
-  - component: {fileID: 677570160}
-  m_Layer: 0
-  m_Name: Bodies
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &677570160
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 677570159}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8aac56f161dba2540848fcf625603db2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.BodyRenderer
-  BaseMaterial: {fileID: 2100000, guid: ee56cfd1c50ec4c42bcee69a31c7b5bd, type: 2}
-  EarthGround: {fileID: 2800000, guid: e5bdfc3501c76e542bf68ff5e1c84f67, type: 3}
-  EarthMacro: {fileID: 2800000, guid: 5400357b8ef61dd488dcde67defb4e0f, type: 3}
-  MoonGround: {fileID: 2800000, guid: 38349d882868569408ec2b183090eb9b, type: 3}
-  MarsGround: {fileID: 2800000, guid: cce9f7be0e1b10244979707127c0bfc5, type: 3}
-  EarthGroundNormal: {fileID: 2800000, guid: 817358eba3aa2e34e9a0f73eb7850fe9, type: 3}
-  WaterNormal: {fileID: 2800000, guid: a38362efe8fcae940af5e567fb226755, type: 3}
-  Maps:
-  - Id: moon
-    Map: {fileID: 2800000, guid: 56e784c10fc1a49449ba45875a8caf3b, type: 3}
-    Small: {fileID: 2800000, guid: d3613527d7ccf4440835fc91120af0ee, type: 3}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: earth
-    Map: {fileID: 2800000, guid: 774cff5249f6bd64daaaa947d13a3a07, type: 3}
-    Small: {fileID: 2800000, guid: 11a0a9f5665db404e9897f870a7303ed, type: 3}
-    Night: {fileID: 2800000, guid: f3fec076a81c3c642b5ef1adfc83dff5, type: 3}
-    Clouds: {fileID: 2800000, guid: 38d50d6ca53be8048a336c06aeee8297, type: 3}
-  - Id: mercury
-    Map: {fileID: 2800000, guid: 4576e440d7d5ebe429294a94ca107f16, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: venus
-    Map: {fileID: 2800000, guid: 7902f812e02b7dd4295ba15a322caad6, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: mars
-    Map: {fileID: 2800000, guid: 63839ba5812c5704d9a1bd9601873b84, type: 3}
-    Small: {fileID: 2800000, guid: 31f166fd6b394434380459e87ca9b7e4, type: 3}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: jupiter
-    Map: {fileID: 2800000, guid: 3f4ff9c4b37ccdf4ca0e68e811e4a50e, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: saturn
-    Map: {fileID: 2800000, guid: d6ad9e44d79ce334db9a8ad8ed870830, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: uranus
-    Map: {fileID: 2800000, guid: 0cfaea251bb4de64181e46d5b608a0cc, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  - Id: neptune
-    Map: {fileID: 2800000, guid: 9b739e0940c07fa49b9f82edecd3c270, type: 3}
-    Small: {fileID: 0}
-    Night: {fileID: 0}
-    Clouds: {fileID: 0}
-  SaturnRing: {fileID: 2800000, guid: 2c92d65e27d115a43a66aba8192325f7, type: 3}
---- !u!4 &677570161
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 677570159}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1162020377
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1162020380}
-  - component: {fileID: 1162020378}
-  - component: {fileID: 1162020379}
-  m_Layer: 0
-  m_Name: Global Volume
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1162020378
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1162020377}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
-  m_IsGlobal: 1
-  priority: 0
-  blendDistance: 0
-  weight: 1
-  sharedProfile: {fileID: 11400000, guid: c217d6ea0ffc9884f89fe4f27d02928b, type: 2}
---- !u!114 &1162020379
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1162020377}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b33d184a5ad092f488a16668cc0c9854, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SkyController
-  Volume: {fileID: 1162020378}
-  FogRestoreShader: {fileID: 4800000, guid: 69363927b6287fe438652ba12dff9836, type: 3}
---- !u!4 &1162020380
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1162020377}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1532593023
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1532593029}
-  - component: {fileID: 1532593028}
-  - component: {fileID: 1532593027}
-  - component: {fileID: 1532593026}
-  - component: {fileID: 1532593025}
-  - component: {fileID: 1532593024}
+  - component: {fileID: 320574099}
+  - component: {fileID: 320574098}
+  - component: {fileID: 320574097}
+  - component: {fileID: 320574096}
+  - component: {fileID: 320574095}
+  - component: {fileID: 320574094}
   m_Layer: 0
   m_Name: Game
   m_TagString: Untagged
@@ -302,73 +140,73 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1532593024
+--- !u!114 &320574094
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1532593023}
+  m_GameObject: {fileID: 320574093}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9a9a878a938f20f41be338c474bb46e2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.MapView
-  Camera: {fileID: 2131800566}
+  Camera: {fileID: 456912320}
   LineMaterial: {fileID: 2100000, guid: 9d7643be48ce5f543bad9bd333429a18, type: 2}
---- !u!114 &1532593025
+--- !u!114 &320574095
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1532593023}
+  m_GameObject: {fileID: 320574093}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 53ce6d0cf805a6b46bea5a9b7350a4a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightHud
   Icons: {fileID: 2800000, guid: c4ed70b5fef9cc64291127f45b761746, type: 3}
---- !u!114 &1532593026
+--- !u!114 &320574096
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1532593023}
+  m_GameObject: {fileID: 320574093}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d2159aa8700a20a42aa8b60e47600caf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightInput
---- !u!114 &1532593027
+--- !u!114 &320574097
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1532593023}
+  m_GameObject: {fileID: 320574093}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0000ef320f7f464418ef79f5c388e551, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FloatingOrigin
---- !u!114 &1532593028
+--- !u!114 &320574098
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1532593023}
+  m_GameObject: {fileID: 320574093}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0c8e796a15890514eb585f982fc8fe26, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.GameBootstrap
   MissionId: vostok
-  Camera: {fileID: 2131800566}
-  Sun: {fileID: 2058208958}
-  Volume: {fileID: 1162020378}
+  Camera: {fileID: 456912320}
+  Sun: {fileID: 628698085}
+  Volume: {fileID: 454874275}
   VesselMaterial: {fileID: 2100000, guid: 73c6f2463d9719342a8f60327806af52, type: 2}
   FinishMaterials:
   - {fileID: 2100000, guid: 73c6f2463d9719342a8f60327806af52, type: 2}
@@ -388,6 +226,7 @@ MonoBehaviour:
   BlastPrefab: {fileID: 100004, guid: b46890100828db6429ff69c322b45893, type: 3}
   BigBlastPrefab: {fileID: 100002, guid: 6ecf76dc4f268d340b2666896a954bcc, type: 3}
   PadTexture: {fileID: 2800000, guid: 2c64fb41758a32046bed8079f64e0b03, type: 3}
+  PadNormal: {fileID: 2800000, guid: fa1b9518bce585c4793a4b180e3fc0b9, type: 3}
   CapsuleMesh: {fileID: -5214642718586993695, guid: 4b257117241f63b4cbc742eaa66606da, type: 3}
   EngineMesh: {fileID: -6926942270825805550, guid: eead109c816ec8c4693a86bf4d918940, type: 3}
   LegMesh: {fileID: -4502446984299914024, guid: 427957c9ceeaa134fad36d2b82e603c4, type: 3}
@@ -710,13 +549,13 @@ MonoBehaviour:
   MercuryHeight: {fileID: 4900000, guid: 27f988399286eef45b1acd86db853dcb, type: 3}
   VenusHeight: {fileID: 4900000, guid: caade6c7c8c5bbc4bbcc8d17c897d7c1, type: 3}
   EarthPatches: {fileID: 4900000, guid: dc2e43ed49500944b8672ee3f7164bee, type: 3}
---- !u!4 &1532593029
+--- !u!4 &320574099
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1532593023}
+  m_GameObject: {fileID: 320574093}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -725,7 +564,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &2058208957
+--- !u!1 &454874274
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -733,10 +572,339 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 2058208961}
-  - component: {fileID: 2058208958}
-  - component: {fileID: 2058208960}
-  - component: {fileID: 2058208959}
+  - component: {fileID: 454874277}
+  - component: {fileID: 454874275}
+  - component: {fileID: 454874276}
+  m_Layer: 0
+  m_Name: Global Volume
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &454874275
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 454874274}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: c217d6ea0ffc9884f89fe4f27d02928b, type: 2}
+--- !u!114 &454874276
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 454874274}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b33d184a5ad092f488a16668cc0c9854, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SkyController
+  Volume: {fileID: 454874275}
+  FogRestoreShader: {fileID: 4800000, guid: 69363927b6287fe438652ba12dff9836, type: 3}
+--- !u!4 &454874277
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 454874274}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &456912319
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 456912325}
+  - component: {fileID: 456912320}
+  - component: {fileID: 456912324}
+  - component: {fileID: 456912323}
+  - component: {fileID: 456912322}
+  - component: {fileID: 456912321}
+  m_Layer: 0
+  m_Name: Main Camera
+  m_TagString: MainCamera
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!20 &456912320
+Camera:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 456912319}
+  m_Enabled: 1
+  serializedVersion: 2
+  m_ClearFlags: 1
+  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_projectionMatrixMode: 1
+  m_GateFitMode: 1
+  m_FOVAxisMode: 0
+  m_Iso: 200
+  m_ShutterSpeed: 0.005
+  m_Aperture: 16
+  m_FocusDistance: 10
+  m_FocalLength: 50
+  m_BladeCount: 5
+  m_Curvature: {x: 2, y: 11}
+  m_BarrelClipping: 0.25
+  m_Anamorphism: 0
+  m_SensorSize: {x: 36, y: 24}
+  m_LensShift: {x: 0, y: 0}
+  m_NormalizedViewPortRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+  near clip plane: 1
+  far clip plane: 10000000
+  field of view: 60
+  orthographic: 0
+  orthographic size: 5
+  m_Depth: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingPath: -1
+  m_TargetTexture: {fileID: 0}
+  m_TargetDisplay: 0
+  m_TargetEye: 3
+  m_HDR: 0
+  m_AllowMSAA: 0
+  m_AllowDynamicResolution: 0
+  m_ForceIntoRT: 0
+  m_OcclusionCulling: 1
+  m_StereoConvergence: 10
+  m_StereoSeparation: 0.022
+--- !u!114 &456912321
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 456912319}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8f3e21eaf37b8a42a3a873d0482a235, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.RenderQuality
+--- !u!114 &456912322
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 456912319}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a74223da20fd79f41a3a01d19c5d3e1b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightCamera
+  Distance: 40
+  MinDistance: 5
+  MaxDistance: 20000
+  Yaw: 30
+  Pitch: 10
+  OrbitSpeed: 3
+  Secondary: 0
+--- !u!81 &456912323
+AudioListener:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 456912319}
+  m_Enabled: 1
+--- !u!114 &456912324
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 456912319}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 23c1ce4fb46143f46bc5cb5224c934f6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.HighDefinition.Runtime::UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData
+  m_Version: 9
+  m_ObsoleteRenderingPath: 0
+  m_ObsoleteFrameSettings:
+    overrides: 0
+    enableShadow: 0
+    enableContactShadows: 0
+    enableShadowMask: 0
+    enableSSR: 0
+    enableSSAO: 0
+    enableSubsurfaceScattering: 0
+    enableTransmission: 0
+    enableAtmosphericScattering: 0
+    enableVolumetrics: 0
+    enableReprojectionForVolumetrics: 0
+    enableLightLayers: 0
+    enableExposureControl: 1
+    diffuseGlobalDimmer: 0
+    specularGlobalDimmer: 0
+    shaderLitMode: 0
+    enableDepthPrepassWithDeferredRendering: 0
+    enableTransparentPrepass: 0
+    enableMotionVectors: 0
+    enableObjectMotionVectors: 0
+    enableDecals: 0
+    enableRoughRefraction: 0
+    enableTransparentPostpass: 0
+    enableDistortion: 0
+    enablePostprocess: 0
+    enableOpaqueObjects: 0
+    enableTransparentObjects: 0
+    enableRealtimePlanarReflection: 0
+    enableMSAA: 0
+    enableAsyncCompute: 0
+    runLightListAsync: 0
+    runSSRAsync: 0
+    runSSAOAsync: 0
+    runContactShadowsAsync: 0
+    runVolumeVoxelizationAsync: 0
+    lightLoopSettings:
+      overrides: 0
+      enableDeferredTileAndCluster: 0
+      enableComputeLightEvaluation: 0
+      enableComputeLightVariants: 0
+      enableComputeMaterialVariants: 0
+      enableFptlForForwardOpaque: 0
+      enableBigTilePrepass: 0
+      isFptlEnabled: 0
+  clearColorMode: 0
+  backgroundColorHDR: {r: 0.025, g: 0.07, b: 0.19, a: 0}
+  clearDepth: 1
+  volumeLayerMask:
+    serializedVersion: 2
+    m_Bits: 1
+  volumeAnchorOverride: {fileID: 0}
+  antialiasing: 0
+  SMAAQuality: 2
+  dithering: 0
+  stopNaNs: 0
+  taaSharpenStrength: 0.5
+  TAAQuality: 1
+  taaSharpenMode: 0
+  taaRingingReduction: 0
+  taaHistorySharpening: 0.35
+  taaAntiFlicker: 0.5
+  taaMotionVectorRejection: 0
+  taaAntiHistoryRinging: 0
+  taaBaseBlendFactor: 0.875
+  taaJitterScale: 1
+  physicalParameters:
+    m_Iso: 200
+    m_ShutterSpeed: 0.005
+    m_Aperture: 16
+    m_FocusDistance: 10
+    m_BladeCount: 5
+    m_Curvature: {x: 2, y: 11}
+    m_BarrelClipping: 0.25
+    m_Anamorphism: 0
+  flipYMode: 0
+  xrRendering: 1
+  fullscreenPassthrough: 0
+  allowDynamicResolution: 0
+  customRenderingSettings: 0
+  invertFaceCulling: 0
+  probeLayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  hasPersistentHistory: 0
+  screenSizeOverride: {x: 0, y: 0, z: 0, w: 0}
+  screenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
+  allowDeepLearningSuperSampling: 1
+  deepLearningSuperSamplingUseCustomQualitySettings: 0
+  deepLearningSuperSamplingQuality: 0
+  deepLearningSuperSamplingUseCustomAttributes: 0
+  deepLearningSuperSamplingUseOptimalSettings: 1
+  deepLearningSuperSamplingSharpening: 0
+  allowFidelityFX2SuperResolution: 1
+  fidelityFX2SuperResolutionUseCustomQualitySettings: 0
+  fidelityFX2SuperResolutionQuality: 0
+  fidelityFX2SuperResolutionUseCustomAttributes: 0
+  fidelityFX2SuperResolutionUseOptimalSettings: 1
+  fidelityFX2SuperResolutionEnableSharpening: 0
+  fidelityFX2SuperResolutionSharpening: 0
+  fsrOverrideSharpness: 0
+  fsrSharpness: 0.92
+  exposureTarget: {fileID: 0}
+  materialMipBias: 0
+  m_RenderingPathCustomFrameSettings:
+    bitDatas:
+      data1: 5770166122053581
+      data2: 12934340311651418136
+    lodBias: 1
+    lodBiasMode: 0
+    lodBiasQualityLevel: 0
+    maximumLODLevel: 0
+    maximumLODLevelMode: 0
+    maximumLODLevelQualityLevel: 0
+    sssQualityMode: 0
+    sssQualityLevel: 0
+    sssCustomSampleBudget: 20
+    sssCustomDownsampleSteps: 0
+    msaaMode: 1
+    materialQuality: 0
+  renderingPathCustomFrameSettingsOverrideMask:
+    mask:
+      data1: 0
+      data2: 0
+  defaultFrameSettings: 0
+--- !u!4 &456912325
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 456912319}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &628698084
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 628698088}
+  - component: {fileID: 628698085}
+  - component: {fileID: 628698087}
+  - component: {fileID: 628698086}
   m_Layer: 0
   m_Name: Sun
   m_TagString: Untagged
@@ -744,13 +912,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!108 &2058208958
+--- !u!108 &628698085
 Light:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2058208957}
+  m_GameObject: {fileID: 628698084}
   m_Enabled: 1
   serializedVersion: 13
   m_Type: 1
@@ -809,25 +977,25 @@ Light:
   m_LightUnit: 2
   m_LuxAtDistance: 1
   m_EnableSpotReflector: 1
---- !u!114 &2058208959
+--- !u!114 &628698086
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2058208957}
+  m_GameObject: {fileID: 628698084}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 90013aea05d01b248b190c02458475c3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.SunLight
---- !u!114 &2058208960
+--- !u!114 &628698087
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2058208957}
+  m_GameObject: {fileID: 628698084}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7a68c43fe1f2a47cfa234b5eeaa98012, type: 3}
@@ -962,13 +1130,13 @@ MonoBehaviour:
   m_AreaLightEmissiveMeshShadowCastingMode: 0
   m_AreaLightEmissiveMeshMotionVectorGenerationMode: 0
   m_AreaLightEmissiveMeshLayer: -1
---- !u!4 &2058208961
+--- !u!4 &628698088
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2058208957}
+  m_GameObject: {fileID: 628698084}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -977,7 +1145,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &2131800565
+--- !u!1 &1436379337
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -985,254 +1153,88 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 2131800571}
-  - component: {fileID: 2131800566}
-  - component: {fileID: 2131800570}
-  - component: {fileID: 2131800569}
-  - component: {fileID: 2131800568}
-  - component: {fileID: 2131800567}
+  - component: {fileID: 1436379339}
+  - component: {fileID: 1436379338}
   m_Layer: 0
-  m_Name: Main Camera
-  m_TagString: MainCamera
+  m_Name: Bodies
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!20 &2131800566
-Camera:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2131800565}
-  m_Enabled: 1
-  serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
-  m_projectionMatrixMode: 1
-  m_GateFitMode: 1
-  m_FOVAxisMode: 0
-  m_Iso: 200
-  m_ShutterSpeed: 0.005
-  m_Aperture: 16
-  m_FocusDistance: 10
-  m_FocalLength: 50
-  m_BladeCount: 5
-  m_Curvature: {x: 2, y: 11}
-  m_BarrelClipping: 0.25
-  m_Anamorphism: 0
-  m_SensorSize: {x: 36, y: 24}
-  m_LensShift: {x: 0, y: 0}
-  m_NormalizedViewPortRect:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 1
-    height: 1
-  near clip plane: 1
-  far clip plane: 10000000
-  field of view: 60
-  orthographic: 0
-  orthographic size: 5
-  m_Depth: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingPath: -1
-  m_TargetTexture: {fileID: 0}
-  m_TargetDisplay: 0
-  m_TargetEye: 3
-  m_HDR: 0
-  m_AllowMSAA: 0
-  m_AllowDynamicResolution: 0
-  m_ForceIntoRT: 0
-  m_OcclusionCulling: 1
-  m_StereoConvergence: 10
-  m_StereoSeparation: 0.022
---- !u!114 &2131800567
+--- !u!114 &1436379338
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2131800565}
+  m_GameObject: {fileID: 1436379337}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e8f3e21eaf37b8a42a3a873d0482a235, type: 3}
+  m_Script: {fileID: 11500000, guid: 8aac56f161dba2540848fcf625603db2, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.RenderQuality
---- !u!114 &2131800568
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2131800565}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a74223da20fd79f41a3a01d19c5d3e1b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.FlightCamera
-  Distance: 40
-  MinDistance: 5
-  MaxDistance: 20000
-  Yaw: 30
-  Pitch: 10
-  OrbitSpeed: 3
---- !u!81 &2131800569
-AudioListener:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2131800565}
-  m_Enabled: 1
---- !u!114 &2131800570
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2131800565}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 23c1ce4fb46143f46bc5cb5224c934f6, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.RenderPipelines.HighDefinition.Runtime::UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData
-  m_Version: 9
-  m_ObsoleteRenderingPath: 0
-  m_ObsoleteFrameSettings:
-    overrides: 0
-    enableShadow: 0
-    enableContactShadows: 0
-    enableShadowMask: 0
-    enableSSR: 0
-    enableSSAO: 0
-    enableSubsurfaceScattering: 0
-    enableTransmission: 0
-    enableAtmosphericScattering: 0
-    enableVolumetrics: 0
-    enableReprojectionForVolumetrics: 0
-    enableLightLayers: 0
-    enableExposureControl: 1
-    diffuseGlobalDimmer: 0
-    specularGlobalDimmer: 0
-    shaderLitMode: 0
-    enableDepthPrepassWithDeferredRendering: 0
-    enableTransparentPrepass: 0
-    enableMotionVectors: 0
-    enableObjectMotionVectors: 0
-    enableDecals: 0
-    enableRoughRefraction: 0
-    enableTransparentPostpass: 0
-    enableDistortion: 0
-    enablePostprocess: 0
-    enableOpaqueObjects: 0
-    enableTransparentObjects: 0
-    enableRealtimePlanarReflection: 0
-    enableMSAA: 0
-    enableAsyncCompute: 0
-    runLightListAsync: 0
-    runSSRAsync: 0
-    runSSAOAsync: 0
-    runContactShadowsAsync: 0
-    runVolumeVoxelizationAsync: 0
-    lightLoopSettings:
-      overrides: 0
-      enableDeferredTileAndCluster: 0
-      enableComputeLightEvaluation: 0
-      enableComputeLightVariants: 0
-      enableComputeMaterialVariants: 0
-      enableFptlForForwardOpaque: 0
-      enableBigTilePrepass: 0
-      isFptlEnabled: 0
-  clearColorMode: 0
-  backgroundColorHDR: {r: 0.025, g: 0.07, b: 0.19, a: 0}
-  clearDepth: 1
-  volumeLayerMask:
-    serializedVersion: 2
-    m_Bits: 1
-  volumeAnchorOverride: {fileID: 0}
-  antialiasing: 0
-  SMAAQuality: 2
-  dithering: 0
-  stopNaNs: 0
-  taaSharpenStrength: 0.5
-  TAAQuality: 1
-  taaSharpenMode: 0
-  taaRingingReduction: 0
-  taaHistorySharpening: 0.35
-  taaAntiFlicker: 0.5
-  taaMotionVectorRejection: 0
-  taaAntiHistoryRinging: 0
-  taaBaseBlendFactor: 0.875
-  taaJitterScale: 1
-  physicalParameters:
-    m_Iso: 200
-    m_ShutterSpeed: 0.005
-    m_Aperture: 16
-    m_FocusDistance: 10
-    m_BladeCount: 5
-    m_Curvature: {x: 2, y: 11}
-    m_BarrelClipping: 0.25
-    m_Anamorphism: 0
-  flipYMode: 0
-  xrRendering: 1
-  fullscreenPassthrough: 0
-  allowDynamicResolution: 0
-  customRenderingSettings: 0
-  invertFaceCulling: 0
-  probeLayerMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  hasPersistentHistory: 0
-  screenSizeOverride: {x: 0, y: 0, z: 0, w: 0}
-  screenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
-  allowDeepLearningSuperSampling: 1
-  deepLearningSuperSamplingUseCustomQualitySettings: 0
-  deepLearningSuperSamplingQuality: 0
-  deepLearningSuperSamplingUseCustomAttributes: 0
-  deepLearningSuperSamplingUseOptimalSettings: 1
-  deepLearningSuperSamplingSharpening: 0
-  allowFidelityFX2SuperResolution: 1
-  fidelityFX2SuperResolutionUseCustomQualitySettings: 0
-  fidelityFX2SuperResolutionQuality: 0
-  fidelityFX2SuperResolutionUseCustomAttributes: 0
-  fidelityFX2SuperResolutionUseOptimalSettings: 1
-  fidelityFX2SuperResolutionEnableSharpening: 0
-  fidelityFX2SuperResolutionSharpening: 0
-  fsrOverrideSharpness: 0
-  fsrSharpness: 0.92
-  exposureTarget: {fileID: 0}
-  materialMipBias: 0
-  m_RenderingPathCustomFrameSettings:
-    bitDatas:
-      data1: 5770166122053581
-      data2: 12934340311651418136
-    lodBias: 1
-    lodBiasMode: 0
-    lodBiasQualityLevel: 0
-    maximumLODLevel: 0
-    maximumLODLevelMode: 0
-    maximumLODLevelQualityLevel: 0
-    sssQualityMode: 0
-    sssQualityLevel: 0
-    sssCustomSampleBudget: 20
-    sssCustomDownsampleSteps: 0
-    msaaMode: 1
-    materialQuality: 0
-  renderingPathCustomFrameSettingsOverrideMask:
-    mask:
-      data1: 0
-      data2: 0
-  defaultFrameSettings: 0
---- !u!4 &2131800571
+  m_EditorClassIdentifier: Kare.Space.Game::Kare.Space.Game.BodyRenderer
+  BaseMaterial: {fileID: 2100000, guid: ee56cfd1c50ec4c42bcee69a31c7b5bd, type: 2}
+  EarthGround: {fileID: 2800000, guid: e5bdfc3501c76e542bf68ff5e1c84f67, type: 3}
+  EarthMacro: {fileID: 2800000, guid: 5400357b8ef61dd488dcde67defb4e0f, type: 3}
+  MoonGround: {fileID: 2800000, guid: 38349d882868569408ec2b183090eb9b, type: 3}
+  MarsGround: {fileID: 2800000, guid: cce9f7be0e1b10244979707127c0bfc5, type: 3}
+  EarthGroundNormal: {fileID: 2800000, guid: 817358eba3aa2e34e9a0f73eb7850fe9, type: 3}
+  WaterNormal: {fileID: 2800000, guid: a38362efe8fcae940af5e567fb226755, type: 3}
+  Maps:
+  - Id: moon
+    Map: {fileID: 2800000, guid: 56e784c10fc1a49449ba45875a8caf3b, type: 3}
+    Small: {fileID: 2800000, guid: d3613527d7ccf4440835fc91120af0ee, type: 3}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: earth
+    Map: {fileID: 2800000, guid: 774cff5249f6bd64daaaa947d13a3a07, type: 3}
+    Small: {fileID: 2800000, guid: 11a0a9f5665db404e9897f870a7303ed, type: 3}
+    Night: {fileID: 2800000, guid: f3fec076a81c3c642b5ef1adfc83dff5, type: 3}
+    Clouds: {fileID: 2800000, guid: 38d50d6ca53be8048a336c06aeee8297, type: 3}
+  - Id: mercury
+    Map: {fileID: 2800000, guid: 4576e440d7d5ebe429294a94ca107f16, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: venus
+    Map: {fileID: 2800000, guid: 7902f812e02b7dd4295ba15a322caad6, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: mars
+    Map: {fileID: 2800000, guid: 63839ba5812c5704d9a1bd9601873b84, type: 3}
+    Small: {fileID: 2800000, guid: 31f166fd6b394434380459e87ca9b7e4, type: 3}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: jupiter
+    Map: {fileID: 2800000, guid: 3f4ff9c4b37ccdf4ca0e68e811e4a50e, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: saturn
+    Map: {fileID: 2800000, guid: d6ad9e44d79ce334db9a8ad8ed870830, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: uranus
+    Map: {fileID: 2800000, guid: 0cfaea251bb4de64181e46d5b608a0cc, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  - Id: neptune
+    Map: {fileID: 2800000, guid: 9b739e0940c07fa49b9f82edecd3c270, type: 3}
+    Small: {fileID: 0}
+    Night: {fileID: 0}
+    Clouds: {fileID: 0}
+  SaturnRing: {fileID: 2800000, guid: 2c92d65e27d115a43a66aba8192325f7, type: 3}
+--- !u!4 &1436379339
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2131800565}
+  m_GameObject: {fileID: 1436379337}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -1245,8 +1247,8 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 1162020380}
-  - {fileID: 2058208961}
-  - {fileID: 2131800571}
-  - {fileID: 1532593029}
-  - {fileID: 677570161}
+  - {fileID: 454874277}
+  - {fileID: 628698088}
+  - {fileID: 456912325}
+  - {fileID: 320574099}
+  - {fileID: 1436379339}

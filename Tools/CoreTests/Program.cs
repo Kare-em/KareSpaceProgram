@@ -225,6 +225,7 @@ static class Program
         "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
         "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
         "voskhod2", "soyuz_tm31", "crew_dragon", "sts1", "buran", "ift5", "starship_catch",
+        "sts1_landing", "buran_landing", "starship_landing",
     };
 
     /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
@@ -240,6 +241,7 @@ static class Program
         int frames = 0;
         string phase = null;
         bool inAir = false, wasHigh = false;
+        double nextLog = u.Time;
         double maxG = 0, maxGTimer = 0;
         while (tr.Status == MissionStatus.Active && u.Mission != null && u.Time < end && frames < MaxFrames)
         {
@@ -264,6 +266,16 @@ static class Program
                 inAir = true;
                 maxG = Math.Max(maxG, av.GForce);
                 maxGTimer = Math.Max(maxGTimer, av.HighGTimer);
+            }
+            // Старт перед посадкой: раз в 10 с — высота, воздушная скорость и куда смотрит брюхо (+X): «к потоку» = 1.
+            if (tr.Def.Approach != null && av != null && av.Alive && !av.IsLanded && u.Time >= nextLog)
+            {
+                nextLog = u.Time + 5;
+                var vs = av.Velocity - Vector3d.Cross(FlightPhysics.SpinAxis(av.Body, u.Time), av.Position);
+                var upv = av.Position.normalized;
+                Console.WriteLine($"   ~ {av.Altitude:F0} м, {vs.magnitude:F0} м/с, верт. {Vector3d.Dot(vs, upv):F0}, " +
+                                  $"брюхо·поток {Vector3d.Dot(av.LocalToWorld(new Vector3d(1, 0, 0)), vs.normalized):F2}, " +
+                                  $"нос·верх {Vector3d.Dot(av.LocalToWorld(new Vector3d(0, 1, 0)), upv):F2}, топливо {av.Propellant[av.Attached.Length - 1] / 1000:F1} т");
             }
             if (u.Mission != null && u.Mission.Phase != phase)
             {

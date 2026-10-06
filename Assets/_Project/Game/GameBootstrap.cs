@@ -47,6 +47,8 @@ namespace Kare.Space.Game
         BlastEffects blasts;
         [Tooltip("Бетон стартового стола (Textures/Ground/Concrete).")]
         public Texture2D PadTexture;
+        [Tooltip("Нормали бетона: швы плит и заполнитель (Textures/Ground/ConcreteNormal, Tools/gen-concrete.py).")]
+        public Texture2D PadNormal;
         [Header("Лоу-поли детали (Tools/blender → Models/*.fbx); без них — процедурные меши")]
         [Tooltip("СА «Восток»: начало у днища, Ø2,3 м.")]
         public Mesh CapsuleMesh;
@@ -196,7 +198,7 @@ namespace Kare.Space.Game
             }
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)
-                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh, PadMeshFor);
+                new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh, PadMeshFor, PadNormal);
             // Полосы посадки крылатых бортов (§6.4): только Земля, одна лента на полосу на сцену.
             RunwayView.EnsureAll(universe.System.Get("earth"), VesselMaterial);
         }

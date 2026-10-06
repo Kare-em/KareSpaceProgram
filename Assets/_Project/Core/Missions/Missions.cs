@@ -91,6 +91,8 @@ namespace Kare.Space.Core
         public int StationSection = -1;
         public double StationAltitude, StationInclination, StationLead, StationLaunchDelay = 120;
         public string StationName;
+        /// <summary>Старт перед посадкой (ApproachStart): борт — верхняя секция проекта, уже в воздухе у цели. null — со стола.</summary>
+        public ApproachStart Approach;
         public readonly List<Objective> Objectives = new List<Objective>();
     }
 
@@ -124,7 +126,10 @@ namespace Kare.Space.Core
         public static Universe CreateUniverse(MissionDef def, SolarSystem system)
         {
             var u = new Universe(system, def.StartTime);
-            var v = u.Launch(VesselPresets.ById(def.DesignId), def.SiteId);
+            var design = VesselPresets.ById(def.DesignId);
+            if (def.Approach != null) design = ApproachStart.TopOnly(design);
+            var v = u.Launch(design, def.SiteId);
+            if (def.Approach != null) ApproachStart.Place(u, v, def);
             if (def.StationSection >= 0) StationSetup.Place(u, v, def);
             return u;
         }
