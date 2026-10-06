@@ -45,13 +45,17 @@ namespace Kare.Space.Game
         static readonly Vector4 ProtonTower = new Vector4(-17.5f, 0, 4.2f, 62), AtlasTower = new Vector4(-12, 0, 3, 36),
             TitanTower = new Vector4(0, 12.5f, 3, 38), SaturnTower = new Vector4(-24, 0, 12.2f, 120);
         /// <summary>
-        /// Starbase: башня (центр x, —, сторона, высота), м — 146 м, ≈ 12 м в плане, ≈ 30 м на запад от оси стола. Палочки:
-        /// высота над столом — цапфы Super Heavy (b_super_heavy: 71 − 6 = 65 м над днищем), полуразнос — радиус 4,5 + 1 м,
-        /// вылет до x = +8 (дальний край корпуса). Проём стола — под связку 33 Raptor (радиус юбки 4,5). Пара: spacex_parts.py.
+        /// Starbase: башня (центр x, —, сторона, высота), м — из ядра (TowerCatch): физика ловли и рисунок — одни числа.
+        /// Высота палочек — RecoveryDef.ArmHeight своей башни, щель — TowerCatch.Gap(Vessel.CatchArms). Проём стола —
+        /// под связку 33 Raptor (радиус юбки 4,5). Пара: spacex_parts.py.
         /// </summary>
-        static readonly Vector4 StarbaseTower = new Vector4(-30, 0, 12, 146);
-        const float StarbaseColumn = 1.4f, StarbaseBay = 9, StarbaseArmHeight = 65, StarbaseArmGap = 5.5f, StarbaseArmReach = 8,
-            StarbaseHole = 6;
+        static readonly Vector4 StarbaseTower = new Vector4((float)TowerCatch.TowerX, 0, (float)TowerCatch.TowerSide, (float)TowerCatch.TowerHeight);
+        const float StarbaseColumn = 1.4f, StarbaseBay = 9, StarbaseHole = 6;
+        /// <summary>
+        /// Фундамент башни, м: стойки уходят под отметку оси ловли. Грунт под башней (30 м к западу) ниже отметки стола,
+        /// и стойки, начатые с неё, висели над землёй (Play 06.10.2026).
+        /// </summary>
+        const float StarbaseFooting = 20;
         /// <summary>«Протон»: башня на фундаменте от грунта до низа каркаса (PAD_H − 0,1), апрон вокруг стола, м.</summary>
         const float PadH = 6;
         /// <summary>Saturn V: проём ML 13,7 м, низ ML над грунтом (ML_HOLE, ML_BASE) — бетон под ML до этой отметки.</summary>
@@ -102,6 +106,14 @@ namespace Kare.Space.Game
         Vector3d anchorBf;
         QuaternionD frameBf;
         readonly List<Mover> movers = new List<Mover>();
+        /// <summary>Палочки башни ловли: цель (RecoveryDef — по ней ищем ловимый борт), две балки и ось щели по z, м.</summary>
+        struct CatchArms
+        {
+            public RecoveryDef Def;
+            public Transform Left, Right, Carriage;
+            public float Z0;
+        }
+        readonly List<CatchArms> catchArms = new List<CatchArms>();
         float releaseT;
         Renderer[] renderers;
         // стек ракеты: [низ, верх, радиус] секции, м от стола (для длины стрел и высоты ярусов)
@@ -298,33 +310,73 @@ namespace Kare.Space.Game
 
         /// <summary>
         /// Starbase (Бока-Чика, OLP-A): бетон с проёмом под 33 Raptor и башня ловли «Mechazilla» на запад от стола со
-        /// «палочками» на высоте цапф Super Heavy. Палочки стоят сведёнными по обе стороны оси: ускоритель садится в круг
-        /// RecoveryDef.DeckRadius у центра стола (SpaceXRockets.StarbaseCatch) — и оказывается между ними, как при ловле.
+        /// «палочками» на высоте цапф Super Heavy (RecoveryDef.ArmHeight). Палочки разведены и сходятся, когда корпус между
+        /// ними (Vessel.CatchArms, контакт — TowerCatch.Step): ускоритель повисает на них над столом.
         /// </summary>
         void PlanStarbase(MeshBuilder slab, MeshBuilder pit)
         {
             Deck(slab, pit, 32, StarbaseHole);
             var tower = new MeshBuilder(ConcreteTile);
-            float x0 = StarbaseTower.x, half = StarbaseTower.z * 0.5f, h = StarbaseTower.w, c = StarbaseColumn * 0.5f;
+            var defA = SpaceXRockets.StarbaseCatch();
+            MechazillaMesh(tower, Vector3.zero, (float)defA.ArmHeight, defA);
+            AddPart("Mechazilla", tower.Build(), steel[0], transform);
+
+            // OLP-B: вторая башня, ловит корабль (starship_catch, SpaceXRockets.StarbaseShipCatch): палочки — на высоте
+            // цапф висящего корабля над грунтом точки B. Смещение — в базисе стола
+            // (восток, зенит, север); кривизна на 300 м — миллиметры.
+            var upA = anchorBf.normalized;
+            var east = Vector3d.Cross(Vector3d.forward, upA).normalized;
+            var north = Vector3d.Cross(upA, east);
+            var upB = CelestialBody.LatLonToBodyFixed(SpaceXRockets.StarbaseBLat, SpaceXRockets.StarbaseBLon);
+            var d = upB * (body.Radius + body.SurfaceHeight(upB)) - anchorBf;
+            var b = new Vector3((float)Vector3d.Dot(d, east), (float)Vector3d.Dot(d, upA), (float)Vector3d.Dot(d, north));
+            // Площадка под башней B — от грунта до отметки чуть выше него (не мерцает с травой).
+            slab.Box(new Vector3(b.x - 40, b.y - 1, b.z - 25), new Vector3(b.x + 25, b.y + 0.03f, b.z + 25));
+            var towerB = new MeshBuilder(ConcreteTile);
+            var defB = SpaceXRockets.StarbaseShipCatch();
+            MechazillaMesh(towerB, b, b.y + (float)defB.ArmHeight, defB);
+            AddPart("Mechazilla B", towerB.Build(), steel[0], transform);
+        }
+
+        /// <summary>
+        /// Решётчатая башня Mechazilla со стойками, поясами и кареткой; «палочки» на высоте yArm (в базисе стола) — отдельные
+        /// балки, их сводит Pose. m — ось ловли (центр стола или круга ловли): башня — на StarbaseTower.x к западу от неё.
+        /// </summary>
+        void MechazillaMesh(MeshBuilder tower, Vector3 m, float yArm, RecoveryDef def)
+        {
+            float x0 = m.x + StarbaseTower.x, half = StarbaseTower.z * 0.5f, h = m.y + StarbaseTower.w, c = StarbaseColumn * 0.5f;
+            float y0 = m.y, z0 = m.z;
             // Решётчатая башня: четыре стойки и пояса через StarbaseBay — читается фермой и не стоит лишних мешей.
             for (int sx = -1; sx <= 1; sx += 2)
                 for (int sz = -1; sz <= 1; sz += 2)
-                    tower.Box(new Vector3(x0 + sx * half - c, 0, sz * half - c), new Vector3(x0 + sx * half + c, h, sz * half + c));
-            for (float y = StarbaseBay; y < h; y += StarbaseBay)
+                    tower.Box(new Vector3(x0 + sx * half - c, y0 - StarbaseFooting, z0 + sz * half - c), new Vector3(x0 + sx * half + c, h, z0 + sz * half + c));
+            for (float y = y0 + StarbaseBay; y < h; y += StarbaseBay)
             {
-                tower.Box(new Vector3(x0 - half, y - 0.4f, -half - c), new Vector3(x0 + half, y + 0.4f, -half + c));
-                tower.Box(new Vector3(x0 - half, y - 0.4f, half - c), new Vector3(x0 + half, y + 0.4f, half + c));
-                tower.Box(new Vector3(x0 - half - c, y - 0.4f, -half), new Vector3(x0 - half + c, y + 0.4f, half));
-                tower.Box(new Vector3(x0 + half - c, y - 0.4f, -half), new Vector3(x0 + half + c, y + 0.4f, half));
+                tower.Box(new Vector3(x0 - half, y - 0.4f, z0 - half - c), new Vector3(x0 + half, y + 0.4f, z0 - half + c));
+                tower.Box(new Vector3(x0 - half, y - 0.4f, z0 + half - c), new Vector3(x0 + half, y + 0.4f, z0 + half + c));
+                tower.Box(new Vector3(x0 - half - c, y - 0.4f, z0 - half), new Vector3(x0 - half + c, y + 0.4f, z0 + half));
+                tower.Box(new Vector3(x0 + half - c, y - 0.4f, z0 - half), new Vector3(x0 + half + c, y + 0.4f, z0 + half));
             }
-            // Каретка на грани к столу и две «палочки» до дальнего края корпуса, щель между ними — Ø ускорителя с зазором.
-            float yArm = top + StarbaseArmHeight, inner = x0 + half;
-            tower.Box(new Vector3(inner, yArm - 4, -StarbaseArmGap - 2), new Vector3(inner + 2.5f, yArm + 4, StarbaseArmGap + 2));
-            for (int sz = -1; sz <= 1; sz += 2)
-                tower.Box(new Vector3(inner, yArm - 1.2f, sz * StarbaseArmGap - 0.8f), new Vector3(StarbaseArmReach, yArm + 1.2f, sz * StarbaseArmGap + 0.8f));
+            // Каретка на грани к оси — во всю разведённую щель; две «палочки» до TowerCatch.ArmTip — отдельные балки
+            // (ось балки — z = 0 меша), их ставит по щели Pose. Каретка с балками ездит вниз на Vessel.CatchLowered.
+            float inner = x0 + half, open = (float)TowerCatch.ArmGapOpen;
+            var carriage = new MeshBuilder(ConcreteTile);
+            carriage.Box(new Vector3(inner, yArm - 4, z0 - open - 2), new Vector3(inner + 2.5f, yArm + 4, z0 + open + 2));
+            var bar = new MeshBuilder(ConcreteTile);
+            float bh = (float)TowerCatch.ArmBarHalfHeight, bz = (float)TowerCatch.ArmBarHalf;
+            bar.Box(new Vector3(inner, yArm - bh, -bz), new Vector3(m.x + (float)TowerCatch.ArmTip, yArm + bh, bz));
+            var barMesh = bar.Build();
+            var arms = new CatchArms
+            {
+                Def = def, Z0 = z0,
+                Left = AddPart("Catch Arm L", barMesh, steel[0], transform).transform,
+                Right = AddPart("Catch Arm R", barMesh, steel[0], transform).transform,
+                Carriage = AddPart("Catch Carriage", carriage.Build(), steel[0], transform).transform,
+            };
+            catchArms.Add(arms);
+            PoseArms(arms, 0, 0);
             // Кран и молниеотвод на макушке.
-            tower.Box(new Vector3(x0 - 1, h, -1), new Vector3(x0 + 1, h + 9, 1));
-            AddPart("Mechazilla", tower.Build(), steel[0], transform);
+            tower.Box(new Vector3(x0 - 1, h, z0 - 1), new Vector3(x0 + 1, h + 9, z0 + 1));
         }
 
         /// <summary>Четыре прожекторные мачты на диагоналях (по 45°): ствол, голова с панелью ламп и Spot-светом,
@@ -509,6 +561,34 @@ namespace Kare.Space.Game
         }
 
         /// <summary>Часть из меша: mat != null — один материал на все субмеши; null — палитра комплекса по слотам FBX.</summary>
+        /// <summary>
+        /// Сведение палочек башни (0–1) и ход каретки вниз, м: самые большие у живых бортов, которых она ловит
+        /// (TowerCatch.Def, Vessel.CatchArms / CatchLowered).
+        /// </summary>
+        void ArmsState(RecoveryDef def, out float closure, out float lowered)
+        {
+            closure = lowered = 0;
+            var u = GameBootstrap.U;
+            if (u == null) return;
+            foreach (var v in u.Vessels)
+            {
+                if (!v.Alive || v.Body != body) continue;
+                var d = TowerCatch.Def(v);
+                if (d == null || d.TargetLat != def.TargetLat || d.TargetLon != def.TargetLon) continue;
+                closure = Math.Max(closure, (float)v.CatchArms);
+                if (v.TowerCaught) lowered = Math.Max(lowered, (float)v.CatchLowered);
+            }
+        }
+
+        /// <summary>Балки по обе стороны оси щели на полущели TowerCatch.Gap и на ходе каретки — те же числа, что в ядре.</summary>
+        static void PoseArms(CatchArms a, float s, float lowered)
+        {
+            float gap = (float)TowerCatch.Gap(s);
+            a.Left.localPosition = new Vector3(0, -lowered, a.Z0 - gap);
+            a.Right.localPosition = new Vector3(0, -lowered, a.Z0 + gap);
+            a.Carriage.localPosition = new Vector3(0, -lowered, 0);
+        }
+
         GameObject AddPart(string name, Mesh mesh, Material mat, Transform parent)
         {
             var go = new GameObject(name);
@@ -548,6 +628,11 @@ namespace Kare.Space.Game
             if (lampMat != null) lampMat.SetColor("_EmissiveColor", lampColor * (FloodLampNits * night));
             if (!show) return;
             transform.SetPositionAndRotation(pos, FloatingOrigin.ToQuaternion(o.SwapYZ * frameBf));
+            foreach (var a in catchArms)
+            {
+                ArmsState(a.Def, out float s, out float lowered);
+                PoseArms(a, s, lowered);
+            }
             foreach (var m in movers)
             {
                 // Плавный старт и мягкая остановка — деталь тяжёлая, рывком не ходит.

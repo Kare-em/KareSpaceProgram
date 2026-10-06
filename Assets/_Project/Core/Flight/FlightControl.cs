@@ -106,6 +106,20 @@ namespace Kare.Space.Core
             Regulate(v, err);
         }
 
+        /// <summary>
+        /// Довернуть нос на dirP и креном вывести брюхо (+X корпуса, Aerodynamics: плитки, щитки) на bellyP. Без крена
+        /// «Старшип» входил с α 90° боком к потоку — плитки и закрылки работали не той стороной (Play 06.10.2026).
+        /// Ошибка крена — угол от +X до проекции bellyP на плоскость XZ, знак — как у FromToRotation по +Y.
+        /// </summary>
+        public static void PointAt(Vessel v, Vector3d dirP, Vector3d bellyP)
+        {
+            var target = v.WorldToLocal(dirP.normalized);
+            var err = QuaternionD.FromToRotation(Vector3d.up, target).ToRotationVector();
+            var b = v.WorldToLocal(bellyP.normalized);
+            err.y = b.x * b.x + b.z * b.z > 1e-6 ? Math.Atan2(-b.z, b.x) : 0;
+            Regulate(v, err);
+        }
+
         /// <summary>Закон «корня»: желаемая скорость такая, чтобы успеть затормозить к нулю ошибки.</summary>
         static void Regulate(Vessel v, Vector3d err)
         {

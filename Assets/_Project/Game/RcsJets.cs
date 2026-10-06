@@ -155,6 +155,13 @@ namespace Kare.Space.Game
             public Vector3[] Ex;
         }
 
+        /// <summary>Высота кольца РСУ Super Heavy над срезом нижнего сопла, м (верх бака, под решётчатыми рулями).
+        /// Пара: SpaceXRockets.SuperHeavyLength, SuperHeavyPinsFromTop (цапфы ниже на 6 м).</summary>
+        const float SuperHeavyRcsY = 67f;
+        /// <summary>Starship: азимут блоков от оси −X (подветренная сторона), °, и высоты носовых/кормовых блоков, м.
+        /// Пара: SpaceXRockets.StarshipFlaps (носовые закрылки с 0,78 L = 39 м, кормовые до 13 м).</summary>
+        const float StarshipRcsAz = 40f, StarshipRcsFwdY = 32f, StarshipRcsAftY = 15f;
+
         /// <summary>Четыре «квада» по окружности (СМ «Аполлона», ДПО «Союза», Draco): у каждого вверх, вниз и по
         /// касательной в обе стороны. Радиальную тягу дают касательные соседних квадов.</summary>
         static IEnumerable<Cluster> Quads(float y, float r, float az0)
@@ -198,6 +205,24 @@ namespace Kare.Space.Game
                     return Quads(2.65f, 0.73f, 45);
                 case SectionModel.GeminiAdapter: // OAMS на юбке переходника (конус 1,45 → 1,2 м)
                     return Quads(1.15f, 1.33f, 45);
+                case SectionModel.SuperHeavy:
+                    // Кольцо холодного газа у верха бака (b_super_heavy: кольцо горячего разделения с 71 м, решётчатые рули
+                    // на hot−2,4 м под азимутами 45 + 90k, цапфы 0/180 на hot−6, магистраль на 90). Азимуты 22,5 + 90k — между
+                    // рулём и цапфой, мимо магистрали. Пара: SpaceXRockets.SuperHeavyLength (71 + 1,8), радиус 4,5 = R модели.
+                    return Quads(SuperHeavyRcsY, 4.5f, 22.5f);
+                case SectionModel.Starship:
+                    // Оси секции: +X — брюхо (плитки), значит подветренная сторона — −X. Блоки РСУ стоят на ней, по бокам
+                    // от оси (±StarshipRcsAz): носовые у передних закрылков (цилиндр до 31,5 м, дальше оживал — радиус там
+                    // ≈ 4,49 м), струя наружу и вверх; кормовые выше кормовых закрылков (шарнир до 13,1 м), наружу и вниз.
+                    {
+                        float ca = Mathf.Cos(StarshipRcsAz * Mathf.Deg2Rad), sa = Mathf.Sin(StarshipRcsAz * Mathf.Deg2Rad);
+                        Vector3 nl = new Vector3(-ca, 0, sa), nr = new Vector3(-ca, 0, -sa);
+                        return new[]
+                        {
+                            Side(nl.x * 4.5f, StarshipRcsFwdY, nl.z * 4.5f, nl, up), Side(nr.x * 4.5f, StarshipRcsFwdY, nr.z * 4.5f, nr, up),
+                            Side(nl.x * 4.5f, StarshipRcsAftY, nl.z * 4.5f, nl, down), Side(nr.x * 4.5f, StarshipRcsAftY, nr.z * 4.5f, nr, down),
+                        };
+                    }
                 case SectionModel.ShuttleOrbiter:
                     // Оси вида: −X — верх (киль), +X — брюхо, нос +Y (b_shuttle, x Blender = −x вида).
                     // Носовой блок FRCS — бока, верх и брюхо носа; кормовые ARCS — на гондолах OMS.

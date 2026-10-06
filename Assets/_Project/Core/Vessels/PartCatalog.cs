@@ -80,6 +80,8 @@ namespace Kare.Space.Core
         public bool UllageMotors;
         public int Crew;
         public double RcsTorque, ParachuteArea, FinArea;
+        /// <summary>Закрылки и решётчатые рули, м² — сумма четырёх (SectionDef.FlapArea, GridFinArea).</summary>
+        public double FlapArea, GridFinArea;
         /// <summary>Допустимый тепловой поток, Вт/м²; 0 — по умолчанию секции (обшивка ступени).</summary>
         public double MaxHeatFlux;
         public double DragScale = 1;
@@ -198,6 +200,11 @@ namespace Kare.Space.Core
         /// ТЗП — до 100+), киль и оперение ≈30, стабилизаторы ракеты ≈75 (каталожные 4 м² → 300 кг).
         /// </summary>
         const double WingAreal = 40, FinPlaneAreal = 30, FinsAreal = 75;
+        /// <summary>
+        /// Закрылки и решётки, кг/м²: закрылки Starship ≈ 120 м² и ≈ 12 т с приводами; решётки Falcon 9 ≈ 4 × 1,5 м² по
+        /// ≈ 360 кг (титан).
+        /// </summary>
+        const double FlapsAreal = 100, GridFinsAreal = 240;
         /// <summary>Носовой конус: масса 20·d·L (при L = 1,5·d — прежние 30·d²).</summary>
         const double NoseAreal = 20;
 
@@ -247,6 +254,14 @@ namespace Kare.Space.Core
                 r.Wing.Span = r.Span;
                 r.DryMass = Math.Round((r.Wing.Vertical ? FinPlaneAreal : WingAreal) * area);
                 r.Description = $"S = {area:F1} м², удлинение {r.Wing.AspectRatio:F1}";
+            }
+            else if (r.FlapArea > 0 || r.GridFinArea > 0)
+            {
+                // 4 закрылка или 4 решётки: площадь — сумма. Закрылки с приводами и ТЗП тяжелее стабилизаторов.
+                double area = 4 * r.Span * r.Chord;
+                if (r.FlapArea > 0) r.FlapArea = area; else r.GridFinArea = area;
+                r.DryMass = Math.Round((r.FlapArea > 0 ? FlapsAreal : GridFinsAreal) * area);
+                r.Description = $"4 × {r.Span:0.##} × {r.Chord:0.##} м, всего {area:F1} м²";
             }
             else if (r.FinArea > 0)
             {
@@ -476,6 +491,19 @@ namespace Kare.Space.Core
                 FinArea = 4, Span = 1, Chord = 1, Params = PartParam.Span | PartParam.Chord,
                 Description = "Сдвигают центр давления назад — статическая устойчивость",
             });
+            Add(new PartDef
+            {
+                Id = "flaps", Name = "Закрылки (4 шт)", Category = PartCategory.Aero, Diameter = 1, Length = 0,
+                FlapArea = 8, Span = 1, Chord = 2, DryMass = Math.Round(FlapsAreal * 8), Params = PartParam.Span | PartParam.Chord,
+                // Как у Starship: вход «брюхом» поперёк потока, перед посадкой — переворот (§6.9, RecoveryDef.BellyFlop).
+                Description = "Рулят на напоре без тяги: вход брюхом и переворот перед посадкой",
+            });
+            Add(new PartDef
+            {
+                Id = "gridfins", Name = "Решётчатые рули (4 шт)", Category = PartCategory.Aero, Diameter = 1, Length = 0,
+                GridFinArea = 6, Span = 1.2, Chord = 1.25, DryMass = Math.Round(GridFinsAreal * 6), Params = PartParam.Span | PartParam.Chord,
+                Description = "Раскрываются после отделения: рулят и тормозят при спуске ступени",
+            });
             // Несущие плоскости (§4.6): считаются Aerodynamics по WingDef, а не FinArea. Площадь = размах × хорда,
             // масса — PartCatalog.WingAreal/FinPlaneAreal на м². Крыло и оперение — пара консолей, киль — одна плоскость.
             const PartParam wingParams = PartParam.Span | PartParam.Chord | PartParam.Sweep | PartParam.Incidence | PartParam.Dihedral;
@@ -517,7 +545,8 @@ namespace Kare.Space.Core
             Add(new PartDef
             {
                 Id = "legs", Name = "Посадочные опоры", Category = PartCategory.Utility, Diameter = 1, Length = 0, DryMass = 250,
-                LandingLegs = true, Description = "Мягкая посадка на тело без атмосферы; G — выпуск и уборка",
+                LandingLegs = true,
+                Description = "Мягкая посадка; у ступени с двигателем — возврат после отделения (выбор в окне детали); G — выпуск",
             });
             Add(new PartDef
             {

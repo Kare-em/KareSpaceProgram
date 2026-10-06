@@ -101,7 +101,8 @@ namespace Kare.Space.Game
             up = (up - Vector3.Dot(up, aft) * aft).normalized;
             var t = AddChild(go, cs.Name);
             t.localPosition = a;
-            var mesh = SurfaceMesh(b - a, aft, up, (float)cs.ChordA, (float)cs.ChordB, (float)cs.Thickness);
+            var mesh = SurfaceMesh(b - a, aft, up, (float)cs.ChordA, (float)cs.ChordB, (float)cs.Thickness,
+                (float)cs.TipShiftA, (float)cs.TipShiftB);
             Color top = palette.Length > 0 ? palette[0] : WhiteColor;
             Color belly = cs.DarkBelly && palette.Length > 1 ? palette[1] : top;
             var pal = new[] { top, belly };
@@ -117,20 +118,26 @@ namespace Kare.Space.Game
         /// <summary>
         /// Клин створки: шарнир (от 0 до span) толщиной th, задняя кромка — на chord по aft, толщиной th·SurfaceEdgeShare.
         /// Субмеш 0 — верх (сторона Up), носок, торцы и кромка; 1 — низ. Вершины у каждой грани свои — жёсткие рёбра.
+        /// shiftA/shiftB — сдвиг внешних углов вдоль шарнира (ControlSurface.TipShiftA/B): скошенная боковая кромка,
+        /// у прямоугольной створки 0. Все углы остаются в плоскости створки (span, aft) — грани плоские.
         /// </summary>
-        static Mesh SurfaceMesh(Vector3 span, Vector3 aft, Vector3 up, float chordA, float chordB, float th)
+        static Mesh SurfaceMesh(Vector3 span, Vector3 aft, Vector3 up, float chordA, float chordB, float th,
+            float shiftA = 0, float shiftB = 0)
         {
             float h = th * 0.5f, e = h * SurfaceEdgeShare;
+            var along = span.normalized;
+            var tipA = aft * chordA + along * shiftA;
+            var tipB = span + aft * chordB + along * shiftB;
             // Углы: 0/1 — шарнир у A верх/низ, 2/3 — у B, 4/5 — кромка у A, 6/7 — у B.
             var p = new[]
             {
                 up * h, -up * h, span + up * h, span - up * h,
-                aft * chordA + up * e, aft * chordA - up * e, span + aft * chordB + up * e, span + aft * chordB - up * e,
+                tipA + up * e, tipA - up * e, tipB + up * e, tipB - up * e,
             };
             var verts = new List<Vector3>();
             var topTris = new List<int>();
             var botTris = new List<int>();
-            var centre = (span + aft * (chordA + chordB) * 0.5f) * 0.5f;
+            var centre = (span + tipA + tipB) * 0.25f;
             void Quad(List<int> tris, int i0, int i1, int i2, int i3)
             {
                 int o = verts.Count;
@@ -193,17 +200,35 @@ namespace Kare.Space.Game
             dragChutes.Add(view);
         }
 
+        /// <summary>Закрылки в потоке: состояние с гистерезисом (UpdateControls). Напор выхода и сброса, Па: обшивка
+        /// ощутимо обдувается от ≈ 300 Па (≈ 25 м/с у земли, ≈ 70 км на скорости входа), убираются — ниже 100.</summary>
+        bool flapsOut;
+        const double FlapDeployQ = 300, FlapStowQ = 100;
+
+        /// <summary>Под секцией ещё стоит ступень — корабль на ускорителе, закрылки сложены.</summary>
+        static bool StackBelow(Vessel v, int section)
+        {
+            for (int j = 0; j < section; j++) if (v.Attached[j]) return true;
+            return false;
+        }
+
         /// <summary>Каждый кадр: створки к целевому углу с пределом скорости привода, тормозной парашют по Vessel.DragChute.</summary>
         void UpdateControls(Vector3 airflow)
         {
             var v = Vessel;
             float dt = Time.deltaTime;
+            // Складные закрылки (ControlSurface.StowDeg, Starship): вышли в поток — в атмосфере без тяги (брюхом); убраны на
+            // подъёме (под кораблём ещё ступень), в вакууме и на посадочном импульсе. Гистерезис по напору — без дрожи у порога.
+            // Пара: FlapDeployQ > FlapStowQ. Только вид: физика закрылков не знает.
+            bool thrusting = v.CurrentThrust > 0;
+            flapsOut = flapsOut ? !thrusting && v.DynamicPressure > FlapStowQ : !thrusting && v.DynamicPressure > FlapDeployQ;
             // Ход рулей ограничен настройкой ControlLimit (PartInspector) — визуально так же, как бюджет момента в физике.
             var cmd = v.ControlDeflection * MathD.Clamp(v.ControlLimit, 0, 1);
             foreach (var h in surfaces)
             {
                 if (h.T == null) continue;
-                float target = v.Attached[h.Section] ? (float)h.S.Angle(cmd, v.PitchTrim, v.AirBrake) : 0;
+                float target = v.Attached[h.Section] ? (float)h.S.Angle(cmd * h.S.VisualGain, v.PitchTrim, v.AirBrake) : 0;
+                if (h.S.StowDeg > 0 && v.Attached[h.Section] && (!flapsOut || StackBelow(v, h.Section))) target = (float)h.S.StowDeg;
                 float step = (float)h.S.RateDeg * dt;
                 h.Angle += Mathf.Clamp(target - h.Angle, -step, step);
                 h.T.localRotation = Quaternion.AngleAxis(h.Sign * h.Angle, h.Axis);

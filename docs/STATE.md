@@ -313,7 +313,26 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   `VesselView.SpaceX.cs`: F9 legs on `Hinge` (deploy with G / by the autopilot, feet in the bottom plane, span ≈ 20 m) and grid fins
   (open in 2.5 s when the stage flies alone). `RecoveryDeckView.cs` — OCISLY barge (52 × 91 m) at the recovery target.
   `LaunchPadView` Kind.Starbase — tower "Mechazilla" with chopsticks (pad chosen by `SectionModel.SuperHeavy`).
-- Not verified in Play: the full IFT-5 / Demo-2 flight with the view (barge and catch seen only from the core tests).
+- `starship_catch` (06.10.2026): both stages caught by towers. Super Heavy -> tower A (`Reserve` 520 t), ship -> orbit 267 km
+  (16 revs per sidereal day, repeating ground track), `PlanShipDeorbit` picks the deorbit ~22 h later over Texas, boostback in
+  vacuum, belly entry with AoA as a range rudder (`GuideBelly`), flop, catch by tower B (`StarbaseShipCatch`, OLP-B ~300 m NE).
+  Objective Landing with `Site = Objective.TowerSite`. Test `starship_catch`: SH 3.5 m/s 3 m, ship 2.6 m/s 9 m, peak heat
+  0.53 MW/m2, max q 43 kPa, 7.8 g. View: `LaunchPadView` builds the second tower "Mechazilla B" for every Starbase pad.
+  Play 06.10.2026: SH 3.1 m/s 3-4 m, ship 2.6 m/s 11 m (post-burn miss 33 km absorbed by `GuideBelly`, cross-track
+  456 m at 4 km taken out by the landing burn); F2/F3/F4 work, F4 resume -> booster caught. Split collapses to one
+  view 8 s after the booster catch (`HoldAfterLanding`) - the ship entry a day later is single-view by design.
+- **Physical chopstick catch** (06.10.2026, `Core/Flight/TowerCatch.cs`, called from `FlightPhysics.StepFlying` before
+  `CheckContact`): tower geometry (x = -30, side 12, height 146), arm bars to x = +14, half-gap 15 m open -> 5.5 m closed in
+  2.5 s. `RecoveryDef.ArmHeight` / `PinsFromTop`: SH 75.8 m (pins 6 m below the nose, hangs 6 m above the 3 m pad),
+  ship 45.3 m (pins 11 m below the nose). The pilot aims the bottom at `ArmHeight - (len - PinsFromTop)` (`TargetBodyFixed`).
+  Arms close while the hull spans them; on the pin crossing: both pins must rest on bars (else "Сорвалась: смещение"),
+  sink <= 6 m/s, slide along the arms <= 3 m/s, tilt <= 10°, else "Удар о палочки"/"Сорвалась". Hull hits tower -> "Удар о башню";
+  bars push the hull out (contact band ±1.2 m). Caught -> `Vessel.TowerCaught`, Landed, anchored. Objective `TowerSite` checks
+  `TowerCaught`. Missed arms -> falls to the ground on stowed legs (crash > `StowedCrashSpeed`). View: `LaunchPadView` arms are
+  separate bars posed by `TowerCatch.Gap(Vessel.CatchArms)`. Trace: env `KSP_CATCH=1` prints `CATCH …` lines.
+  Tests: `starship_catch` SH 2.9 m/s 6 m, ship 2.5 m/s +8 m along the arms; `starship` SH 2.5 m/s 7 m; `booster` unchanged.
+- Not verified in Play: the full IFT-5 / Demo-2 flight with the view (barge and catch seen only from the core tests);
+  chopstick closing animation and `RunwayView` not seen in Play after the 06.10.2026 change.
 - **Order "stage ↔ ship" after separation** (`Game/FlightView.cs`, `Core/Flight/Universe.Deferred.cs`, `FlightHud.View.cs`):
   control always stays on `u.Active` (the ship's mission autopilot flies only the active vessel); only the *view* moves.
   F2 — view on the returning stage ("landing first": ship flies itself, view returns 8 s after touchdown);

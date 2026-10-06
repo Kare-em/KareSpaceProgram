@@ -210,7 +210,7 @@ namespace Kare.Space.Core
             {
                 Terrain.Sites.Add(new LaunchSite("baikonur", "Байконур, Гагаринский старт", "earth", 45.920, 63.342, 90));
                 Terrain.Sites.Add(new LaunchSite("canaveral", "Канаверал, LC-39A", "earth", 28.608, -80.604, 3));
-                Terrain.Sites.Add(new LaunchSite("starbase", "Starbase, Бока-Чика", "earth", SpaceXRockets.StarbaseLat, SpaceXRockets.StarbaseLon, 3));
+                Terrain.Sites.Add(new LaunchSite("starbase", "Starbase, Бока-Чика", "earth", SpaceXRockets.StarbaseLat, SpaceXRockets.StarbaseLon, SpaceXRockets.StarbasePadHeight));
                 Terrain.Sites.Add(new LaunchSite("kourou", "Куру, ELA-3", "earth", 5.239, -52.768, 15));
                 Terrain.Sites.Add(new LaunchSite("plesetsk", "Плесецк", "earth", 62.927, 40.575, 120));
                 Terrain.Sites.Add(new LaunchSite("vostochny", "Восточный", "earth", 51.884, 128.334, 230));

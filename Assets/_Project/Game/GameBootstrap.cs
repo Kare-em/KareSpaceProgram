@@ -197,6 +197,8 @@ namespace Kare.Space.Game
             FloatingOrigin.Refresh();
             if (universe.Active?.Site != null)
                 new GameObject("Launch Pad").AddComponent<LaunchPadView>().Init(universe.Active, PadTexture, VesselMaterial, TrussMesh, PadMeshFor);
+            // Полосы посадки крылатых бортов (§6.4): только Земля, одна лента на полосу на сцену.
+            RunwayView.EnsureAll(universe.System.Get("earth"), VesselMaterial);
         }
 
         void OnDestroy()

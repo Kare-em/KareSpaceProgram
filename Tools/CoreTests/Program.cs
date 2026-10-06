@@ -82,6 +82,7 @@ static class Program
         Run("booster", TestBooster, only);
         Run("booster_defer", TestBoosterDefer, only);
         Run("starship", TestStarship, only);
+        Run("starship_catch", TestStarshipCatch, only);
         // Миссии целиком автопилотом Y без рук и с автоускорением: «auto» — все, «auto_<id>» — одна.
         foreach (var id in AutoMissions)
             Run("auto_" + id, () => TestAuto(id), only == "auto" ? "auto_" + id : only);
@@ -223,7 +224,7 @@ static class Program
     {
         "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
         "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
-        "voskhod2", "soyuz_tm31", "crew_dragon", "sts1", "buran", "ift5",
+        "voskhod2", "soyuz_tm31", "crew_dragon", "sts1", "buran", "ift5", "starship_catch",
     };
 
     /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
@@ -390,7 +391,7 @@ static class Program
 
     /// <summary>
     /// Starship IFT-5 (§6.9): автопилот миссии ведёт корабль, фоновый пилот — Super Heavy к башне. Ускоритель: касание
-    /// медленнее 6 м/с в круге ловли 50 м; корабль: вход «брюхом», переворот, приводнение медленнее 6 м/с; миссия выполнена.
+    /// медленнее 6 м/с и висит на палочках (TowerCatch); корабль: вход «брюхом», переворот, приводнение медленнее 6 м/с; миссия выполнена.
     /// </summary>
     static void TestStarship()
     {
@@ -446,7 +447,7 @@ static class Program
         {
             Console.WriteLine($"   Super Heavy: {booster.Phase} — {booster.Status}");
             Check("starship: Super Heavy пойман медленнее 6 м/с", booster.TouchdownSpeed < 6, $"{booster.TouchdownSpeed:F1} м/с");
-            Check("starship: Super Heavy в круге ловли 50 м", booster.Miss <= 50, $"{booster.Miss:F0} м");
+            Check("starship: Super Heavy висит на палочках", booster.Vessel.TowerCaught, $"{booster.Vessel.Situation}, {booster.Miss:F0} м от оси");
         }
         Check("starship: корабль передан пилоту посадки", ship != null, "нет пилота");
         if (ship != null)
@@ -458,6 +459,84 @@ static class Program
                   $"{ship.TouchdownSpeed:F1} м/с, {s.Situation}");
         }
         Check("starship: миссия выполнена", tr.Status == MissionStatus.Success, tr.Status.ToString());
+    }
+
+    /// <summary>
+    /// starship_catch (§6.9): обе ступени ловят башни Starbase. Super Heavy — к башне A, как в IFT-5; корабль — орбита
+    /// повторяющейся трассы, сход через сутки, доправка в вакууме, вход «брюхом» и ловля башней B. Обе: касание медленнее
+    /// 6 м/с в круге 50 м своей башни; миссия выполнена.
+    /// </summary>
+    static void TestStarshipCatch()
+    {
+        var (u, tr) = StartMission("starship_catch");
+        u.AutoWarp = true;
+        u.Mission = new MissionAutopilot(u, tr);
+        Check("starship_catch: профиль Starship", u.Mission.Profile == MissionAutopilot.ProfileType.Starship, u.Mission.Profile.ToString());
+        BoosterLandingAutopilot booster = null, ship = null;
+        string bPhase = null, sPhase = null, mPhase = null;
+        double maxHeat = 0, maxQ = 0, maxG = 0, end = u.Time + 3 * 86400;
+        for (int f = 0; f < 400000 && tr.Status == MissionStatus.Active && u.Time < end; f++)
+        {
+            u.Advance(0.1);
+            tr.Update(u);
+            foreach (var p in u.Recoveries)
+            {
+                if (p.Vessel == u.Active) ship = p;
+                else booster = p;
+            }
+            if (u.Mission != null && u.Mission.Phase != mPhase)
+            {
+                mPhase = u.Mission.Phase;
+                var a = u.Active;
+                Console.WriteLine($"   ◆ миссия: {mPhase}: h {a.Altitude / 1000:F1} км, v {a.Velocity.magnitude:F0} м/с, {OrbitText(a, u.Time)}, " +
+                                  $"топливо {a.Propellant[1] / 1000:F0} т");
+            }
+            if (booster != null && booster.Phase.ToString() != bPhase)
+            {
+                bPhase = booster.Phase.ToString();
+                var b = booster.Vessel;
+                Console.WriteLine($"   ▶ Super Heavy: {bPhase}: h {b.Altitude / 1000:F1} км, v {b.SurfaceSpeed:F0} м/с, " +
+                                  $"топливо {b.Propellant[0] / 1000:F0} т — {booster.Status}");
+            }
+            if (ship != null && ship.Phase.ToString() != sPhase)
+            {
+                sPhase = ship.Phase.ToString();
+                var s = ship.Vessel;
+                var miss = ship.Predict(u.Time, s.Position, s.Velocity, s.Mass, false, out double tI);
+                Console.WriteLine($"   ▶ корабль: {sPhase}: h {s.Altitude / 1000:F1} км, v {s.SurfaceSpeed:F0} м/с, топливо {s.Propellant[1] / 1000:F1} т, " +
+                                  $"прогноз промаха {miss.magnitude / 1000:F2} км через {tI - u.Time:F0} с — {ship.Status}");
+            }
+            if (ship != null && ship.Running)
+            {
+                maxHeat = Math.Max(maxHeat, ship.Vessel.HeatFlux);
+                maxQ = Math.Max(maxQ, ship.Vessel.DynamicPressure);
+                maxG = Math.Max(maxG, ship.Vessel.GForce);
+                if (ship.Phase == BoosterLandingAutopilot.PhaseType.Aero && f % 100 == 0)
+                {
+                    var s = ship.Vessel;
+                    var miss = ship.Predict(u.Time, s.Position, s.Velocity, s.Mass, false, out _);
+                    Console.WriteLine($"     · h {s.Altitude / 1000:F1} км, v {s.SurfaceSpeed:F0} м/с, {s.GForce:F1} g, AoA {s.AngleOfAttack:F0}°, q {s.DynamicPressure:F0}, прогноз промаха {miss.magnitude:F0} м — {ship.Status}");
+                }
+                if (ship.Phase == BoosterLandingAutopilot.PhaseType.Landing && f % 20 == 0)
+                    Console.WriteLine($"     · h {ship.Vessel.Altitude:F0} м, v {ship.Vessel.SurfaceSpeed:F0} м/с, газ {ship.Vessel.Throttle:F2} × {ship.Vessel.EngineLimit} — {ship.Status}");
+            }
+        }
+        Console.WriteLine($"   корабль: тепловой поток до {maxHeat / 1e6:F2} МВт/м², напор до {maxQ / 1000:F1} кПа, до {maxG:F1} g");
+        Check("starship_catch: Super Heavy вернулся с пилотом", booster != null, "нет пилота");
+        if (booster != null)
+        {
+            Console.WriteLine($"   Super Heavy: {booster.Phase} — {booster.Status}");
+            Check("starship_catch: Super Heavy пойман медленнее 6 м/с", booster.TouchdownSpeed < 6, $"{booster.TouchdownSpeed:F1} м/с");
+            Check("starship_catch: Super Heavy висит на палочках", booster.Vessel.TowerCaught, $"{booster.Vessel.Situation}, {booster.Miss:F0} м от оси");
+        }
+        Check("starship_catch: корабль передан пилоту возврата", ship != null, "нет пилота");
+        if (ship != null)
+        {
+            Console.WriteLine($"   корабль: {ship.Phase} — {ship.Status}; {ship.Vessel.Situation}");
+            Check("starship_catch: корабль пойман медленнее 6 м/с", ship.TouchdownSpeed < 6, $"{ship.TouchdownSpeed:F1} м/с");
+            Check("starship_catch: корабль висит на палочках башни B", ship.Vessel.TowerCaught, $"{ship.Vessel.Situation}, {ship.Miss:F0} м от оси");
+        }
+        Check("starship_catch: миссия выполнена", tr.Status == MissionStatus.Success, tr.Status.ToString());
     }
 
     /// <summary>Вставки DEM 15″ у площадок (bake-dem.py patches): мыс Канаверал — суша, океан к востоку — вода. В 0,1° LC-39A

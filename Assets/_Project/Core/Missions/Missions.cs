@@ -39,8 +39,9 @@ namespace Kare.Space.Core
         public string Body = "earth";
         public double Min, Max, HoldSeconds;
         public double MaxSpeed = FlightPhysics.CrashSpeed;
-        /// <summary>Id полосы для ObjectiveType.Runway (Runways.Get).</summary>
+        /// <summary>Id полосы для ObjectiveType.Runway (Runways.Get); у Landing — TowerSite: только ловля башней.</summary>
         public string Site;
+        public const string TowerSite = "tower";
 
         public string Describe(SolarSystem sys)
         {
@@ -55,7 +56,9 @@ namespace Kare.Space.Core
                 case ObjectiveType.Flyby: return $"Пролёт {b} не выше {Max / 1000:F0} км";
                 case ObjectiveType.FarSidePhoto: return $"Снять освещённую обратную сторону: {b}, не дальше {Max / 1000:F0} км";
                 case ObjectiveType.Impact: return $"Достичь поверхности: {b}";
-                case ObjectiveType.Landing: return $"Мягкая посадка: {b}, не быстрее {MaxSpeed:F0} м/с";
+                case ObjectiveType.Landing:
+                    return Site == TowerSite ? "Ловля корабля башней: цапфы на «палочках»"
+                                             : $"Мягкая посадка: {b}, не быстрее {MaxSpeed:F0} м/с";
                 case ObjectiveType.Drive: return $"Проехать {Min:F0} м: {b}";
                 case ObjectiveType.Dock:
                     return "Стыковка со станцией" + (HoldSeconds > 0 ? $", в связке {GameCalendar.FormatDuration(HoldSeconds)}" : "");
@@ -236,6 +239,8 @@ namespace Kare.Space.Core
 
                 case ObjectiveType.Landing:
                     if (!launched || !onBody || v.Situation != Situation.Landed && v.Situation != Situation.Splashed) return false;
+                    // Ловля башней: висит на палочках своей башни (TowerCatch.Step), а не стоит где угодно.
+                    if (o.Site == Objective.TowerSite) return v.TowerCaught;
                     return true;
 
                 case ObjectiveType.Drive:

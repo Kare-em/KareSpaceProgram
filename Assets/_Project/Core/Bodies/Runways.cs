@@ -75,15 +75,27 @@ namespace Kare.Space.Core
             sites.Add(new LaunchSite("yubileyny", "Байконур, аэродром «Юбилейный»", "earth", 45.958, 63.650, 90) { FlatRadius = RunwayFlat });
         }
 
+        /// <summary>
+        /// Твёрдое покрытие вокруг полосы (§6.4): концевая полоса торможения за каждым порогом, м, и обочина за кромкой, м.
+        /// Колёса держат пробег только по бетону — на грунте за ними шасси ломается (FlightPhysics.OffRunwaySpeed).
+        /// Пара: RunwayView рисует концевую полосу этой же длины; RunwayFlat ≥ Length/2 + Overrun (плоская площадка).
+        /// </summary>
+        public const double Overrun = 300, Shoulder = 15;
+
+        /// <summary>Полоса, под точкой которой бетон (длина + Overrun, полуширина + Shoulder), или null.</summary>
+        public static Runway Paved(CelestialBody body, Vector3d bodyFixed) => At(body, bodyFixed, Shoulder, Overrun);
+
         /// <summary>Полоса, на которой стоит точка (в пределах длины и полуширины + запас), или null.</summary>
-        public static Runway At(CelestialBody body, Vector3d bodyFixed, double margin = 30)
+        public static Runway At(CelestialBody body, Vector3d bodyFixed, double margin = 30) => At(body, bodyFixed, margin, margin);
+
+        static Runway At(CelestialBody body, Vector3d bodyFixed, double margin, double ends)
         {
             foreach (var r in All)
             {
                 var s = r.Site;
                 if (s == null || s.BodyId != body.Id) continue;
                 r.Locate(body, bodyFixed, out double along, out double cross);
-                if (Math.Abs(along) <= r.HalfLength + margin && Math.Abs(cross) <= r.Width * 0.5 + margin) return r;
+                if (Math.Abs(along) <= r.HalfLength + ends && Math.Abs(cross) <= r.Width * 0.5 + margin) return r;
             }
             return null;
         }

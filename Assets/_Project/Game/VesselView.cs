@@ -61,28 +61,50 @@ namespace Kare.Space.Game
         /// <summary>Отход ударной волны от лба, радиусов борта: у сферы Δ ≈ 0,14 r. Пара: LimbEdge в
         /// PlasmaSheathHDRP.shader — толщина светящегося слоя того же порядка.</summary>
         const float ShockStandoff = 0.14f;
-        /// <summary>Оболочка ударного слоя (§4.6), радиусов борта: полуось носового полуэллипса вдоль потока, радиус
-        /// у плеча, сужение к корме (доля), длина шейки за кормой и её конечный радиус; след начинается с середины шейки.
-        /// Был билборд-шар перед лбом — «шар висит перед капсулой» (03.10.2026): светится не шар, а колпак между
-        /// ударной волной и лбом, который обтекает плечо и сходится в след. Пара: SheathNeck/2 = WakeStart − корма.</summary>
-        const float SheathNoseDepth = 0.9f, SheathRadius = 1.35f, SheathTail = 0.9f, SheathNeck = 3, SheathNeckRadius = 0.5f;
+        /// <summary>Оболочка ударного слоя (§4.6) снята с деталей борта (BuildSheathMesh): силуэт секций и крыльев, раздутый
+        /// по нормалям. Раньше оболочка была телом вращения «от лба вдоль потока» — у «Старшипа», падающего брюхом на
+        /// 50 м корпуса, она читалась капсулой вдоль потока (05.10.2026: «форма плазмы должна зависеть от деталей»).
+        /// Меш статичный и пересобирается только при смене состава секций; поток подаётся в шейдер каждый кадр
+        /// (_Flow в осях борта), раздутие и растяжка в след — в вершинной стадии PlasmaSheathHDRP.
+        /// Толщина слоя у плеча, доля местного радиуса; на лбу — доля SheathFront от неё (у сферы Δ ≈ 0,14 r против
+        /// 0,35 r у плеча: пара ShockStandoff); с подветренной стороны — SheathLeeLayer.</summary>
+        const float SheathLayer = 0.35f, SheathLeeLayer = 0.6f;
+        const float SheathFront = ShockStandoff / SheathLayer;
+        /// <summary>Нижняя граница радиуса для толщины слоя, доля радиуса секции: на заострённом носу и у полюсов слой
+        /// не должен схлопываться в ноль, иначе кончик оболочки отстаёт от корпуса и «протыкает» его.</summary>
+        const float SheathLayerFloor = 0.4f;
+        /// <summary>Яркость: поверхность вдоль потока (плечо) — доля PlasmaNits, как у прежней капсулы (0,2); степень
+        /// наветренности (cos² к лбу, как раньше) и степень ухода подветренной стороны в ноль.
+        /// Пара: _Shape/_Glow в PlasmaSheathHDRP.shader.</summary>
+        const float SheathSideGlow = 0.2f, SheathWindPow = 2, SheathWakePow = 2;
+        /// <summary>Яркость по площади наветренной стороны: у орбитера слой в ~20 раз больше площадью, чем у капсулы того
+        /// же радиуса, и брюхо втрое тусклее лба капсулы (05.10.2026: иначе плоскость выбеливает кадр). Множитель =
+        /// (площадь капсулы того же радиуса / площадь проекции)^AreaGlowExp, не ниже AreaGlowMin; 20^-0,4 ≈ 0,3.</summary>
+        const float AreaGlowExp = 0.4f, AreaGlowMin = 0.2f;
+        /// <summary>Растяжка оболочки в след, радиусов борта. Пара: WakeStart = SheathWake/2 — линия следа начинается с
+        /// середины растянутого хвоста, как было с шейкой.</summary>
+        const float SheathWake = 3;
         const float WakeStart = 1.5f;
-        /// <summary>Перестройка меша оболочки при смене длины борта, шаг в радиусах.</summary>
-        const float SheathStep = 0.5f;
-        /// <summary>Ударный слой крылатого борта (§4.6), радиусов фюзеляжа. Орбитер входит с углом атаки ~40°: оболочка
-        /// «вдоль потока от носа» уходила на 14 r в сторону от корпуса белой капсулой (05.10.2026). У планера слой
-        /// прижат к наветренной стороне — брюхо, носок, передние кромки крыла, — поэтому оболочка идёт вдоль оси корпуса:
-        /// сечение — полуэллипсы, к брюху WingSheathWind (фюзеляж 1 + слой ~0,35, пара: ShockStandoff), к спине
-        /// WingSheathLee (едва над обшивкой, почти не светится), по размаху — WingSheathBody у фюзеляжа и
-        /// WingSheathSpan от полуразмаха у задней кромки; за кормой гаснет на длине WingSheathTail.</summary>
-        const float WingSheathWind = 1.35f, WingSheathLee = 1.1f, WingSheathBody = 1.3f, WingSheathSpan = 1.08f, WingSheathTail = 1f;
-        /// <summary>Яркость слоя крылатого борта (доля PlasmaNits): точка торможения на носке 1, передние кромки
-        /// WingGlowEdge, брюхо WingGlowBelly, подветренная спина WingGlowLee. Пара: площадь слоя у орбитера в ~20 раз
-        /// больше, чем у капсулы того же радиуса, — брюхо втрое тусклее лба капсулы, иначе плоскость выбеливает кадр.</summary>
-        const float WingGlowEdge = 0.7f, WingGlowBelly = 0.3f, WingGlowLee = 0.04f;
-        /// <summary>След крылатого: начинается за задней кромкой на WingWakeGap радиусов; ширина — доля полуразмаха
-        /// (пара: PlasmaWakeLength — длина в тех же радиусах).</summary>
-        const float WingWakeGap = 0.5f, WingWakeWidth = 0.5f;
+        /// <summary>Ширина следа — радиус борта, умноженный на (корень площади проекции / диаметр)^WakeWidthExp:
+        /// у капсулы ровно радиус, у широкого брюха — шире, но не во весь размах (иначе лента шире аппарата).</summary>
+        const float WakeWidthExp = 0.5f;
+        /// <summary>Сборка меша: сегментов по окружности корпуса, колец на закругление торца, глубина закругления торца
+        /// (доля радиуса) у обычного торца и у торца с двигателем (колокола свисают под днище).</summary>
+        const int SheathSeg = 32, SheathCapRings = 5;
+        const float SheathCapDepth = 0.35f, SheathEngineDepth = 0.6f;
+        /// <summary>Нос «Старшипа» — оживальный конус на верхней доле длины секции (в ядре секция — цилиндр, нос только в
+        /// модели); шаг выборки профиля Р-7, м (пара: ProcMesh.R7RingStep).</summary>
+        const float StarshipNoseShare = 0.2f, SheathR7Step = 3;
+        /// <summary>Крыло и киль в оболочке: только настоящие плоскости. Символические WingDef (створки «Старшипа» площадью
+        /// 1 м² на размах диаметра борта) в оболочку не входят — они бы вытянули плоский «плавник» поперёк корпуса.
+        /// Слой вокруг крыла — доля слоя фюзеляжа (пара: SheathLayer); колец вдоль размаха, точек вокруг хорды; корень
+        /// начинается не у оси, а в долях радиуса фюзеляжа (внутри корпуса слой не нужен: он удвоил бы свечение).</summary>
+        const float WingSheathMinArea = 4, WingLayerShare = 0.5f, WingRootShare = 0.7f;
+        const int WingSheathSteps = 5, WingSheathSeg = 16;
+        /// <summary>Толщина пластины крыла — те же 8 % хорды и минимум, что у WingMesh (пара: WingMesh.Thickness/ThinMin).</summary>
+        const float WingThickness = 0.08f, WingThinMin = 0.06f;
+        /// <summary>Толщина слоя при слабом нагреве — доля полной (при полном нагреве 1): слой растёт вместе с плазмой.</summary>
+        const float SheathThinInflate = 0.6f;
         static readonly Color SheathHot = new Color(1f, 0.78f, 0.58f), SheathCool = new Color(1f, 0.45f, 0.27f);
         static readonly Color PlasmaTint = new Color(1f, 0.5f, 0.32f);
         /// <summary>Накал обшивки на входе, нит при полном нагреве: абляционное покрытие светится тёмно-красным
@@ -187,9 +209,6 @@ namespace Kare.Space.Game
         Transform plasma, sheath;
         Renderer sheathR;
         MeshFilter sheathMf;
-        float sheathL = -1;
-        /// <summary>Ключ меша оболочки крылатого: полуразмах и станции кромок (радиусы); NaN — меш капсульный.</summary>
-        Vector3 sheathWing = new Vector3(float.NaN, 0, 0);
         LineRenderer plasmaWake;
         Light plasmaLight;
         bool heatGlowOn;
@@ -656,13 +675,17 @@ namespace Kare.Space.Game
         /// <summary>
         /// Плазма входа (GDD §4.6). Первая версия — конусы с градиентом по длине — давала жёсткие кромки
         /// силуэта (01.10.2026): у HDRP/Unlit нет френеля, и спад к краю можно задать только текстурой поперёк
-        /// взгляда. Затем ореол-спрайт к камере — читался шаром перед капсулой (03.10.2026). Теперь ударный слой —
-        /// меш-колпак вокруг лба и борта на своём шейдере (PlasmaSheathHDRP: свечение ∝ 1/|N·V|, мягкий край),
+        /// взгляда. Затем ореол-спрайт к камере — читался шаром перед капсулой (03.10.2026). Затем колпак от лба вдоль потока — не зависел от деталей (05.10.2026). Теперь ударный слой —
+        /// меш по составу секций и крыльев (BuildSheathMesh) на своём шейдере (PlasmaSheathHDRP: свечение ∝ 1/|N·V|, мягкий край),
         /// след за кормой — LineRenderer (лента к камере вдоль оси, спад поперёк в V).
         /// Плюс точечный свет: плазма подсвечивает лоб аппарата, иначе теневая сторона чёрная.
         /// </summary>
         void AddPlasma()
         {
+            // Rebuild снёс прежний узел оболочки, а меш — сам по себе: освобождаем и сбрасываем ключ, UpdatePlasma соберёт заново.
+            if (sheathMesh != null) Destroy(sheathMesh);
+            sheathMesh = null;
+            sheathSig = null;
             var root = new GameObject("Plasma");
             root.transform.SetParent(transform, false);
             var sh = new GameObject("Sheath");
@@ -712,172 +735,303 @@ namespace Kare.Space.Game
 
         static Texture2D wakeTex;
 
-        /// <summary>
-        /// Оболочка ударного слоя в радиусах борта: поверхность вращения вокруг +Y (направление полёта), начало — лоб
-        /// борта, L — длина борта. Профиль: полуэллипс носа (вершина на ShockStandoff перед лбом), вдоль борта
-        /// до кормы с сужением SheathTail, шейка за кормой до SheathNeckRadius. Цвет вершин — яркость слоя: максимум
-        /// в точке торможения (cos² угла от оси), у плеча 0,2, к корме 0,12, у конца шейки ноль (открытый край не виден).
-        /// </summary>
-        static Mesh SheathMesh(float L)
+        /// <summary>Точка профиля секции: сдвиг оси по X (наклон боковых блоков Р-7), высота в осях пакета, радиус
+        /// и радиус для толщины слоя (с нижней границей SheathLayerFloor).</summary>
+        struct SheathPt { public float X, Y, R, Layer; }
+
+        /// <summary>Накопитель меша оболочки: вершины, нормали наружу, толщина слоя в UV.x (м), треугольники.</summary>
+        sealed class SheathAcc
         {
-            const int seg = 40, cap = 14, side = 6, neck = 10;
-            var px = new List<float>();
-            var pr = new List<float>();
-            var pc = new List<Color>();
-            float x0 = ShockStandoff - SheathNoseDepth;
-            for (int i = 0; i <= cap; i++)
+            public readonly List<Vector3> V = new List<Vector3>(), N = new List<Vector3>();
+            public readonly List<Vector2> UV = new List<Vector2>();
+            public readonly List<int> T = new List<int>();
+            public float MaxLayer;
+
+            public void Vertex(Vector3 p, Vector3 n, float layer)
             {
-                float phi = i * 0.5f * Mathf.PI / cap, c = Mathf.Cos(phi);
-                px.Add(x0 + SheathNoseDepth * c);
-                pr.Add(SheathRadius * Mathf.Sin(phi));
-                pc.Add(Color.Lerp(SheathCool, SheathHot, c) * (0.2f + 0.8f * c * c));
+                V.Add(p); N.Add(n); UV.Add(new Vector2(layer, 0));
+                if (layer > MaxLayer) MaxLayer = layer;
             }
-            float xEnd = Mathf.Min(-L, x0 - 0.5f), rTail = SheathRadius * SheathTail;
-            for (int i = 1; i <= side; i++)
+
+            /// <summary>Сшивает rings подряд идущих колец по seg вершин, начиная с first. Шейдер Cull Off — обход неважен.</summary>
+            public void Stitch(int first, int rings, int seg)
             {
-                float t = i / (float)side;
-                px.Add(Mathf.Lerp(x0, xEnd, t));
-                pr.Add(Mathf.Lerp(SheathRadius, rTail, t));
-                pc.Add(SheathCool * Mathf.Lerp(0.2f, 0.12f, t));
-            }
-            for (int i = 1; i <= neck; i++)
-            {
-                float t = i / (float)neck, s = t * t * (3 - 2 * t);
-                px.Add(xEnd - SheathNeck * t);
-                pr.Add(Mathf.Lerp(rTail, SheathNeckRadius, s));
-                pc.Add(SheathCool * (0.12f * (1 - s)));
-            }
-            int n = px.Count;
-            var verts = new Vector3[n * seg];
-            var norms = new Vector3[n * seg];
-            var cols = new Color[n * seg];
-            for (int j = 0; j < n; j++)
-            {
-                // Нормаль профиля — касательная, повёрнутая на −90°: у вершины смотрит вперёд, у плеча — наружу.
-                int a = Mathf.Max(0, j - 1), b = Mathf.Min(n - 1, j + 1);
-                var tan = new Vector2(px[b] - px[a], pr[b] - pr[a]).normalized;
-                var n2 = new Vector2(tan.y, -tan.x);
+                for (int j = 0; j + 1 < rings; j++)
                 for (int k = 0; k < seg; k++)
                 {
-                    float th = k * 2 * Mathf.PI / seg, cs = Mathf.Cos(th), sn = Mathf.Sin(th);
-                    int idx = j * seg + k;
-                    verts[idx] = new Vector3(pr[j] * cs, px[j], pr[j] * sn);
-                    norms[idx] = new Vector3(n2.y * cs, n2.x, n2.y * sn);
-                    cols[idx] = pc[j];
+                    int i0 = first + j * seg + k, i1 = first + j * seg + (k + 1) % seg, i2 = i0 + seg, i3 = i1 + seg;
+                    T.Add(i0); T.Add(i2); T.Add(i1);
+                    T.Add(i1); T.Add(i2); T.Add(i3);
                 }
             }
-            var tris = new int[(n - 1) * seg * 6];
-            int q = 0;
-            for (int j = 0; j < n - 1; j++)
-            for (int k = 0; k < seg; k++)
+        }
+
+        /// <summary>Ключ меша оболочки: состав секций (builtSignature) и маска перевёрнутых (§6.6). Лишний раз меш не строим.</summary>
+        string sheathSig;
+        int sheathFlip;
+        Mesh sheathMesh;
+        /// <summary>Габарит корпуса без раздутия, в осях пакета (низ пакета — начало): по нему считаются длина следа,
+        /// площадь проекции и положение света.</summary>
+        Bounds sheathHull;
+
+        /// <summary>
+        /// Профиль тела вращения секции снизу вверх (высота — в осях пакета). Форма — та же, что у процедурного корпуса
+        /// Rebuild: шар СА «Востока», усечённый конус капсулы, обтекатель с оживальным носом, профиль Р-7 из ядра; у
+        /// «Старшипа» нос — оживало на верхней доле длины. Перевёрнутая секция (§6.6) стоит вверх ногами: профиль зеркалится.
+        /// </summary>
+        static void SectionProfile(SectionDef s, float baseY, bool flip, List<SheathPt> output)
+        {
+            float len = (float)s.Length, r = (float)s.Radius;
+            var loc = new List<SheathPt>();
+            void P(float y, float rr, float x = 0) =>
+                loc.Add(new SheathPt { X = x, Y = y, R = rr, Layer = Mathf.Max(rr, r * SheathLayerFloor) });
+            if (s.Kind == SectionKind.Capsule && s.Sphere)
             {
-                int i0 = j * seg + k, i1 = j * seg + (k + 1) % seg, i2 = i0 + seg, i3 = i1 + seg;
-                tris[q++] = i0; tris[q++] = i2; tris[q++] = i1;
-                tris[q++] = i1; tris[q++] = i2; tris[q++] = i3;
+                for (int k = 0; k <= 8; k++) { float phi = Mathf.PI * k / 8; P(len * 0.5f * (1 - Mathf.Cos(phi)), r * Mathf.Sin(phi)); }
             }
-            var m = new Mesh { name = "Plasma Sheath", vertices = verts, normals = norms, colors = cols, triangles = tris };
-            m.RecalculateBounds();
-            return m;
+            else if (s.Kind == SectionKind.Capsule) { P(0, r); P(len, r * 0.35f); }
+            else if (s.Kind == SectionKind.Fairing)
+            {
+                P(0, r); P(len * 0.55f, r);
+                for (int k = 1; k <= 6; k++) { float t = k / 6f; P(len * (0.55f + 0.45f * t), r * Mathf.Sqrt(Mathf.Max(0, 1 - t * t))); }
+            }
+            else if (s.Model == SectionModel.R7BlockA || s.Model == SectionModel.R7Booster)
+            {
+                bool booster = s.Model == SectionModel.R7Booster;
+                int n = Mathf.Max(2, Mathf.CeilToInt(len / SheathR7Step));
+                for (int k = 0; k <= n; k++)
+                {
+                    float y = len * k / n;
+                    P(y, (float)(booster ? VesselPresets.R7BoosterRadiusAt(y) : VesselPresets.R7CoreRadiusAt(y)),
+                      booster ? (float)VesselPresets.R7BoosterLean(y) : 0);
+                }
+            }
+            else if (s.Model == SectionModel.Starship)
+            {
+                float y0 = len * (1 - StarshipNoseShare);
+                P(0, r); P(y0, r);
+                for (int k = 1; k <= 6; k++) { float t = k / 6f; P(y0 + (len - y0) * t, r * Mathf.Pow(1 - t, 0.6f)); }
+            }
+            else { P(0, r); P(len, r); }
+            if (flip)
+            {
+                for (int k = 0; k < loc.Count; k++) { var q = loc[k]; q.Y = len - q.Y; loc[k] = q; }
+                loc.Reverse();
+            }
+            foreach (var p in loc) { var q = p; q.Y += baseY; output.Add(q); }
+        }
+
+        /// <summary>Закругляет торцы профиля (оболочка замкнута, открытого края нет); нос, сошедшийся в точку, не трогаем.
+        /// Глубина — доля радиуса торца.</summary>
+        static void CapEnds(List<SheathPt> p, float depthBottom, float depthTop)
+        {
+            if (p.Count == 0) return;
+            var a = p[0];
+            var b = p[p.Count - 1];
+            var bottom = new List<SheathPt>();
+            var top = new List<SheathPt>();
+            if (a.R > 1e-3f)
+                for (int j = 0; j < SheathCapRings; j++)
+                {
+                    float phi = j / (float)SheathCapRings * 0.5f * Mathf.PI;
+                    bottom.Add(new SheathPt { X = a.X, Y = a.Y - depthBottom * a.R * Mathf.Cos(phi), R = a.R * Mathf.Sin(phi), Layer = a.Layer });
+                }
+            if (b.R > 1e-3f)
+                for (int j = 1; j <= SheathCapRings; j++)
+                {
+                    float phi = j / (float)SheathCapRings * 0.5f * Mathf.PI;
+                    top.Add(new SheathPt { X = b.X, Y = b.Y + depthTop * b.R * Mathf.Sin(phi), R = b.R * Mathf.Cos(phi), Layer = b.Layer });
+                }
+            p.InsertRange(0, bottom);
+            p.AddRange(top);
         }
 
         /// <summary>
-        /// Крыло в плане для ударного слоя (§4.6): наибольший горизонтальный WingDef присоединённых секций — полуразмах
-        /// и станции корня передней и задней кромок от носа, в радиусах фюзеляжа. Крыло считаем треугольным: корневая
-        /// хорда 2S/b, линия 1/4 хорд корня — на WingDef.Height над низом секции (так её ставит WingMesh).
+        /// Тело вращения по профилю: off — смещение оси в осях борта, yaw — поворот блока (наклон X-сдвига профиля).
+        /// Нормаль кольца — среднее нормалей соседних отрезков профиля: на цилиндре смотрит наружу, на торце вдоль оси,
+        /// на ступеньке между секциями — под 45°. Эти же нормали шейдер использует для раздутия и для наветренности.
         /// </summary>
-        bool WingPlanform(double com, double length, float r, out Vector3 wing)
+        static void Revolve(SheathAcc acc, List<SheathPt> src, Vector3 off, Quaternion yaw)
         {
-            wing = default;
+            var p = new List<SheathPt>(src.Count);
+            foreach (var q in src)
+                if (p.Count == 0 || Mathf.Abs(q.Y - p[p.Count - 1].Y) > 1e-4f || Mathf.Abs(q.R - p[p.Count - 1].R) > 1e-4f) p.Add(q);
+            int m = p.Count;
+            if (m < 2) return;
+            // Нормаль отрезка в (радиально, вдоль оси): профиль идёт снизу вверх, наружу — вправо от хода.
+            var sn = new Vector2[m - 1];
+            for (int j = 0; j < m - 1; j++) sn[j] = new Vector2(p[j + 1].Y - p[j].Y, -(p[j + 1].R - p[j].R)).normalized;
+            int first = acc.V.Count;
+            for (int j = 0; j < m; j++)
+            {
+                var nn = ((j > 0 ? sn[j - 1] : Vector2.zero) + (j < m - 1 ? sn[j] : Vector2.zero)).normalized;
+                if (nn.sqrMagnitude < 0.5f) nn = Vector2.right;
+                var centre = off + yaw * new Vector3(p[j].X, 0, 0) + new Vector3(0, p[j].Y, 0);
+                for (int k = 0; k < SheathSeg; k++)
+                {
+                    float th = k * 2 * Mathf.PI / SheathSeg;
+                    var u = new Vector3(Mathf.Cos(th), 0, Mathf.Sin(th));
+                    acc.Vertex(centre + u * p[j].R, u * nn.x + Vector3.up * nn.y, SheathLayer * p[j].Layer);
+                }
+            }
+            acc.Stitch(first, m, SheathSeg);
+        }
+
+        /// <summary>
+        /// Консоль крыла или киль оболочкой — вытянутый эллипс сечения (хорда × толщина пластины) вдоль линии 1/4 хорд от
+        /// корня к концу, с закруглением обоих концов. Геометрия — та же, что у WingMesh (хорда постоянная, стреловидность
+        /// сдвигает конец назад), чтобы слой лежал на пластине, которую считает аэродинамика. Передняя кромка получает
+        /// нормаль вперёд, поэтому шейдер раздувает и подсвечивает именно её. f0 — доля размаха, с которой начинается слой.
+        /// </summary>
+        static void WingLoft(SheathAcc acc, Vector3 rootQ, Vector3 tipQ, Vector3 ch, Vector3 nDir, float f0, float th,
+                             float layer, float baseY, Vector3 off, Quaternion yaw)
+        {
+            const int caps = 3;
+            float c = ch.magnitude;
+            var chd = ch / c;
+            nDir = nDir.normalized;
+            var span = tipQ - rootQ;
+            var spanU = span.normalized;
+            float capLen = Mathf.Max(th * 0.5f, 0.2f);
+            var st = new List<(Vector3 q, float scale, float side)>();
+            for (int j = 0; j < caps; j++)
+            {
+                float phi = j / (float)caps * 0.5f * Mathf.PI;
+                st.Add((rootQ + span * f0 - spanU * (capLen * Mathf.Cos(phi)), Mathf.Sin(phi), -1));
+            }
+            for (int j = 0; j <= WingSheathSteps; j++) st.Add((rootQ + span * Mathf.Lerp(f0, 1, j / (float)WingSheathSteps), 1, 0));
+            for (int j = 1; j <= caps; j++)
+            {
+                float phi = j / (float)caps * 0.5f * Mathf.PI;
+                st.Add((tipQ + spanU * (capLen * Mathf.Sin(phi)), Mathf.Cos(phi), 1));
+            }
+            int first = acc.V.Count;
+            foreach (var (q, scale, side) in st)
+            {
+                var centre = q - ch * 0.25f;
+                for (int k = 0; k < WingSheathSeg; k++)
+                {
+                    float a = k * 2 * Mathf.PI / WingSheathSeg, ca = Mathf.Cos(a), sa = Mathf.Sin(a);
+                    var p = centre + chd * (0.5f * c * ca * scale) + nDir * (0.5f * th * sa * scale);
+                    // Нормаль эллипса, у концевых колец — с наклоном вдоль размаха наружу.
+                    var nr = (chd * (ca / (0.5f * c)) + nDir * (sa / (0.5f * th))).normalized;
+                    nr = (nr * scale + spanU * (side * (1 - scale))).normalized;
+                    acc.Vertex(off + yaw * p + new Vector3(0, baseY, 0), yaw * nr, layer);
+                }
+            }
+            acc.Stitch(first, st.Count, WingSheathSeg);
+        }
+
+        /// <summary>Крылья и килевые плоскости секции (WingDef) в оболочку — по той же схеме, что WingMesh. Мелкие символические
+        /// WingDef (WingSheathMinArea) пропускаем.</summary>
+        static void AddWings(SheathAcc acc, SectionDef s, float baseY, Vector3 off, Quaternion yaw)
+        {
+            if (s.Wings == null) return;
+            float secR = (float)s.Radius;
+            foreach (var w in s.Wings)
+            {
+                if (w.Area < WingSheathMinArea || w.Span <= 0) continue;
+                float c = (float)w.MeanChord, b = (float)w.Span;
+                if (c <= 0) continue;
+                float sweep = Mathf.Tan((float)w.Sweep * Mathf.Deg2Rad), th = Mathf.Max(WingThinMin, WingThickness * c);
+                float layer = SheathLayer * secR * WingLayerShare;
+                var rootQ = new Vector3(-(float)w.Offset, (float)w.Height, 0);
+                if (w.Vertical)
+                {
+                    var tipV = rootQ + new Vector3(-b, -b * sweep, 0);
+                    WingLoft(acc, rootQ, tipV, Vector3.up * c, Vector3.forward, 0, th, layer, baseY, off, yaw);
+                    continue;
+                }
+                float inc = (float)w.Incidence * Mathf.Deg2Rad, dih = (float)w.Dihedral * Mathf.Deg2Rad, half = b * 0.5f;
+                var ch = new Vector3(-Mathf.Sin(inc), Mathf.Cos(inc), 0) * c;
+                float f0 = Mathf.Clamp(WingRootShare * secR / half, 0, 0.5f);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    var span = new Vector3(-Mathf.Sin(dih), 0, side * Mathf.Cos(dih));
+                    var tip = rootQ + span * half + Vector3.down * (half * sweep);
+                    WingLoft(acc, rootQ, tip, ch, Vector3.Cross(span, ch), f0, th, layer, baseY, off, yaw);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Меш оболочки ударного слоя (§4.6) по составу борта: силуэт секций, раздутый по нормалям в шейдере. Основная стопка
+        /// (на оси пакета) — один сквозной профиль без швов между секциями; радиальные блоки и орбитер сбоку (Beside) —
+        /// отдельные тела на своих осях, как стоят их Part; крылья и киль — эллиптические «колбаски» вдоль пластины.
+        /// Секции под обтекателем не светятся. Меш в осях пакета (начало — низ), узел оболочки стоит со сдвигом −ЦМ.
+        /// От направления потока меш не зависит — только от состава секций, поэтому пересобирается при отделении ступени.
+        /// </summary>
+        Mesh BuildSheathMesh(float rMax)
+        {
             var secs = Vessel.Design.Sections;
-            WingDef best = null;
-            int at = -1;
+            var acc = new SheathAcc();
+            // Профили секций основной стопки, по возрастанию высоты низа (порядок в Design — снизу вверх, но не гарантия).
+            var stack = new List<(float y, bool engine, List<SheathPt> pts)>();
             for (int i = 0; i < secs.Count; i++)
             {
-                if (!Vessel.Attached[i] || secs[i].Wings == null || secs[i].IsRadial) continue;
-                foreach (var w in secs[i].Wings)
-                    if (!w.Vertical && (best == null || w.Span > best.Span)) { best = w; at = i; }
+                if (!Vessel.Attached[i] || Vessel.IsEnclosed(i)) continue;
+                var s = secs[i];
+                float baseY = (float)baseHeight[i];
+                bool flip = Vessel.Flipped[i];
+                int copies = s.IsRadial ? s.RadialCount : 1;
+                for (int c = 0; c < copies; c++)
+                {
+                    // Положение и поворот — те же три случая, что у Part в Rebuild.
+                    Vector3 off = Vector3.zero;
+                    Quaternion yaw = Quaternion.identity;
+                    bool beside = false;
+                    if (s.IsRadial)
+                    {
+                        float ang = 2 * Mathf.PI * c / s.RadialCount + (float)s.RadialPhase;
+                        off = new Vector3(Mathf.Cos(ang), 0, Mathf.Sin(ang)) * (float)s.RadialOffset;
+                        yaw = Quaternion.Euler(0, -ang * Mathf.Rad2Deg, 0);
+                    }
+                    else if (s.Beside && i > 0 && Vessel.Attached[0] && !secs[0].IsRadial)
+                    {
+                        off = new Vector3(-(float)s.BesideOffset, 0, 0);
+                        beside = true;
+                    }
+                    else if (Vessel.RadialYaw != 0) yaw = Quaternion.Euler(0, -(float)Vessel.RadialYaw * Mathf.Rad2Deg, 0);
+                    var pts = new List<SheathPt>();
+                    SectionProfile(s, baseY, flip, pts);
+                    if (s.IsRadial || beside)
+                    {
+                        CapEnds(pts, s.HasEngine ? SheathEngineDepth : SheathCapDepth, SheathCapDepth);
+                        Revolve(acc, pts, off, yaw);
+                    }
+                    else
+                    {
+                        int at = stack.Count;
+                        while (at > 0 && stack[at - 1].y > baseY) at--;
+                        stack.Insert(at, (baseY, s.HasEngine, pts));
+                    }
+                    // Перевёрнутая секция (ЛМ после перестроения) крыльев не несёт.
+                    if (!flip) AddWings(acc, s, baseY, off, yaw);
+                }
             }
-            if (best == null || best.Span <= 0) return false;
-            double rootChord = 2 * best.Area / best.Span, bottom = baseHeight[at] - com, nose = length - com;
-            double le = (nose - (bottom + best.Height + 0.25 * rootChord)) / r;
-            double te = (nose - System.Math.Max(bottom, bottom + best.Height - 0.75 * rootChord)) / r;
-            float L = (float)(length / r);
-            float leR = Mathf.Clamp((float)le, 1, L), teR = Mathf.Clamp((float)te, leR + 0.5f, L + 0.5f);
-            // Ключ меша квантуется шагом SheathStep, чтобы дрожь расчёта не пересобирала меш каждый кадр.
-            wing = new Vector3(Mathf.Round((float)(best.Span * 0.5 / r) / SheathStep) * SheathStep,
-                               Mathf.Round(leR / SheathStep) * SheathStep, Mathf.Round(teR / SheathStep) * SheathStep);
-            return true;
-        }
-
-        /// <summary>
-        /// Оболочка крылатого борта в радиусах фюзеляжа: вдоль +Y от носа (0) к корме (−L), +X — наветренная сторона,
-        /// Z — размах. Сечение — два полуэллипса (к ветру WingSheathWind, от ветра WingSheathLee) с полушириной w(y):
-        /// у носа колпак, вдоль фюзеляжа WingSheathBody, от корня передней кромки (wing.y) — расширение до полуразмаха
-        /// у задней (wing.z), за кормой хвост WingSheathTail с яркостью в ноль (открытый край не виден).
-        /// Цвет вершин — яркость: носок 1, передние кромки WingGlowEdge, брюхо WingGlowBelly, спина WingGlowLee.
-        /// </summary>
-        static Mesh WingedSheathMesh(float L, Vector3 wing)
-        {
-            const int seg = 48, cap = 10;
-            float halfSpan = Mathf.Max(WingSheathBody, wing.x * WingSheathSpan);
-            var py = new List<float>();
-            var pw = new List<float>();
-            var ps = new List<float>();   // доля сечения от полного (колпак)
-            var pn = new List<float>();   // «носовость»: 1 в точке торможения
-            var pe = new List<float>();   // вес передней кромки
-            var pf = new List<float>();   // гашение хвоста
-            float y0 = ShockStandoff - SheathNoseDepth;
-            for (int i = 0; i <= cap; i++)
+            if (stack.Count > 0)
             {
-                float phi = i * 0.5f * Mathf.PI / cap, c = Mathf.Cos(phi);
-                py.Add(y0 + SheathNoseDepth * c); pw.Add(WingSheathBody); ps.Add(Mathf.Sin(phi));
-                pn.Add(c * c); pe.Add(0); pf.Add(1);
+                var line = new List<SheathPt>();
+                foreach (var e in stack) line.AddRange(e.pts);
+                CapEnds(line, stack[0].engine ? SheathEngineDepth : SheathCapDepth, SheathCapDepth);
+                Revolve(acc, line, Vector3.zero, Quaternion.identity);
             }
-            float end = L + WingSheathTail;
-            int body = Mathf.Max(4, Mathf.CeilToInt((end + y0) / SheathStep));
-            for (int i = 1; i <= body; i++)
-            {
-                float d = Mathf.Lerp(-y0, end, i / (float)body);
-                float t = Mathf.Clamp01((d - wing.y) / Mathf.Max(0.5f, wing.z - wing.y));
-                py.Add(-d);
-                pw.Add(Mathf.Lerp(WingSheathBody, halfSpan, t));
-                ps.Add(1);
-                pn.Add(0);
-                // Кромка горит там, где крыло расширяется (она набегает на поток), к задней кромке гаснет.
-                pe.Add(d > wing.y ? 1 - t * t : 0);
-                pf.Add(d > L ? 1 - Mathf.SmoothStep(0, 1, (d - L) / WingSheathTail) : 1);
-            }
-            int n = py.Count;
-            var verts = new Vector3[n * seg];
-            var cols = new Color[n * seg];
-            for (int j = 0; j < n; j++)
-            for (int k = 0; k < seg; k++)
-            {
-                float th = k * 2 * Mathf.PI / seg, cs = Mathf.Cos(th), sn = Mathf.Sin(th);
-                float hx = cs >= 0 ? WingSheathWind : WingSheathLee;
-                verts[j * seg + k] = new Vector3(hx * cs * ps[j], py[j], pw[j] * sn * ps[j]);
-                // Наветренность: 1 под брюхом, 0 над спиной; кромка — край сечения (|sin| → 1).
-                float wind = 0.5f + 0.5f * cs;
-                wind *= wind;
-                float b = Mathf.Lerp(WingGlowLee, WingGlowBelly, wind);
-                float s2 = sn * sn;
-                b = Mathf.Max(b, WingGlowEdge * pe[j] * s2 * s2 * s2);
-                b = Mathf.Lerp(b, 1, pn[j] * wind);
-                cols[j * seg + k] = Color.Lerp(SheathCool, SheathHot, b) * (b * pf[j]);
-            }
-            var tris = new int[(n - 1) * seg * 6];
-            int q = 0;
-            for (int j = 0; j < n - 1; j++)
-            for (int k = 0; k < seg; k++)
-            {
-                int i0 = j * seg + k, i1 = j * seg + (k + 1) % seg, i2 = i0 + seg, i3 = i1 + seg;
-                tris[q++] = i0; tris[q++] = i2; tris[q++] = i1;
-                tris[q++] = i1; tris[q++] = i2; tris[q++] = i3;
-            }
-            // Нормали — для свечения ∝ 1/|N·V| (шейдер Cull Off, знак не важен).
-            var m = new Mesh { name = "Plasma Sheath (winged)", vertices = verts, colors = cols, triangles = tris };
-            m.RecalculateNormals();
-            m.RecalculateBounds();
+            if (acc.V.Count == 0) return null;
+            var hull = new Bounds(acc.V[0], Vector3.zero);
+            foreach (var p in acc.V) hull.Encapsulate(p);
+            sheathHull = hull;
+            var m = new Mesh { name = "Plasma Sheath (parts)" };
+            if (acc.V.Count > 60000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            m.SetVertices(acc.V);
+            m.SetNormals(acc.N);
+            m.SetUVs(0, acc.UV);
+            var white = new Color[acc.V.Count];
+            for (int i = 0; i < white.Length; i++) white[i] = Color.white;
+            m.colors = white;
+            m.SetTriangles(acc.T, 0);
+            // Вершинная стадия уносит вершины за габарит: на слой наружу и в след на SheathWake радиусов.
+            float pad = acc.MaxLayer + SheathWake * rMax;
+            m.bounds = new Bounds(hull.center, hull.size + Vector3.one * (2 * pad));
             return m;
         }
 
@@ -920,43 +1074,35 @@ namespace Kare.Space.Game
             plasma.gameObject.SetActive(on);
             if (!on) return;
             float r = (float)radius;
-            // Лоб — тот торец, что идёт первым; оболочка строится от него вдоль потока, ударная волна чуть впереди.
-            var nose = transform.up;
-            float front = Vector3.Dot(nose, airflow) >= 0 ? (float)(length - com) : (float)-com;
-            var lead = transform.TransformPoint(0, front, 0);
-            var bow = lead + airflow * (r * ShockStandoff);
-            float L = Mathf.Max(SheathStep, Mathf.Round((float)length / r / SheathStep) * SheathStep);
-            bool winged = WingPlanform(com, length, r, out var wing);
-            // Начало следа (wakeFrom) и отступ до него по потоку: у капсулы — от лба через весь борт и шейку, у крылатого —
-            // сразу за задней кромкой (оболочка идёт вдоль корпуса, а не вдоль потока).
-            Vector3 wakeFrom = lead;
-            float wakeStart = (float)length + r * WakeStart;
-            if (winged)
+            // Меш оболочки — по составу секций, а не по потоку: пересобираем только при смене состава (отделение ступени,
+            // перестроение ЛМ). Узел оболочки (ниже) — начало пакета, меш в осях пакета.
+            int flipMask = 0;
+            for (int i = 0; i < Vessel.Flipped.Length && i < 31; i++) if (Vessel.Flipped[i]) flipMask |= 1 << i;
+            if (!ReferenceEquals(sheathSig, builtSignature) || flipMask != sheathFlip)
             {
-                // Оболочка в осях корпуса от носа; +X меша — наветренная сторона: брюхо (+X борта, WingDef.Offset к −X)
-                // или спина, если поток набегает сверху. Поворот вокруг оси корпуса размах не меняет.
-                var up = transform.up;
-                var windward = Vector3.Dot(airflow, transform.right) >= 0 ? transform.right : -transform.right;
-                var noseAt = transform.TransformPoint(0, (float)(length - com), 0);
-                plasma.SetPositionAndRotation(noseAt, Quaternion.LookRotation(Vector3.Cross(windward, up), up));
-                // Свет — под брюхом у середины корпуса: там основная площадь слоя.
-                plasmaLight.transform.position = noseAt - up * ((float)length * 0.45f) + windward * (r * 2);
-                wakeFrom = transform.TransformPoint(0, (float)-com, 0) + windward * (r * WingWakeGap);
-                wakeStart = r * WingWakeGap;
+                if (sheathMesh != null) Destroy(sheathMesh);
+                sheathMesh = BuildSheathMesh(r);
+                sheathMf.sharedMesh = sheathMesh;
+                sheathSig = builtSignature;
+                sheathFlip = flipMask;
             }
-            else
-            {
-                plasma.SetPositionAndRotation(lead, Quaternion.FromToRotation(Vector3.up, airflow));
-                plasmaLight.transform.position = bow;
-            }
-            if (L != sheathL || (winged ? !wing.Equals(sheathWing) : !float.IsNaN(sheathWing.x)))
-            {
-                if (sheathMf.sharedMesh != null) Destroy(sheathMf.sharedMesh);
-                sheathMf.sharedMesh = winged ? WingedSheathMesh(L, wing) : SheathMesh(L);
-                sheathL = L;
-                sheathWing = winged ? wing : new Vector3(float.NaN, 0, 0);
-            }
-            sheath.localScale = Vector3.one * r;
+            if (sheathMesh == null) { plasma.gameObject.SetActive(false); return; }
+            sheath.localPosition = new Vector3(0, (float)-com, 0);
+            // Курс борта в осях меша: оболочка и растяжка в след зависят от него в вершинной стадии, меш не трогаем.
+            var flow = transform.InverseTransformDirection(airflow);
+            float fx = Mathf.Abs(flow.x), fy = Mathf.Abs(flow.y), fz = Mathf.Abs(flow.z);
+            var size = sheathHull.size;
+            var ext = sheathHull.extents;
+            // Вынос корпуса от центра габарита вдоль потока и площадь его проекции на плоскость ⟂ потоку (по ящику габарита).
+            float extent = ext.x * fx + ext.y * fy + ext.z * fz;
+            float proj = Mathf.Max(size.y * size.z * fx + size.x * size.z * fy + size.x * size.y * fz, 1e-3f);
+            float areaGlow = Mathf.Clamp(Mathf.Pow(4 * r * r / proj, AreaGlowExp), AreaGlowMin, 1);
+            var center = transform.TransformPoint(sheathHull.center + new Vector3(0, (float)-com, 0));
+            // Свет — у лба по ходу: корпус, развёрнутый брюхом, подсвечивается с брюха, а не с носа.
+            plasmaLight.transform.position = center + airflow * (extent + r * ShockStandoff);
+            // След начинается за хвостом корпуса: от центра габарита назад по потоку на вынос и WakeStart.
+            Vector3 wakeFrom = center;
+            float wakeStart = extent + r * WakeStart;
             float flicker = Flicker(PlasmaFlicker, 17);
             var cam = Camera.main;
             float wakeLen = wakeStart + r * PlasmaWakeLength * (0.3f + 0.7f * k) * flicker;
@@ -980,16 +1126,24 @@ namespace Kare.Space.Game
             plasmaWake.SetPosition(0, wakeFrom - airflow * wakeStart);
             plasmaWake.SetPosition(1, wakeFrom - airflow * Mathf.Lerp(wakeStart, wakeLen, 0.25f));
             plasmaWake.SetPosition(2, wakeFrom - airflow * wakeLen);
-            // Крылатый: след во всю ширину слоя за задней кромкой, а не по диаметру фюзеляжа.
-            plasmaWake.widthMultiplier = winged ? r * Mathf.Max(1, wing.x * WingWakeWidth) : r;
+            // Ширина — радиус борта, у широкого брюха/крыла шире (WakeWidthExp): у капсулы ровно r, как было.
+            plasmaWake.widthMultiplier = r * Mathf.Pow(Mathf.Sqrt(proj) / (2 * r), WakeWidthExp);
             float nits = PlasmaNits * k * flicker;
             ReportPlume(nits);
             ReportPlasma(PlasmaNits * k);
-            // Цвет — в вершинах оболочки; мягкое касание корпуса и гашение у камеры — в радиусах борта.
+            // Яркость и цвет — в шейдере по потоку и нормалям; мягкое касание корпуса и гашение у камеры — в метрах.
+            // Растяжка в след и толщина слоя растут с нагревом, как и длина ленты следа.
             mpb.Clear();
             mpb.SetColor("_EmissiveColor", new Color(nits, nits, nits, 1));
             mpb.SetFloat("_SoftDist", r * 0.15f);
             mpb.SetFloat("_NearFade", r * 2);
+            mpb.SetVector("_Flow", new Vector4(flow.x, flow.y, flow.z, 0));
+            mpb.SetFloat("_Inflate", Mathf.Lerp(SheathThinInflate, 1, k));
+            mpb.SetFloat("_WakeLen", r * SheathWake * (0.3f + 0.7f * k));
+            mpb.SetVector("_Shape", new Vector4(SheathFront, SheathLeeLayer, SheathWindPow, SheathWakePow));
+            mpb.SetVector("_Glow", new Vector4(SheathSideGlow, areaGlow, 0, 0));
+            mpb.SetVector("_HotTint", SheathHot);
+            mpb.SetVector("_CoolTint", SheathCool);
             sheathR.SetPropertyBlock(mpb);
             SetEmissive(plasmaWake, PlasmaTint * (PlasmaWakeNits * k * wakeFade));
             // Сила света = яркость × видимая площадь ударного слоя (диск радиуса r).

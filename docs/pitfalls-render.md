@@ -400,3 +400,18 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
   to the main camera only — in the right half they may look flat/turned. Sky/exposure/sun follow `Main` too.
 - Objects hidden by distance (`VesselView`, `RecoveryDeckView`, `LaunchPadView`) check `FlightView.Near(pos, dist)`,
   not `pos.magnitude` — with it the barge is drawn in the right half 12 000 km from the origin (split3, 05.10.2026).
+
+## Plasma sheath follows the parts, not the flow (05.10.2026, `VesselView.BuildSheathMesh`, `PlasmaSheathHDRP.shader`)
+- Symptom: Starship falling belly-first got a sheath shaped like a capsule along the flow (old `SheathMesh(L)` was a surface
+  of revolution from the leading end; winged vessels had a separate `WingedSheathMesh`).
+- Now one mesh for every vessel: hull silhouette from the section stack (profiles mirror `Rebuild`) plus real wings/fins as
+  elliptic lofts. The mesh is rebuilt only when `builtSignature` or the flip mask changes (staging), never per frame.
+- The flow goes to the shader every frame as `_Flow` (heading, local axes of the mesh): vertices are pushed along their normals
+  on the windward side (`N·F > 0`) and dragged back along `-F` on the lee side, brightness `~ (N·F)^2`. Same mesh works for
+  nose-first, belly-first and tail-first.
+- Starship flaps (`StarshipFlaps`, Area 1) are symbolic and skipped (`WingSheathMinArea = 4`); do not use `Surfaces != null`
+  as the "real wing" test — the orbiter and Buran have it too. Wings of flipped sections (§6.6) are skipped.
+- Big flat undersides brighten the frame: brightness is scaled by `(4r²/projected area)^AreaGlowExp`, clamped, 1 for capsules.
+- Keep `ReportPlasma(PlasmaNits*k)` — night exposure depends on it. Keep `MaterialPropertyBlock.Clear()` and use `SetVector`
+  for tints (SetColor would gamma-convert them).
+- Not checked in Play (visual): FBX parts are approximated by the procedural profiles of `Rebuild`.

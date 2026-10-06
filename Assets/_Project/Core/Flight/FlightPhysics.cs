@@ -376,8 +376,9 @@ namespace Kare.Space.Core
             v.AeroControlTorque = Vector3d.zero;
             v.ControlDeflection = Vector3d.zero;
             bool rolling = v.RollSpeed > 0 && v.Situation == Situation.Landed;
-            if (rolling) StepRollout(v, t, dt);
+            if (rolling) { StepRollout(v, t, dt); if (!v.Alive) return; }
             else if (v.IsRover && v.Situation == Situation.Landed) DriveRover(v, dt);
+            else if (v.TowerCaught) TowerCatch.Lower(v, dt);
             else SettleOnLegs(v, dt);
             StepSuspension(v, dt);
             UpdateLandedPose(v, t + dt);
@@ -534,6 +535,8 @@ namespace Kare.Space.Core
             else v.SettledTimer = Math.Max(0, v.SettledTimer - dt);
 
             CheckStructure(v, g, sinA, leadDef, dt);
+            // Башня с палочками (RecoveryDef.TowerCatch) — до грунта: поймала или разбила — касание не считаем.
+            if (v.Alive && TowerCatch.Step(v, body, t + dt, dt, g.Com, g.Length, g.Hull)) return;
             if (v.Alive) CheckContact(v, body, spin, g, t + dt);
         }
 
@@ -779,6 +782,12 @@ namespace Kare.Space.Core
         /// </summary>
         public const double GearMaxNoseUp = 0.35, GearSinkLimit = 3, GearMaxSpeed = 130;
         /// <summary>
+        /// Шасси вне бетона (§6.4), м/с: колёса и стойки «Шаттла» рассчитаны на полосу — на грунте выше этой путевой
+        /// колесо зарывается и стойку срывает (касание или сход с полосы). Медленнее — борт просто вязнет и встаёт.
+        /// Пара: бетон — Runways.Paved (полоса + Runways.Overrun по концам, + Runways.Shoulder по бокам).
+        /// </summary>
+        public const double OffRunwaySpeed = 15;
+        /// <summary>
         /// Пробег (§6.4): торможение колёсами ≈ 2,5 м/с² (у «Шаттла» с парашютом ≈ 2,4 при 2,7 км пробега от 100 м/с);
         /// нос опускается на переднюю стойку за NoseDownTime; руление A/D — RolloutTurnRate при полном отклонении.
         /// </summary>
@@ -807,6 +816,12 @@ namespace Kare.Space.Core
                 return true;
             }
             var snapped = up * (body.Radius + height);
+            var rw = Runways.Paved(body, o.Inverse * snapped);
+            if (rw == null && hs > OffRunwaySpeed)
+            {
+                v.Destroy($"Шасси сломано: касание вне полосы на {hs:F0} м/с");
+                return true;
+            }
             v.Situation = Situation.Landed;
             v.AnchorBodyFixed = o.Inverse * snapped;
             v.Suspension = 0;
@@ -820,9 +835,13 @@ namespace Kare.Space.Core
             v.RollDir = o.Inverse * dirP;
             v.RollSpeed = Math.Max(hs, 0.01);
             UpdateLandedPose(v, t);
-            var rw = Runways.At(body, v.AnchorBodyFixed);
-            v.Raise(rw != null ? $"Касание: {rw.Name}, {hs:F0} м/с, снижение {sink:F1} м/с"
-                               : $"Касание вне полосы: {hs:F0} м/с, снижение {sink:F1} м/с");
+            if (rw == null) v.Raise($"Касание вне полосы: {hs:F0} м/с, снижение {sink:F1} м/с");
+            else
+            {
+                // Где коснулся: от порога (along от середины + полдлины) и от оси — видно качество захода.
+                rw.Locate(body, v.AnchorBodyFixed, out double along, out double cross);
+                v.Raise($"Касание: {rw.Name}, {hs:F0} м/с, снижение {sink:F1} м/с, {along + rw.HalfLength:F0} м от порога, {cross:+0;-0} м от оси");
+            }
             return true;
         }
 
@@ -872,6 +891,14 @@ namespace Kare.Space.Core
             var Z = -Vector3d.Cross(X, Y);
             var target = QuaternionD.FromBasis(X.SwapYZ, Y.SwapYZ, Z.SwapYZ);
             v.AttitudeBodyFixed = QuaternionD.Slerp(v.AttitudeBodyFixed, target, Math.Min(1, dt / NoseDownTime));
+            // Сход с бетона (§6.4): колесо на грунте быстрее OffRunwaySpeed срывает стойку, медленнее — борт вязнет.
+            // Касание вне полосы на малой скорости катится по грунту так же — и вязнет на первом шаге.
+            if (Runways.Paved(body, v.AnchorBodyFixed) == null)
+            {
+                if (v.RollSpeed > OffRunwaySpeed) { v.Destroy($"Сход с полосы на {v.RollSpeed:F0} м/с: шасси сломано"); return; }
+                if (v.RollSpeed > 0) { v.RollSpeed = 0; v.Raise("Шасси увязло в грунте"); }
+                return;
+            }
             if (v.RollSpeed <= 0) v.Raise("Остановка на полосе");
         }
 
@@ -920,8 +947,8 @@ namespace Kare.Space.Core
                 v.Destroy($"Удар о поверхность: {body.Name}, {speed:F0} м/с");
                 return;
             }
-            // Super Heavy без опор: у башни касание держат её «палочки» (RecoveryDef.TowerCatch).
-            if (!water && speed > StowedCrashSpeed && !v.LegsDown && !BoosterLandingAutopilot.CaughtByTower(v, body, bf))
+            // Без опор грунт не держит: Super Heavy и корабль ловят палочки (TowerCatch.Step) — промах падает сюда.
+            if (!water && speed > StowedCrashSpeed && !v.LegsDown)
             {
                 v.Destroy($"Посадка на сложенные опоры: {body.Name}, {speed:F1} м/с");
                 return;

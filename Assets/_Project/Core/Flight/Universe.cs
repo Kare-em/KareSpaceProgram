@@ -234,7 +234,7 @@ namespace Kare.Space.Core
                 d.NoCollideUntil = Time + CollisionGrace;
                 d.Event += OnVesselEvent;
                 Vessels.Add(d);
-                var pilot = BoosterLandingAutopilot.TryStart(d);
+                var pilot = BoosterLandingAutopilot.TryStart(d, parent);
                 if (pilot != null) Recoveries.Add(pilot);
             }
             for (int i = -1; i < parts.Count; i++)

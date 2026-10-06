@@ -45,6 +45,13 @@ namespace Kare.Space.Core
 
         /// <summary>Стартовый стол OLP-A на Starbase (Бока-Чика, Техас); башня ловли — рядом с ним.</summary>
         public const double StarbaseLat = 25.9969, StarbaseLon = -97.1573;
+        /// <summary>Высота стола OLP-A, м (LaunchSite «starbase»). У OLP-B стола под башней нет — корабль висит над грунтом.</summary>
+        public const double StarbasePadHeight = 3;
+        /// <summary>
+        /// Длины корпусов, м, и цапфы ниже носа, м: у Super Heavy — под решётчатыми рулями (≈ 6 м), у корабля — под
+        /// передними закрылками (≈ 11 м). Пара: RecoveryDef.ArmHeight и рисунок палочек в LaunchPadView.
+        /// </summary>
+        public const double SuperHeavyLength = 71 + 1.8, ShipLength = 50.3, SuperHeavyPinsFromTop = 6, ShipPinsFromTop = 11;
 
         /// <summary>
         /// Запас Super Heavy на возврат, кг. Пара: разворотный импульс 13 Raptor к башне (≈ 2,5 км/с: модель не дросселирует
@@ -61,14 +68,16 @@ namespace Kare.Space.Core
         public const double SuperHeavyRcsTorque = 3e6;
 
         /// <summary>
-        /// Момент управления корабля, Н·м: РСУ и закрылки вместе (закрылки только вид, их момент — здесь). Пара: инерция
-        /// пустого корабля ≈ 130 т × 50² / 12 ≈ 2,7·10⁷ кг·м² → поворот на 90° «брюхом» ≈ 10 с.
+        /// Момент РСУ корабля, Н·м (закрылки — свой момент на напоре, StarshipFlapArea). Пара: инерция пустого корабля
+        /// ≈ 130 т × 50² / 12 ≈ 2,7·10⁷ кг·м² → поворот на 90° «брюхом» ≈ 10 с.
         /// </summary>
         public const double StarshipRcsTorque = 3e6;
+        /// <summary>Закрылки S30, м²: 2 носовых ≈ 2 × 20 и 2 кормовых ≈ 2 × 40 (SectionDef.FlapArea).</summary>
+        public const double StarshipFlapArea = 120;
 
         /// <summary>
-        /// Ловля Super Heavy башней (IFT-5, 13.10.2024 — первая ловля «палочками» Mechazilla). Упрощение: мягкая посадка в
-        /// круге DeckRadius у башни (RecoveryDef.TowerCatch). Входной импульс — упрощение (у настоящего его нет): сопротивление
+        /// Ловля Super Heavy башней (IFT-5, 13.10.2024 — первая ловля «палочками» Mechazilla): цапфы под решётчатыми
+        /// рулями ложатся на сведённые палочки (TowerCatch). Входной импульс — упрощение (у настоящего его нет): сопротивление
         /// модели «хвостом вперёд» мало, без него на 12 км ≈ 1250 м/с и посадочному не хватает высоты (удар 85 м/с).
         /// </summary>
         public static RecoveryDef StarbaseCatch() => new RecoveryDef
@@ -77,6 +86,9 @@ namespace Kare.Space.Core
             TargetName = "башня Starbase",
             TargetLat = StarbaseLat, TargetLon = StarbaseLon,
             AtSea = false, DeckHeight = 0, DeckRadius = 50, TowerCatch = true,
+            ArmLowered = StarbasePadHeight + Core.TowerCatch.HangClearance + SuperHeavyLength - SuperHeavyPinsFromTop,
+            ArmHeight = StarbasePadHeight + Core.TowerCatch.HangClearance + SuperHeavyLength - SuperHeavyPinsFromTop + Core.TowerCatch.CatchLift,
+            PinsFromTop = SuperHeavyPinsFromTop,
             Reserve = SuperHeavyReserve,
             BurnEngines = 13, LandingEngines = 3,
             EntryAltitude = 70000, EntryDv = 600,
@@ -107,15 +119,53 @@ namespace Kare.Space.Core
         public const double ShipSplashLat = -25.93, ShipSplashLon = 68.42;
 
         /// <summary>
+        /// Второй стол Starbase (OLP-B) со своей башней — к ней возвращается корабль (миссия starship_catch), к первой —
+        /// Super Heavy. Координаты приблизительные: ≈ 280 м к северо-востоку от OLP-A. Башня ловит только борт, чья
+        /// секция назначила её целью (TowerCatch.Def): чужие палочки корпус не видит.
+        /// </summary>
+        public const double StarbaseBLat = 25.9984, StarbaseBLon = -97.1548;
+
+        /// <summary>
+        /// Ловля корабля башней OLP-B после орбитального полёта (§6.9). Сход с орбиты — импульсом автопилота миссии
+        /// (MissionAutopilot.StarshipOrbital), точную наводку делает этот пилот разворотным импульсом в вакууме
+        /// (BoostbackTolerance): подъёмной силы у корпуса в модели нет, и после входа промах правит только посадочный импульс.
+        /// </summary>
+        public static RecoveryDef StarbaseShipCatch() => new RecoveryDef
+        {
+            StageName = "Starship S33",
+            TargetName = "башня Starbase B",
+            TargetLat = StarbaseBLat, TargetLon = StarbaseBLon,
+            AtSea = false, DeckHeight = 0, DeckRadius = 50, TowerCatch = true,
+            ArmLowered = Core.TowerCatch.HangClearance + ShipLength - ShipPinsFromTop, PinsFromTop = ShipPinsFromTop,
+            ArmHeight = Core.TowerCatch.HangClearance + ShipLength - ShipPinsFromTop + Core.TowerCatch.CatchLift,
+            BellyFlop = true, FlopAltitude = 2500,
+            BurnEngines = 3, LandingEngines = 1,
+            EntryAltitude = 120000, EntryDv = 0,
+            // Пара: Boostback заканчивает при промахе < 150 м — порог ниже был бы недостижим.
+            BoostbackTolerance = ShipCatchTolerance,
+            LandingDv = 300,
+        };
+
+        /// <summary>Промах прогноза после схода с орбиты, м, выше которого корабль доправляет его импульсом в вакууме.</summary>
+        public const double ShipCatchTolerance = 300;
+
+        /// <summary>
         /// Перигей трансатмосферной траектории корабля на SECO, м (IFT: «почти орбита», перигей ≈ 50 км). Ниже — вход
         /// раньше (50 км — у Мадагаскара, 49° в. д.), выше — дальше на восток и ближе к второму витку. Пара: ShipSplashLat/Lon.
         /// </summary>
         public const double ShipPerigee = 70e3;
 
+        /// <summary>Скорость привода закрылков, °/с (складывание на ≈ 100° — 2–3 с), угол «убрано» носовых, °, и усиление
+        /// команды для вида: ControlDeflection = момент/РСУ, у корабля обычно ≪ 1 — без усиления закрылки не видны.</summary>
+        const double FlapRateDeg = 45, FlapStowDeg = 100, FlapVisualGain = 6;
+
         /// <summary>
         /// Закрылки корабля (§4.6): 2 носовых и 2 кормовых по бокам корпуса, шарнир вдоль оси, хорда — наружу.
-        /// Только вид (VesselView.Controls): площадь крыла символическая, момент закрылков — в StarshipRcsTorque.
+        /// Только вид (VesselView.Controls): площадь крыла символическая, момент закрылков — SectionDef.FlapArea.
         /// Тангаж — носовые против кормовых, крен — левые против правых. Оси секции: +Y нос, +X брюхо, Z размах.
+        /// Форма — по S30: кормовые большие, сильно сужаются, верхний угол внешней кромки сдвинут к корме (скошенная кромка);
+        /// носовые малые, тоже скошены. В полёте складываются к подветренной стороне (−X) на StowDeg, выходят в поток
+        /// в атмосфере без тяги (VesselView.Controls). Пара: обтекатели шарниров в Tools/blender/spacex_parts.py (b_starship).
         /// </summary>
         public static WingDef StarshipFlaps(double length, double radius)
         {
@@ -134,8 +184,9 @@ namespace Kare.Space.Core
                     Name = side > 0 ? "Носовой закрылок П" : "Носовой закрылок Л",
                     HingeA = new Vector3d(0.6, length * 0.78, side * radius * 0.84), HingeB = new Vector3d(0.8, length * 0.90, side * radius * 0.51),
                     Aft = new Vector3d(0, 0, side), Up = new Vector3d(-1, 0, 0),
-                    ChordA = 3.2, ChordB = 1.8, Thickness = 0.35,
-                    MixPitch = 1, MixRoll = side, MaxDeg = 30, RateDeg = 20, DarkBelly = true,
+                    ChordA = 3.0, ChordB = 1.1, TipShiftA = 0, TipShiftB = -2.2, Thickness = 0.35,
+                    MixPitch = 1, MixRoll = side, MaxDeg = 35, RateDeg = FlapRateDeg, DarkBelly = true,
+                    StowDeg = FlapStowDeg, VisualGain = FlapVisualGain,
                 });
                 // Кормовые: крупнее, от низа до 0,26 длины.
                 w.Surfaces.Add(new ControlSurface
@@ -143,8 +194,9 @@ namespace Kare.Space.Core
                     Name = side > 0 ? "Кормовой закрылок П" : "Кормовой закрылок Л",
                     HingeA = new Vector3d(0.8, length * 0.03, z), HingeB = new Vector3d(0.8, length * 0.26, z),
                     Aft = new Vector3d(0, 0, side), Up = new Vector3d(-1, 0, 0),
-                    ChordA = 4.8, ChordB = 4.0, Thickness = 0.4,
-                    MixPitch = -1, MixRoll = side, MaxDeg = 30, RateDeg = 20, DarkBelly = true,
+                    ChordA = 5.4, ChordB = 2.6, TipShiftA = 0, TipShiftB = -3.2, Thickness = 0.4,
+                    MixPitch = -1, MixRoll = side, MaxDeg = 35, RateDeg = FlapRateDeg, DarkBelly = true,
+                    StowDeg = FlapStowDeg + 10, VisualGain = FlapVisualGain,
                 });
             }
             return w;
@@ -159,6 +211,7 @@ namespace Kare.Space.Core
             switch (id)
             {
                 case "ift5": return StarshipIft5();
+                case "starship_catch": return StarshipCatch();
                 default: return null;
             }
         }
@@ -177,10 +230,10 @@ namespace Kare.Space.Core
                 // Сухая ≈ 200 т + кольцо горячего разделения ≈ 10 т. Топливо 3400 т (CH₄/O₂).
                 Name = "Super Heavy B12", Kind = SectionKind.Stage, DryMass = 210000, Propellant = 3400000,
                 Engine = new EngineDef { Name = "Raptor 2", ThrustVac = 2.45e6, ThrustSL = 2.26e6, IspVac = 350, MinThrottle = 0.4, GimbalDeg = 15, Ignitions = 4 },
-                EngineCount = 33, Length = 71 + 1.8, Diameter = 9, MaxHeatFlux = 4e5, Model = SectionModel.SuperHeavy,
+                EngineCount = 33, Length = SpaceXRockets.SuperHeavyLength, Diameter = 9, MaxHeatFlux = 4e5, Model = SectionModel.SuperHeavy,
                 RcsTorque = SpaceXRockets.SuperHeavyRcsTorque, Recovery = SpaceXRockets.StarbaseCatch(),
             });
-            const double shipLength = 50.3, shipRadius = 4.5;
+            const double shipLength = SpaceXRockets.ShipLength, shipRadius = 4.5;
             var ship = new SectionDef
             {
                 // Двигатель — среднее 3 Raptor (у Земли) и 3 RVac: на посадке (LandingEngines 3) работает тяга «у Земли».
@@ -189,7 +242,7 @@ namespace Kare.Space.Core
                 Name = "Starship S30", Kind = SectionKind.Stage, DryMass = 120000, Propellant = 900000,
                 Engine = new EngineDef { Name = "Raptor 2 + RVac", ThrustVac = 2.5e6, ThrustSL = 2.2e6, IspVac = 365, MinThrottle = 0.4, GimbalDeg = 15, Ignitions = 4 },
                 EngineCount = 6, Length = shipLength, Diameter = 2 * shipRadius, MaxHeatFlux = 1.5e6, Model = SectionModel.Starship,
-                RcsTorque = SpaceXRockets.StarshipRcsTorque, Recovery = SpaceXRockets.IndianOcean(),
+                RcsTorque = SpaceXRockets.StarshipRcsTorque, FlapArea = SpaceXRockets.StarshipFlapArea, Recovery = SpaceXRockets.IndianOcean(),
             };
             ship.Wings = new List<WingDef> { SpaceXRockets.StarshipFlaps(shipLength, shipRadius) };
             d.Sections.Add(ship);
@@ -197,5 +250,36 @@ namespace Kare.Space.Core
             d.Sequence.Add(new StageAction(StageActionType.Separate, 0, igniteNext: true)); // горячее разделение
             return d;
         }
+
+        /// <summary>
+        /// Запас Super Heavy на возврат в starship_catch, кг. Пакет с полным кораблём тяжелее IFT-5: MECO ниже и медленнее
+        /// (48 км, 1,6 км/с против 71 км, 2,1 км/с), разворот дешевле, и с 600 т ступень приходила на посадку с 153 т
+        /// вместо 79 т — трёх Raptor не хватало, садилась на 13 и разбивалась (16 м/с). Пара: StarbaseCatch().LandingDv.
+        /// </summary>
+        const double BoosterCatchReserve = 520000;
+
+        /// <summary>
+        /// Starship с ловлей обеих ступеней (миссия starship_catch): тот же пакет, но корабль идёт на орбиту и возвращается
+        /// к башне OLP-B. Топливо корабля — полные 1500 т (у IFT-5 урезано до 900 т под суборбиту): на выведение,
+        /// сход с орбиты, доправку и посадку. Пара: SpaceXRockets.SuperHeavyReserve — MECO по запасу ускорителя.
+        /// </summary>
+        public static VesselDesign StarshipCatch()
+        {
+            var d = StarshipIft5();
+            d.Name = "Starship: ловля обеих ступеней";
+            d.Sections[0].Name = "Super Heavy B14";
+            var booster = SpaceXRockets.StarbaseCatch();
+            booster.StageName = "Super Heavy B14";
+            booster.Reserve = BoosterCatchReserve;
+            d.Sections[0].Recovery = booster;
+            var ship = d.Sections[1];
+            ship.Name = "Starship S33";
+            ship.Propellant = ShipCatchPropellant;
+            ship.Recovery = SpaceXRockets.StarbaseShipCatch();
+            return d;
+        }
+
+        /// <summary>Топливо орбитального корабля, кг. Пара: остаток после выведения должен покрыть сход, доправку и посадку.</summary>
+        const double ShipCatchPropellant = 1500000;
     }
 }

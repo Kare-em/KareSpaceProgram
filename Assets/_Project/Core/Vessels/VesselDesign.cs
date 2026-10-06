@@ -95,6 +95,19 @@ namespace Kare.Space.Core
         /// переносят центр давления за ЦМ; пара — FlightPhysics.FinNormalSlope.
         /// </summary>
         public double FinArea;
+        /// <summary>
+        /// Откидные закрылки (§4.6, Starship и деталь «flaps»), м² — сумма площадей. Момент управления растёт с напором
+        /// (Vessel.MaxTorque), пока у секции нет тяги и она не в связке; держат корпус поперёк потока, поэтому лимит q·α
+        /// к такой секции не применяется (BoosterLandingAutopilot.BellyEntry). Пара: Vessel.FlapLift, FlapLever.
+        /// </summary>
+        public double FlapArea;
+        /// <summary>
+        /// Решётчатые рули, м² — сумма (деталь «gridfins»; у пресетов — RecoveryDef.GridFinArea). Момент на напоре и
+        /// сопротивление после отделения (Vessel.MaxTorque, GridFinCdA).
+        /// </summary>
+        public double GridFinArea;
+        /// <summary>Решётчатые рули секции: свои или заданные целью возврата пресета.</summary>
+        public double GridFins => GridFinArea > 0 ? GridFinArea : Recovery?.GridFinArea ?? 0;
         /// <summary>Площадь купола, м² (0 — парашюта нет).</summary>
         public double ParachuteArea;
         /// <summary>
@@ -297,7 +310,12 @@ namespace Kare.Space.Core
             p.EngineCount /= n;
             p.RcsTorque /= n;
             p.FinArea /= n;
+            p.FlapArea /= n;
+            p.GridFinArea /= n;
             p.ParachuteArea /= n;
+            // Возврат своего блока (CraftPart.Landing) — запас и двигатели на один блок, а не на группу.
+            if (p.Recovery != null && p.Recovery.Mode != RecoveryTarget.Fixed && p.HasEngine)
+                p.Recovery = RecoveryDef.ForCraft(p, p.Recovery.Mode);
             if (p.Wings != null) foreach (var w in p.Wings) { w.Area /= n; w.Span /= Math.Sqrt(n); w.BrakeArea /= n; }
             var d = new VesselDesign { Name = s.Name };
             d.Sections.Add(p);

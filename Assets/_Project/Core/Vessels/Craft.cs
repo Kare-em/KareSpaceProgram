@@ -26,6 +26,15 @@ namespace Kare.Space.Core
         /// <summary>JSON-ключ высоты ввода парашюта у детали стека и у боковой группы; пишется только заданный.</summary>
         public const string ChuteKey = "chuteAlt";
 
+        /// <summary>
+        /// Возврат ступени (§6.9, окно опор в ангаре): null — по умолчанию (RecoveryDef.DefaultFor), иначе выбор игрока.
+        /// Смысл имеет у детали с опорами в секции с двигателем; в JSON — необязательный ключ LandingKey.
+        /// </summary>
+        public RecoveryTarget? Landing;
+
+        /// <summary>JSON-ключ возврата ступени у детали стека и у боковой группы; пишется только заданный.</summary>
+        public const string LandingKey = "landing";
+
         public CraftPart() { }
         public CraftPart(string id, int stage = -1) { Id = id; Stage = stage; }
 
@@ -100,6 +109,8 @@ namespace Kare.Space.Core
         public int EngineStage = -1, SepStage = -1;
         /// <summary>Высота ввода парашютов блоков, м; NaN — штатная (как CraftPart.ChuteAltitude).</summary>
         public double ChuteAltitude = double.NaN;
+        /// <summary>Возврат блоков с опорами (как CraftPart.Landing); null — по умолчанию.</summary>
+        public RecoveryTarget? Landing;
     }
 
     /// <summary>
@@ -160,7 +171,7 @@ namespace Kare.Space.Core
                 var r = Radials[i];
                 sb.Append(i == 0 ? "\n" : ",\n").Append("    { \"parent\": ").Append(r.Parent).Append(", \"symmetry\": ").Append(r.Symmetry)
                     .Append(", \"lift\": ").Append(r.Lift.ToString("R", CultureInfo.InvariantCulture))
-                    .Append(", \"engineStage\": ").Append(r.EngineStage).Append(", \"sepStage\": ").Append(r.SepStage).Append(ChuteJson(r.ChuteAltitude)).Append(", \"parts\": [");
+                    .Append(", \"engineStage\": ").Append(r.EngineStage).Append(", \"sepStage\": ").Append(r.SepStage).Append(ChuteJson(r.ChuteAltitude)).Append(LandingJson(r.Landing)).Append(", \"parts\": [");
                 for (int j = 0; j < r.Parts.Count; j++) sb.Append(j == 0 ? "" : ", ").Append(Json.Quote(r.Parts[j]));
                 sb.Append("] }");
             }
@@ -178,8 +189,25 @@ namespace Kare.Space.Core
                 if (!double.IsNaN(v))
                     sb.Append(", ").Append(Json.Quote(CraftPart.ParamKeys[k])).Append(": ").Append(v.ToString("R", CultureInfo.InvariantCulture));
             }
-            sb.Append(ChuteJson(cp.ChuteAltitude));
+            sb.Append(ChuteJson(cp.ChuteAltitude)).Append(LandingJson(cp.Landing));
             return sb.ToString();
+        }
+
+        /// <summary>Возврат ступени — тоже только заданный, словом: "none", "site", "downrange".</summary>
+        static string LandingJson(RecoveryTarget? m) => m == null ? ""
+            : ", " + Json.Quote(CraftPart.LandingKey) + ": " + Json.Quote(LandingWord(m.Value));
+
+        static string LandingWord(RecoveryTarget m) => m == RecoveryTarget.LaunchSite ? "site" : m == RecoveryTarget.Downrange ? "downrange" : "none";
+
+        static RecoveryTarget? ParseLanding(Dictionary<string, object> p)
+        {
+            switch (Json.Str(p, CraftPart.LandingKey))
+            {
+                case "none": return RecoveryTarget.None;
+                case "site": return RecoveryTarget.LaunchSite;
+                case "downrange": return RecoveryTarget.Downrange;
+                default: return null;
+            }
         }
 
         /// <summary>Высота ввода парашюта — тоже только заданная: файлы без ключа открываются со штатной высотой.</summary>
@@ -198,6 +226,7 @@ namespace Kare.Space.Core
                         for (int k = 0; k < PartCatalog.ParamOrder.Length; k++)
                             cp.Set(PartCatalog.ParamOrder[k], Json.Num(p, CraftPart.ParamKeys[k], double.NaN));
                         cp.ChuteAltitude = Json.Num(p, CraftPart.ChuteKey, double.NaN);
+                        cp.Landing = ParseLanding(p);
                         c.Stack.Add(cp);
                     }
             if (o.TryGetValue("radials", out var rt) && rt is List<object> rl)
@@ -209,6 +238,7 @@ namespace Kare.Space.Core
                             Parent = (int)Json.Num(p, "parent", 0), Symmetry = (int)Json.Num(p, "symmetry", 2), Lift = Json.Num(p, "lift", 0),
                             EngineStage = (int)Json.Num(p, "engineStage", -1), SepStage = (int)Json.Num(p, "sepStage", -1),
                             ChuteAltitude = Json.Num(p, CraftPart.ChuteKey, double.NaN),
+                            Landing = ParseLanding(p),
                         };
                         if (p.TryGetValue("parts", out var pp) && pp is List<object> pl)
                             foreach (var id in pl)
@@ -439,10 +469,24 @@ namespace Kare.Space.Core
                 if (!double.IsNaN(c.Radials[r].ChuteAltitude) && b.RadialSection[r] < d.Sections.Count && d.Sections[b.RadialSection[r]].ParachuteArea > 0)
                     d.Sections[b.RadialSection[r]].ChuteAltitude = FlightPhysics.ClampChuteAltitude(c.Radials[r].ChuteAltitude);
 
+            // Возврат ступеней с опорами (§6.9): выбор игрока у детали опор, иначе RecoveryDef.DefaultFor.
+            for (int i = 0; i < c.Stack.Count; i++)
+                if (PartCatalog.Resolve(c.Stack[i]).LandingLegs)
+                    SetLanding(d.Sections[b.PartSection[i]], c.Stack[i].Landing, b.PartSection[i] == 0);
+            for (int r = 0; r < c.Radials.Count; r++)
+                if (b.RadialSection[r] < d.Sections.Count && d.Sections[b.RadialSection[r]].LandingLegs)
+                    SetLanding(d.Sections[b.RadialSection[r]], c.Radials[r].Landing, true);
+
             CheckJoints(c, fairingPart, b);
             b.Design = d;
             Check(c, b, blocks);
             return b;
+        }
+
+        static void SetLanding(SectionDef s, RecoveryTarget? choice, bool booster)
+        {
+            var mode = choice ?? RecoveryDef.DefaultFor(s, booster);
+            s.Recovery = mode == RecoveryTarget.None || !s.HasEngine ? null : RecoveryDef.ForCraft(s, mode);
         }
 
         static SectionDef Section(List<PartDef> parts, CraftBuild b, string where)
@@ -459,6 +503,8 @@ namespace Kare.Space.Core
                 s.Diameter = Math.Max(s.Diameter, p.MaxDiameter);
                 s.RcsTorque += p.RcsTorque;
                 s.FinArea += p.FinArea;
+                s.FlapArea += p.FlapArea;
+                s.GridFinArea += p.GridFinArea;
                 s.ParachuteArea += p.ParachuteArea;
                 s.Crew += p.Crew;
                 s.LandingLegs |= p.LandingLegs;
@@ -602,6 +648,8 @@ namespace Kare.Space.Core
             s.EngineCount = one.EngineCount * n;
             s.RcsTorque = one.RcsTorque * n;
             s.FinArea = one.FinArea * n;
+            s.FlapArea = one.FlapArea * n;
+            s.GridFinArea = one.GridFinArea * n;
             s.ParachuteArea = one.ParachuteArea * n;
             s.RadialCount = n;
             s.RadialParent = parentSection;

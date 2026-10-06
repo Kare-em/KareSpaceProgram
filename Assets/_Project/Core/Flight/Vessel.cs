@@ -161,6 +161,16 @@ namespace Kare.Space.Core
         public Vector3d RollDir;
         /// <summary>Последнее касание на шасси: снижение и путевая, м/с (NaN — не было). Для итога миссии и тестов.</summary>
         public double TouchdownSink = double.NaN, TouchdownSpeed = double.NaN;
+        /// <summary>
+        /// Палочки башни, ловящей этот борт (TowerCatch): сведение 0 — разведены, 1 — сведены; TowerCaught — висит на них.
+        /// Пара: LaunchPadView ставит балки по TowerCatch.Gap(CatchArms).
+        /// </summary>
+        public double CatchArms;
+        public bool TowerCaught;
+        /// <summary>Ход каретки вниз с пойманным бортом, м (TowerCatch.Lower). Пара: LaunchPadView опускает балки на столько же.</summary>
+        public double CatchLowered;
+        /// <summary>Цапфы над палочками на прошлом шаге, м (TowerCatch.Step: пересечение плоскости балок); NaN — вне башни.</summary>
+        public double CatchPin = double.NaN;
         public SasMode Sas = SasMode.Stability;
         public QuaternionD SasHold;
         public bool SasHoldValid;
@@ -389,12 +399,21 @@ namespace Kare.Space.Core
                 var s = secs[i];
                 pitch += s.RcsTorque;
                 roll += s.RcsTorque;
-                if (s.Recovery != null && s.Recovery.GridFinArea > 0 && !Stacked(i))
+                if (s.GridFins > 0 && !Stacked(i))
                 {
                     // Решётчатые рули (§6.9) раскрыты после отделения: момент на напоре, плечо — от ЦМ до верха секции.
-                    double fin = DynamicPressure * s.Recovery.GridFinArea * GridFinLift;
+                    double fin = DynamicPressure * s.GridFins * GridFinLift;
                     pitch += fin * Math.Max(1, layoutBuf[i] + s.Length - com);
                     roll += fin * s.Radius;
+                }
+                if (s.FlapArea > 0 && DynamicPressure > 0 && !Running[i] && !Stacked(i))
+                {
+                    // Закрылки (§4.6): носовые против кормовых — тангаж, левые против правых — крен. На тяге сложены
+                    // (вид — VesselView.Controls). Замер starship_catch 06.10.2026: без них одного РСУ 3 МН·м хватало
+                    // до q ≈ 4 кПа, дальше α уходил с 61° в 85–90° и корабль недолетал 4 км.
+                    double flap = DynamicPressure * s.FlapArea * FlapLift;
+                    pitch += flap * FlapLever * s.Length;
+                    roll += flap * s.Radius;
                 }
                 if (!Running[i] || s.Engine.GimbalDeg <= 0) continue;
                 double t = s.Engine.Thrust(pressure) * EnginesLit(i) * EffectiveThrottle(i);
@@ -534,6 +553,12 @@ namespace Kare.Space.Core
         /// <summary>Подъёмная сила решётчатого руля на единицу напора и площади (Cy·δ при δ ≈ 20°) — для GridFinTorque.</summary>
         public const double GridFinLift = 0.6;
         /// <summary>
+        /// Закрылки: нормальная сила на единицу напора и площади при полном ходе (Cn·δ) и плечо — доля длины секции от
+        /// ЦМ до шарниров. Пара: Starship 120 м² × 0,8 × 0,4 × 50 м ≈ 1900·q Н·м против ≈ 800·q дестабилизирующего
+        /// момента корпуса на α 60° (FlightPhysics.StackAeroTorque) — запас вдвое.
+        /// </summary>
+        public const double FlapLift = 0.8, FlapLever = 0.4;
+        /// <summary>
         /// Сопротивление раскрытой решётки (Cd на её площадь). Пара: с GridFinArea 6 м² у Falcon 9 CdA ≈ 8 м² — вместе
         /// с корпусом β ≈ 3 т/м², предельная скорость у земли ≈ 250 м/с, как у настоящей ступени перед посадочным.
         /// </summary>
@@ -545,8 +570,8 @@ namespace Kare.Space.Core
             double sum = 0;
             for (int i = 0; i < Attached.Length; i++)
             {
-                var rec = Design.Sections[i].Recovery;
-                if (Attached[i] && rec != null && rec.GridFinArea > 0 && !Stacked(i)) sum += rec.GridFinArea * GridFinCd;
+                double gf = Design.Sections[i].GridFins;
+                if (Attached[i] && gf > 0 && !Stacked(i)) sum += gf * GridFinCd;
             }
             return sum;
         }

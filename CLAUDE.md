@@ -28,7 +28,7 @@ Library/, Temp/, Logs/, UserSettings/ — do not touch or commit.
 
 ## State (05.10.2026) — details in `docs/STATE.md`
 - Core (M0) done, 24 test groups ✅ (presets — `Core/Vessels/HistoricRockets.cs`, `StationRockets.cs`, `WingedRockets.cs`, `SpaceXRockets.cs`).
-- SpaceX: Falcon 9 booster landing on OCISLY, Starship IFT-5 (`ift5`: tower catch + splashdown) — `docs/STATE.md`, `BoosterLanding.cs`.
+- SpaceX: Falcon 9 booster landing on OCISLY, Starship IFT-5 (`ift5`), `starship_catch` (both stages on Mechazilla chopsticks — contact model `TowerCatch.cs`); shuttles land on physical runways (`Runways.cs`, `RunwayView.cs`) — `docs/STATE.md`, `BoosterLanding.cs`.
 - Game layer: scene `Scenes/Flight.unity` is built by menu **Kare/Build Flight Scene** (idempotent); default mission —
   `GameBootstrap.MissionId = "vostok"`; input — legacy Input Manager.
 - Rocket builder — `Scenes/Hangar.unity` (**Kare/Build Hangar Scene**), Esc → "To builder".
@@ -42,7 +42,7 @@ Library/, Temp/, Logs/, UserSettings/ — do not touch or commit.
 D="/c/Program Files/Unity/Hub/Editor/6000.6.3f1/Editor/Data/DotNetSdk/dotnet.exe"; P=/c/CocosGames/KareSpaceProgram/Tools/CoreTests/CoreTests.csproj; "$D" build $P -nologo -v q && "$D" run --no-build --project $P
 ```
 `-- <name>` — a single test (math, orbit, moon, atmo, stats, stability, separation, craft, collide, undock, craft_fly, karman, sputnik, mechta, vympel, farside, vostok, luna9, moondrop,
-juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11, planets, autoplan, patches, booster, booster_defer, starship; `auto` — all missions
+juno1, freedom7, friendship7, gemini3, ranger7, surveyor1, luna17, apollo8, apollo11, planets, autoplan, patches, booster, booster_defer, starship, starship_catch; `auto` — all missions
 hands-off, `auto_<mission>` — one).
 Do not build during a run — the exe is locked, the build fails.
 
