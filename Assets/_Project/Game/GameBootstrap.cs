@@ -247,6 +247,7 @@ namespace Kare.Space.Game
                 var go = new GameObject(v.IsDebris ? $"Debris {v.Name}" : $"Vessel {v.Name}");
                 var view = go.AddComponent<VesselView>();
                 if (PlasmaShader != null) VesselView.SheathShader = PlasmaShader;
+                VesselView.VaporMaterial = SmokeMaterial;
                 view.Init(v, VesselMaterial, PlumeMaterial);
                 // Струи РСУ (§4.9, §9.5) — отдельным компонентом на том же объекте, горят только по команде борта.
                 go.AddComponent<RcsJets>().Init(view, PlumeMaterial);

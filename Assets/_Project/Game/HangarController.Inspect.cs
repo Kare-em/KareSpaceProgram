@@ -28,19 +28,32 @@ namespace Kare.Space.Game
         /// </summary>
         public PartInfo InspectAt(Vector3 m)
         {
-            if (Camera == null || build == null) return null;
-            var d = build.Design;
-            var wr = Camera.ScreenPointToRay(m);
-            var ray = new Ray(root.InverseTransformPoint(wr.origin), root.InverseTransformDirection(wr.direction));
-            double[] layout = null;
-            if (d != null && build.PartSection != null)
+            if (drag != null || !Hit(m, out int hitStack, out int hitRadial, out int hitRadialPart, out _)) return null;
+            if (hitRadial >= 0)
             {
-                layout = new double[d.Sections.Count];
-                new Vessel(d).Layout(layout);
+                selRadial = hitRadial;
+                selStack = craft.Radials[hitRadial].Parent;
+                dirty = true;
+                return RadialInfo(craft.Radials[hitRadial], hitRadialPart);
             }
+            selStack = hitStack;
+            selRadial = -1;
+            dirty = true;
+            return StackInfo(craft.Stack[hitStack]);
+        }
 
-            float best = float.PositiveInfinity, fairT = float.PositiveInfinity;
-            int hitStack = -1, hitRadial = -1, hitRadialPart = -1, fairStack = -1;
+        /// <summary>Деталь под мышью (общая для окна детали и переноса): индекс в стеке или группа + деталь блока, t — по лучу root.</summary>
+        bool Hit(Vector3 m, out int hitStack, out int hitRadial, out int hitRadialPart, out float best)
+        {
+            hitStack = hitRadial = hitRadialPart = -1;
+            best = float.PositiveInfinity;
+            if (Camera == null || build == null) return false;
+            var d = build.Design;
+            var ray = LocalRay(m);
+            var layout = Layout();
+
+            float fairT = float.PositiveInfinity;
+            int fairStack = -1;
             double y = 0;
             for (int i = 0; i < craft.Stack.Count; i++)
             {
@@ -81,23 +94,8 @@ namespace Kare.Space.Game
                         }
                     }
                 }
-            if (hitStack < 0 && hitRadial < 0 && fairStack >= 0) hitStack = fairStack;
-
-            if (hitRadial >= 0)
-            {
-                selRadial = hitRadial;
-                selStack = craft.Radials[hitRadial].Parent;
-                dirty = true;
-                return RadialInfo(craft.Radials[hitRadial], hitRadialPart);
-            }
-            if (hitStack >= 0)
-            {
-                selStack = hitStack;
-                selRadial = -1;
-                dirty = true;
-                return StackInfo(craft.Stack[hitStack]);
-            }
-            return null;
+            if (hitStack < 0 && hitRadial < 0 && fairStack >= 0) { hitStack = fairStack; best = fairT; }
+            return hitStack >= 0 || hitRadial >= 0;
         }
 
         static bool PartHit(Ray ray, PartDef p, Vector3 at, float baseY, out float t)

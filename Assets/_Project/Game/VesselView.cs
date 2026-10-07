@@ -670,6 +670,7 @@ namespace Kare.Space.Game
                 parts.Add(part);
             }
             AddPlasma();
+            AddAeroFx();
         }
 
         /// <summary>
@@ -1585,6 +1586,7 @@ namespace Kare.Space.Game
             var airflow = air.magnitude > 1 ? FloatingOrigin.DirToUnity(air).normalized
                                             : -FloatingOrigin.DirToUnity(Vessel.Position).normalized;
             UpdatePlasma(airflow, com, vesselLen, vesselR);
+            UpdateAeroFx(airflow, plasma != null && plasma.gameObject.activeSelf);
             UpdateControls(airflow);
             UpdateSpaceX();
             foreach (var p in parts)

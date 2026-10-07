@@ -92,18 +92,16 @@ namespace Kare.Space.Game
             build = CraftCompiler.Compile(craft);
             if (selStack >= craft.Stack.Count) selStack = craft.Stack.Count - 1;
             if (selRadial >= craft.Radials.Count) selRadial = -1;
+            TrackUndo();
             RebuildPreview();
-            if (frame)
-            {
-                float h = Mathf.Max(5, (float)(build.Height > 0 ? build.Height : 20));
-                target = new Vector3(0, h * 0.5f, 0);
-                dist = Mathf.Max(h, (float)build.Width) * 1.35f + 8;
-            }
+            if (frame) Frame();
             dirty = false;
         }
 
         void Update()
         {
+            if (dirty) Recompile();
+            BuildInput();
             if (dirty) Recompile();
             OrbitCamera();
             if (statusUntil > 0 && Time.time > statusUntil) status = null;
@@ -125,23 +123,34 @@ namespace Kare.Space.Game
             var m = Input.mousePosition;
             if (InPreview(m))
             {
-                // ЛКМ/ПКМ — вращение, СКМ — сдвиг по высоте, колесо — приближение (как в ангаре KSP).
-                if (Input.GetMouseButton(1) || Input.GetMouseButton(0) && !Input.GetMouseButtonDown(0))
+                // ПКМ (и ЛКМ по пустому месту) — вращение, СКМ — сдвиг в плоскости экрана, колесо — приближение.
+                // ЛКМ по детали — перенос (BuildInput), поэтому камеру она не крутит.
+                if (Input.GetMouseButton(1) || lmbOrbit && Input.GetMouseButton(0) && !Input.GetMouseButtonDown(0))
                 {
                     var d = m - lastMouse;
                     yaw += d.x * 0.3f;
-                    pitch = Mathf.Clamp(pitch - d.y * 0.3f, -10, 80);
+                    pitch = Mathf.Clamp(pitch - d.y * 0.3f, -10, 89);
                 }
-                if (Input.GetMouseButton(2)) target.y = Mathf.Max(0, target.y - (m.y - lastMouse.y) * dist * 0.002f);
+                if (Input.GetMouseButton(2))
+                {
+                    var d = m - lastMouse;
+                    var ct = Camera.transform;
+                    target -= (ct.right * d.x + ct.up * d.y) * dist * 0.0015f;
+                    target.y = Mathf.Max(0, target.y);
+                }
                 float wheel = Input.mouseScrollDelta.y;
                 if (wheel != 0) dist = Mathf.Clamp(dist * Mathf.Pow(0.88f, wheel), 3, 600);
             }
             lastMouse = m;
             var rot = Quaternion.Euler(pitch, yaw, 0);
             Camera.transform.SetPositionAndRotation(target - rot * Vector3.forward * dist, rot);
-            // Створка (половина +X) всегда на дальней от камеры стороне: Euler(0, θ) несёт +X в (cos θ, 0, −sin θ),
-            // а взгляд камеры по горизонтали — (sin yaw, 0, cos yaw) → θ = yaw − 90°.
-            if (fairing != null) fairing.localRotation = Quaternion.Euler(0, yaw - 90, 0);
+            // Створка (половина +X) всегда на дальней от камеры стороне: Euler(0, θ) несёт +X в (cos θ, 0, −sin θ) —
+            // совмещаем с взглядом камеры в осях сборки (в виде «самолёт» сборка повёрнута, yaw уже не годится).
+            if (fairing != null)
+            {
+                var f = root.InverseTransformDirection(Camera.transform.forward);
+                fairing.localRotation = Quaternion.Euler(0, Mathf.Atan2(-f.z, f.x) * Mathf.Rad2Deg, 0);
+            }
         }
 
         // ---------------------------------------------------------------- предпросмотр
@@ -159,9 +168,9 @@ namespace Kare.Space.Game
             r.SetPropertyBlock(b);
         }
 
-        void RebuildPreview()
+        void BuildParts()
         {
-            foreach (Transform ch in root) Destroy(ch.gameObject);
+            fairing = null;
             // Высоты деталей — из скомпилированного проекта (Vessel.Layout), как их поставит полёт; без проекта — подряд.
             double[] layout = null;
             var d = build.Design;
@@ -344,10 +353,17 @@ namespace Kare.Space.Game
             Assembly(new Rect(rx, TopH, RightW - Pad, stackH));
             Staging(new Rect(rx, TopH + stackH + Pad, RightW - Pad, vh - TopH - stackH - 2 * Pad));
             Stats(new Rect(LeftW + Pad, vh - StatsH, vw - LeftW - RightW - 2 * Pad, StatsH - Pad));
+            if (!showFiles)
+            {
+                Centers();
+                NodeMarks();
+                HelpLine();
+                ViewBar();
+            }
             if (showFiles) Files(new Rect(vw * 0.5f - 260, 120, 520, 520));
             if (!string.IsNullOrEmpty(GUI.tooltip))
             {
-                var tip = new Rect(LeftW + 2 * Pad, TopH + Pad, 420, 64);
+                var tip = new Rect(LeftW + 2 * Pad, TopH + ToolH + Pad, 420, 64);
                 Panel(tip);
                 GUI.Label(new Rect(tip.x + 10, tip.y + 6, tip.width - 20, tip.height - 12), GUI.tooltip, small);
             }
@@ -413,7 +429,7 @@ namespace Kare.Space.Game
             }
             y += 2 * (Row + 4) + 6;
             string into = selRadial >= 0 ? $"в боковую группу {selRadial + 1}" : selStack >= 0 ? "над выбранной деталью" : "наверх стека";
-            GUI.Label(new Rect(x, y, w, 22), "Клик — добавить " + into, small);
+            GUI.Label(new Rect(x, y, w, 22), "Клик — добавить " + into + " · или тащите в сборку", small);
             y += 26;
             var list = new List<PartDef>();
             foreach (var p in PartCatalog.All) if (p.Category == category) list.Add(p);
@@ -426,7 +442,10 @@ namespace Kare.Space.Game
                 string line = $"{p.Name}\n<size=12>Ø {p.Diameter:0.##} м · {p.Length:0.##} м · {p.Mass / 1000:0.###} т{EngineText(p)}</size>";
                 var icon = PartIconSet.Get(p.Id);
                 var row = new Rect(0, i * (item + 4), w - 20, item);
-                if (GUI.Button(row, new GUIContent(line, p.Description), icon != null ? rowIconBtn : rowBtn)) AddPart(p.Id);
+                // Нажатие запоминаем до кнопки: её MouseDown съедается, а перенос в предпросмотр ловит BuildInput.
+                var ev = Event.current;
+                if (ev.type == EventType.MouseDown && ev.button == 0 && row.Contains(ev.mousePosition)) { catalogPress = p.Id; catalogDragged = false; }
+                if (GUI.Button(row, new GUIContent(line, p.Description), icon != null ? rowIconBtn : rowBtn) && !catalogDragged) AddPart(p.Id);
                 if (icon != null) GUI.DrawTexture(new Rect(row.x + IconPad, row.y + (item - CatalogIcon) * 0.5f, CatalogIcon, CatalogIcon), icon, ScaleMode.ScaleToFit);
             }
             GUI.EndScrollView();

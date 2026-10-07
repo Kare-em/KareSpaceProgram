@@ -239,3 +239,9 @@ Read before working through MCP, debugging in Play, and bulk file edits.
   domain reload (vostok remains), and `SceneManager.LoadScene` from execute_code breaks the bridge for a minute. What works is
   `PauseMenu.SelectMission("sts1")` via reflection already in Play (verified 05.10: mission sts1, 7 rudders on "Columbia").
   In codedom execute_code write `UnityEngine.Object.Find…` (plain `Object` is ambiguous), without `$"…"`.
+
+## MCP screenshots and IMGUI glyphs (06.10.2026)
+- `manage_camera screenshot` refuses an output folder outside the project → `output_folder: "Captures"` (git-ignored).
+- The IMGUI default font has no ↶/↷ — they render as boxes; use words ("Отменить"/"Вернуть").
+- `SceneManager.LoadScene` in Play can drop the MCP bridge for ~10 s and move it to another port (6400 → 6401); wait and retry.
+- `GameBootstrap.NextMissionId` set before entering Play is wiped by the domain reload — set it in Play and reload the scene.

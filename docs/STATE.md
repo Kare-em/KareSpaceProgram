@@ -361,3 +361,20 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
 - Sky ground tint near the surface = local biome hue at `BodyLook.Low` luminance (`SkyController.LocalGround`).
 - Checked in Play: Baikonur, Starbase, Saturn pads; `starship_landing` flop with visible flaps; `sts1_landing` spawn.
   Not checked in Play: the full shuttle glide to touchdown with the view (core auto tests only).
+
+## Constructor 2.0: drag-and-drop, plane view, undo (06.10.2026, `Game/HangarController.Build.cs`)
+- Drag a part from the catalog (or press-and-drag a part of the craft) onto an attach node: stack top/bottom/between parts,
+  side of a stack part (radial group with symmetry), on top of a radial block. Green ghost = snapped, red = no node (drop cancels).
+  Drop onto the catalog panel deletes. Node markers and CoM (yellow) / CoL (cyan) / CoT (magenta) are drawn in the preview.
+- Keys: X / Shift+X symmetry, V rocket/plane view, 1-4 view presets (iso, side, front/rear, top), F frame, C centers,
+  Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo (100 steps), Del/Backspace delete selected, Esc cancel drag. LMB-drag on empty — orbit,
+  RMB orbit, MMB pan, wheel zoom.
+- Plane view: the craft lies nose → +Z, belly down (`PlaneRot`); the floor fit is by renderer bounds (`FitToFloor`).
+
+## Aero FX (06.10.2026, `Game/VesselView.Aero.cs`)
+- Vapor cone (Prandtl–Glauert): Mach window 0.86→0.96…1.02→1.15, strength by q (25 kPa full) and density (0.5 full);
+  bell around the CoM, half-angle → Mach angle above M 1. Off while the plasma sheath is on.
+- Wingtip vortices: LineRenderer from the trailing edge of each horizontal wing ≥ 2 m², AoA 6°→16°, q ≥ 12 kPa, M < 1.6.
+- Material — lit `GameBootstrap.SmokeMaterial` (`VesselView.VaporMaterial`), not emissive: white in sun, dark at night.
+- Test by hand: Play, `Time.timeScale = 0`, set `Vessel.Mach/DynamicPressure/Density/AngleOfAttack/SurfaceSpeed` by reflection —
+  physics does not overwrite them while time is frozen, LateUpdate still draws.

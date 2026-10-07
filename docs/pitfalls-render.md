@@ -425,3 +425,10 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
   also brightens the haze) → (40, 39, 38).
 - **Old concrete atlas** had big black stains that repeated as "dirt" every tile on a 44 m pad — replaced by the procedural
   `Tools/gen-concrete.py` (periodic FFT noise, seamless).
+
+## Constructor preview and vapor (06.10.2026)
+- "First part under the floor": a swept wing's tips go below the part base (WingMesh: tip y = −half·tan sweep, −2.89 m on a
+  wing-only craft). Fit the preview to the floor by **renderer bounds** (`FitToFloor`), not by the part layout.
+- `Destroy` is deferred: old preview children still count in bounds in the same frame → `SetParent(null, false)` before Destroy.
+- Condensation effects (vapor cone, wingtip vortices) — lit transparent smoke material, not emissive: additive emission is
+  invisible in daylight below ~1e4 nits. LineRenderer with a lit material needs `generateLightingData = true`, else it is black.

@@ -32,7 +32,8 @@ Library/, Temp/, Logs/, UserSettings/ — do not touch or commit.
 - Landing training: `sts1_landing`, `buran_landing`, `starship_landing` start in the air (`ApproachStart.cs`); pad surroundings — `LaunchPadView.Surroundings.cs`.
 - Game layer: scene `Scenes/Flight.unity` is built by menu **Kare/Build Flight Scene** (idempotent); default mission —
   `GameBootstrap.MissionId = "vostok"`; input — legacy Input Manager.
-- Rocket builder — `Scenes/Hangar.unity` (**Kare/Build Hangar Scene**), Esc → "To builder".
+- Rocket builder — `Scenes/Hangar.unity` (**Kare/Build Hangar Scene**), Esc → "To builder"; drag-and-drop attach, plane view V, undo Ctrl+Z (`HangarController.Build.cs`).
+- Aero FX: vapor cone near M 1, wingtip vortices at high AoA (`VesselView.Aero.cs`).
 - Autopilots (Y — whole mission, H — takeoff/landing, R — to Moon, P — maneuver to target), docking (V auto, Tab manual),
   vessel switching PgUp/PgDn/Home, G — deployables, F1 — HUD details. Full key list — `docs/STATE.md`.
 - Render, effects, audio, terrain, textures, Blender FBX parts — sections of `docs/STATE.md` and `docs/pitfalls-render.md`.
