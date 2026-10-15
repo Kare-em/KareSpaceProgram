@@ -438,3 +438,19 @@ Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`
   the probe goes through the upper atmosphere under the shield (≈ 6 m/s at 15 km is fine).
 - **After `Separate(CassiniOrbiter)` the active vessel is Huygens** (`Universe.Stage` keeps the upper sections); the orbiter is
   debris, so there is no orbiter deflection manoeuvre.
+
+## Side-mounted payload separation (15.10.2026, Huygens on Cassini, `Vessel.Split`, `Vessel.SideMountPoint`)
+- **Side mount geometry has one source — the core.** `SectionDef.SideMountHeight/Radius` on the host (Cassini: 2.9 / 0.62 m,
+  pair: `cassini_parts.py` HUY_Z/HUY_R), `SideMounted` on payload sections; `Vessel.SideMountPoint(i, layout, com)` gives the
+  part's point in body axes, `SideMountTurn` (−90° about X: payload −Y → +Z outward) its attitude. The view calls the same
+  function — before this the view had its own constants and the core split the probe axially: jump from the side to the top + 90° turn.
+- **Mass/CoM still treat the payload as part of the axial stack** (layout unchanged): only the split geometry differs. A side
+  payload heavier than ~10 % of the host would need a CoM fix; Huygens 318 kg vs 5255 kg — ignored.
+- **The axial push formula breaks for a light remainder:** `Split` gives the debris `dv` and the remainder `dv·md/mv` — when the
+  orbiter (5255 kg) is the debris and the probe (318 kg) stays active, the probe would get ≈ 3 m/s instead of 0.35. Side case
+  splits `DecouplerPush` by masses (relative speed = push, momentum conserved; test error < 1e-6).
+- **Capture `Attitude`/`AttitudeBodyFixed` before `Recenter`:** `Recenter(this)` rewrites `this.Attitude` for the side part,
+  and the second call (for the debris) would then rotate its offset with the already-turned attitude.
+- **Spin goes into `AngularVelocity` in the payload's own axes:** ω of the stack is turned by `SideMountTurn.Inverse`, then
+  +7.5 rpm about +Y (the probe's nose). Test `cassini` → `TestHuygensRelease`: place error 0.0000 m, nose·outward −1.000,
+  relative 0.350 m/s, spin 7.50 rpm.

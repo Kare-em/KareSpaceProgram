@@ -1286,6 +1286,42 @@ namespace Kare.Space.Core
         }
 
         /// <summary>
+        /// Сторона бокового подвеса груза в связанных осях (SectionDef.SideMountRadius, «Гюйгенс» на «Кассини», §5.3).
+        /// Пара: cassini_parts.py (подкосы к −Y Blender = +Z вида), RcsJets.Clusters (блоки РСУ мимо этого азимута).
+        /// </summary>
+        public static readonly Vector3d SideMountDir = Vector3d.forward;
+        /// <summary>Поворот груза на подвесе: его ось −Y (низ, экран) смотрит наружу, по SideMountDir. Связанные оси
+        /// отделившегося груза — оси несущей, повёрнутые на него же (Split), поэтому вид продолжает тот же кадр.</summary>
+        public static readonly QuaternionD SideMountTurn = QuaternionD.FromToRotation(-Vector3d.up, SideMountDir);
+
+        /// <summary>
+        /// Секция i висит на боковом подвесе: место её низа в связанных осях от ЦМ борта. layout и com — текущая
+        /// раскладка (Layout) и ЦМ в её осях. Груз — жёсткая стопка: низ стопки (экран) снаружи, на SideMountRadius +
+        /// длина стопки от оси, выше по стопке — ближе к несущей. False — не подвешена (или несущей уже нет).
+        /// </summary>
+        public bool SideMountPoint(int i, double[] layout, double com, out Vector3d at)
+        {
+            at = Vector3d.zero;
+            var secs = Design.Sections;
+            if (!Attached[i] || !secs[i].SideMounted) return false;
+            int host = -1;
+            for (int j = 0; j < secs.Count; j++)
+                if (Attached[j] && secs[j].SideMountRadius > 0) { host = j; break; }
+            if (host < 0) return false;
+            double bottom = double.MaxValue, top = double.MinValue;
+            for (int j = 0; j < secs.Count; j++)
+            {
+                if (!Attached[j] || !secs[j].SideMounted) continue;
+                bottom = Math.Min(bottom, layout[j]);
+                top = Math.Max(top, layout[j] + secs[j].Length);
+            }
+            var h = secs[host];
+            at = new Vector3d(0, layout[host] - com + h.SideMountHeight, 0) + SideMountDir * (h.SideMountRadius + top - bottom)
+               + SideMountTurn * new Vector3d(0, layout[i] - bottom, 0);
+            return true;
+        }
+
+        /// <summary>
         /// Отделить секции по маске в новый корабль-обломок, толкнув его вдоль оси на dv, м/с (§5).
         /// Position борта — его центр масс, а вид рисует секции вокруг своего ЦМ. Поэтому обе части после
         /// разделения встают каждая на свой новый ЦМ, а не на общий старый — иначе меши налезали друг на друга
@@ -1297,6 +1333,25 @@ namespace Kare.Space.Core
         {
             MassProperties(out _, out double com0, out _, out _);
             var base0 = (double[])layoutBuf.Clone();
+            // Боковой груз уходит от несущей (§5.3): запомнить место низа стопки, пока подвес цел. side — нижняя секция груза.
+            int side = -1;
+            Vector3d sideAt = Vector3d.zero;
+            double spin = 0;
+            for (int i = 0; i < mask.Length; i++)
+            {
+                if (!SideMountPoint(i, base0, com0, out var at)) continue;
+                if (side < 0 || base0[i] < base0[side]) { side = i; sideAt = at; }
+            }
+            if (side >= 0)
+            {
+                bool hostGoes = false;
+                for (int j = 0; j < mask.Length; j++)
+                    if (Attached[j] && Design.Sections[j].SideMountRadius > 0) { hostGoes = mask[j]; spin = Design.Sections[j].SideMountSpin; break; }
+                if (hostGoes == mask[side]) side = -1; // груз уходит вместе с несущей — подвес цел
+            }
+            var att0 = Attitude;
+            var attFixed0 = AttitudeBodyFixed;
+            var sideW = LocalToWorld(SideMountDir);
             var d = new Vessel(Design, $"{Name} — обломок")
             {
                 IsDebris = debris,
@@ -1357,10 +1412,20 @@ namespace Kare.Space.Core
                 if (low < 0) return 0;
                 p.MassProperties(out _, out double com, out _, out _);
                 var r = new Vector3d(0, base0[low] + com - com0, 0);
-                p.Position += LocalToWorld(r);
+                // Груз с подвеса встаёт туда, где его рисовали (VesselView.Cassini.cs): ЦМ — по его оси от низа стопки,
+                // связанные оси — повёрнуты на SideMountTurn (нос внутрь, экран наружу), закрутка — вокруг его оси.
+                // Без этого зонд прыгал с борта орбитера на его нос и разворачивался на 90°.
+                if (side >= 0 && p.Attached[side])
+                {
+                    r = sideAt + SideMountTurn * new Vector3d(0, com, 0);
+                    p.Attitude = (att0 * SideMountTurn).Normalized;
+                    p.AttitudeBodyFixed = (attFixed0 * SideMountTurn).Normalized;
+                    p.AngularVelocity = SideMountTurn.Inverse * w + new Vector3d(0, spin, 0);
+                }
+                p.Position += (att0 * r).SwapYZ;
                 // На грунте положение задаёт якорь в осях тела: без сдвига якоря часть, оставшаяся стоять
                 // (луноход, съехавший с посадочной ступени), прыгнула бы обратно на старый общий ЦМ.
-                if (p.IsLanded) p.AnchorBodyFixed += (p.AttitudeBodyFixed * r).SwapYZ;
+                if (p.IsLanded) p.AnchorBodyFixed += (attFixed0 * r).SwapYZ;
                 // Луноход стоит на настиле ступени: дальше он не прыгает на грунт, а съезжает по трапам.
                 if (p.IsLanded && p.IsRover)
                 {
@@ -1375,15 +1440,27 @@ namespace Kare.Space.Core
                     p.GroundUp = p.RampUp;
                 }
                 // Точка жёсткого тела на плече r летит со скоростью v + ω × r.
-                p.Velocity += LocalToWorld(Vector3d.Cross(w, r));
+                p.Velocity += (att0 * Vector3d.Cross(w, r)).SwapYZ;
                 return r.y;
             }
+            var nose = NoseP;
             double rd = Recenter(d), rv = Recenter(this);
             d.MassProperties(out double md, out _, out _, out _);
             MassProperties(out double mv, out _, out _, out _);
+            if (side >= 0 && md + mv > 0)
+            {
+                // Пружины подвеса толкают груз наружу, по SideMountDir, а не вдоль оси пакета. dv — скорость расхождения
+                // (у «Гюйгенса» 0,35 м/с, как SED 25.12.2004), делится обратно массам. Общая схема ниже даёт отдачу
+                // dv·md/mv остатку: лёгкий зонд (318 кг) от орбитера (≈ 2,5 т) ушёл бы на ≈ 3 м/с вместо 0,35.
+                if (!d.Attached[side]) sideW = -sideW;
+                d.Velocity += sideW * (dv * mv / (md + mv));
+                Velocity -= sideW * (dv * md / (md + mv));
+                SasHoldValid = false;
+                return d;
+            }
             if (rd < rv) dv = -dv;
-            d.Velocity += NoseP * dv;
-            if (mv > 0) Velocity -= NoseP * (dv * md / mv);
+            d.Velocity += nose * dv;
+            if (mv > 0) Velocity -= nose * (dv * md / mv);
             SasHoldValid = false;
             return d;
         }

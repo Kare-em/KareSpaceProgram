@@ -164,6 +164,9 @@ namespace Kare.Space.Game
             /// совпадают (Attitude уже в U) — копия c стоит там же, где ядро выпустит обломок c (Vessel.SplitRadial).</summary>
             public Vector3 Radial;
             public Quaternion Yaw = Quaternion.identity;
+            /// <summary>Секция «Гюйгенса» на боку орбитера: место каждый кадр считает HuygensMount (VesselView.Cassini.cs),
+            /// Radial не используется, Yaw — поворот экраном наружу.</summary>
+            public bool SideMount;
             public Transform Plume, Glow;
             public Renderer CoreR, GlowR;
             public Light PlumeLight;
@@ -460,6 +463,12 @@ namespace Kare.Space.Game
                 // Орбитер на баке (SectionDef.Beside) — сбоку от оси, к −X; после отделения бака стоит на оси сам.
                 else if (s.Beside && i > 0 && Vessel.Attached[0] && !secs[0].IsRadial)
                     part.Radial = new Vector3(-(float)s.BesideOffset, 0, 0);
+                // «Гюйгенс» при орбитере — сбоку двигательного модуля, экраном наружу (VesselView.Cassini.cs).
+                else if (HuygensOnSide(i))
+                {
+                    part.SideMount = true;
+                    part.Yaw = HuygensMountTurn;
+                }
                 else if (Vessel.RadialYaw != 0)
                     part.Yaw = Quaternion.Euler(0, -(float)Vessel.RadialYaw * Mathf.Rad2Deg, 0);
                 // Своя модель аппарата целиком заменяет процедурный корпус; у отсеков с двигателем в ней и сопло.
@@ -1603,7 +1612,8 @@ namespace Kare.Space.Game
                 // После перестроения (§6.6) ЛМ стоит на КСМ вверх ногами: низ секции — сверху её места в пакете.
                 bool flip = Vessel.Flipped[p.Index];
                 float lift = flip ? (float)Vessel.Design.Sections[p.Index].Length : 0;
-                p.Tr.localPosition = p.Radial + new Vector3(0, (float)(baseHeight[p.Index] - com) + lift, 0);
+                p.Tr.localPosition = p.SideMount ? HuygensMount(p.Index, com)
+                                                 : p.Radial + new Vector3(0, (float)(baseHeight[p.Index] - com) + lift, 0);
                 p.Tr.localRotation = flip ? FlipRotation * p.Yaw : p.Yaw;
                 if (p.Chute != null) UpdateChute(p, airflow);
                 if (p.Plume == null) continue;

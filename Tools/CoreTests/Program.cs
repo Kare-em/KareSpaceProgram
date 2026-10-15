@@ -721,6 +721,51 @@ static partial class Program
         // Орбитеру (2491 м/с) ещё выход на орбиту Сатурна (≈ 620) и наведение на Титан — на тур не больше 900.
         Check("cassini: манёвр и рассогласование тура по силам орбитеру", tour.Mismatch + tour.DsmTotal < 900,
             $"манёвр {tour.DsmTotal:F0} м/с, рассогласование {tour.Mismatch:F0} м/с");
+        TestHuygensRelease();
+    }
+
+    /// <summary>
+    /// Отделение «Гюйгенса» с бокового подвеса (§5.3, Vessel.SideMountPoint): зонд выходит там, где его рисовали, —
+    /// низ экрана на месте, экран наружу, толчок наружу 0,35 м/с относительно орбитера, закрутка 7,5 об/мин.
+    /// </summary>
+    static void TestHuygensRelease()
+    {
+        var (u, _) = StartMission("cassini");
+        var v = u.Active;
+        v.Situation = Situation.Flying;
+        var secs = v.Design.Sections;
+        int orb = VesselPresets.CassiniOrbiter, shield = orb + 1, probe = orb + 3;
+        for (int k = 0; k < 20 && v.HasNextStage && v.Design.Sequence[v.NextStage].Section != orb; k++) v.Stage();
+        v.Velocity = new Vector3d(1000, 2000, 3000);
+        var h0 = new double[secs.Count];
+        v.Layout(h0);
+        v.MassProperties(out double m0, out double com0, out _, out _);
+        bool mounted = v.SideMountPoint(shield, h0, com0, out var at0) & v.SideMountPoint(probe, h0, com0, out var atTop);
+        var shield0 = v.Position + v.LocalToWorld(at0);
+        var top0 = v.Position + v.LocalToWorld(atTop + Vessel.SideMountTurn * new Vector3d(0, secs[probe].Length, 0));
+        var orbBottom0 = v.Position + v.NoseP * (h0[orb] - com0);
+        var outward = v.LocalToWorld(Vessel.SideMountDir);
+        var mom0 = v.Velocity * m0;
+        var list = v.Stage();
+        var o = list.Count == 1 ? list[0] : null;
+        Check("cassini: «Гюйгенс» отделяется от орбитера одним бортом", mounted && o != null && o.Attached[orb] && v.Attached[shield] && !v.Attached[orb],
+            $"на подвесе {mounted}, отделилось {list.Count}");
+        if (o == null) return;
+        v.MassProperties(out double mh, out double ch, out double lh, out _);
+        o.MassProperties(out double mo, out double co, out _, out _);
+        double posErr = (v.Position - v.NoseP * ch - shield0).magnitude + (v.Position + v.NoseP * (lh - ch) - top0).magnitude
+                      + (o.Position - o.NoseP * co - orbBottom0).magnitude;
+        double axis = Vector3d.Dot(v.NoseP, outward);
+        var rel = v.Velocity - o.Velocity;
+        double momErr = (v.Velocity * mh + o.Velocity * mo - mom0).magnitude / m0;
+        Console.WriteLine($"   зонд {mh:F0} кг, орбитер {mo:F0} кг; ошибка места {posErr:F4} м, нос·наружу {axis:F3}, " +
+                          $"расхождение {Vector3d.Dot(rel, outward):F3} м/с, закрутка {v.AngularVelocity.y * 60 / (2 * Math.PI):F2} об/мин");
+        Check("cassini: зонд выходит с подвеса без скачка, экраном наружу", posErr < 1e-3 && axis < -0.999,
+            $"ошибка {posErr:F4} м, нос·наружу {axis:F3}");
+        Check("cassini: толчок наружу 0,35 м/с, импульс сохраняется, закрутка 7,5 об/мин",
+            Math.Abs(Vector3d.Dot(rel, outward) - secs[orb].DecouplerPush) < 1e-6 && (rel - outward * Vector3d.Dot(rel, outward)).magnitude < 1e-6
+            && momErr < 1e-6 && Math.Abs(v.AngularVelocity.y - secs[orb].SideMountSpin) < 1e-9,
+            $"расхождение {rel.magnitude:F3} м/с, импульс {momErr:E1} м/с");
     }
 
     /// <summary>Клавиша P: узел к Луне с орбиты Земли, к Земле с орбиты Луны, к Марсу — через ManeuverAutoPlan.</summary>

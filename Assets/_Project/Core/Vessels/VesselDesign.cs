@@ -189,6 +189,15 @@ namespace Kare.Space.Core
         /// </summary>
         public bool Beside;
         public double BesideOffset;
+        /// <summary>
+        /// Боковой подвес груза («Гюйгенс» на «Кассини», §5.3): у несущей секции — высота оси подвеса над её низом и
+        /// расстояние от оси пакета до верха груза, м, и закрутка груза при отделении, рад/с. В раскладке груз стоит
+        /// стопкой над несущей (ЦМ, отделение), а на деле висит сбоку по Vessel.SideMountDir осью поперёк, низом наружу.
+        /// Vessel.Split выпускает его оттуда же — вид не прыгает (VesselView.Cassini.cs). SideMountRadius > 0 — подвес есть.
+        /// </summary>
+        public double SideMountHeight, SideMountRadius, SideMountSpin;
+        /// <summary>Секция — часть груза на боковом подвесе несущей (пока та присоединена).</summary>
+        public bool SideMounted;
         /// <summary>Высота шасси (DeployKind.Gear), м: на столько борт выше полосы на пробеге.</summary>
         public double GearHeight;
         /// <summary>Центр масс секции — доля длины от низа (0,5 — однородный цилиндр). У орбитера ≈0,35: двигатели и крыло

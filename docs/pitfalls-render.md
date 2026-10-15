@@ -448,3 +448,16 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
   tank — plumes came out wider than the vehicle and "from nowhere". Take the nozzle exit radius from the engine's
   `NozzleArea` (core's SL thrust-loss area; for vacuum engines with ThrustSL = ThrustVac — from ≈ 1.5 atm exit pressure).
   Same rule for RCS: jet length by section radius gave 1.3 m cones on 0.89 N thrusters → explicit `MicroThrusterLength`.
+
+- **Side-mounted payload drawn by the view only** (15.10.2026, Huygens on Cassini): VesselView rewrites every part's
+  `localPosition` each frame from `Vessel.Layout` (`Radial + (0, baseHeight − com + lift, 0)`), so a one-off offset in
+  `Rebuild` is overwritten on the next frame. Fix: `Part.SideMount` flag + `HuygensMount(i, com)` evaluated in the same
+  per-frame line, built from the live `baseHeight` of the attached probe sections (rigid stack: bottom = shield outward).
+  Checked in Play at 250 km: probe sections at view z 1.07 / 1.76 / 2.32 m, all at one height (y −0.76).
+  ~~Limitation: probe jumped at release~~ — fixed 15.10.2026: the mount point moved to the core (`Vessel.SideMountPoint`),
+  the view only calls it; see `pitfalls-core.md` → "Side-mounted payload separation". Play at Titan 1500 km: shield offset
+  from the orbiter before/after release (3.226, 0.593, 2.125) → (3.230, 0.594, 2.124), attitude identical.
+- **RCS fallback radius on a dish-topped section**: `RcsJets` places clusters at the section radius when there is no explicit
+  case; Cassini's radius is the 4 m HGA, so puffs would fire from the dish rim, 2 m off the bus. Explicit
+  `Quads(1.6, 1.06, 30)` (paired with `cassini_parts.py` RCS_Z/RCS_R, azimuths 30+90k clear the RTGs and Huygens at 270 Blender).
+  Huygens (RcsTorque 30 < 0.3·150) gets no jets while attached — correct, its jets are hidden by the max-torque filter.

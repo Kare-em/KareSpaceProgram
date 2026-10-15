@@ -486,7 +486,11 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   sections (shield 2.7 m / back cover with 8.3 m chute / probe with 3.03 m chute). `VesselPresets.CassiniOrbiter = 4`.
 - Models `Models/Titan4_Core.fbx`, `Titan4_SRMU.fbx`, `Cassini.fbx`, `Huygens_Shield.fbx`, `Huygens_Cover.fbx`, `Huygens.fbx` —
   `Tools/blender/cassini_parts.py`; wired in `FlightSceneBuilder` (model table), `VesselView.CraftPalette`, `LaunchPadView` (LC Titan).
-  Huygens is stacked above the HGA (not on the side as in reality) — sections are a stack.
+  Huygens hangs on the side of the propulsion module, shield outward (+Z of the body axes, opposite the magnetometer boom):
+  mass/CoM still count it in the axial layout, but the mount point is core geometry — `SectionDef.SideMountHeight/Radius/Spin`
+  on the orbiter, `SideMounted` on the probe sections, `Vessel.SideMountPoint/SideMountTurn`; the view (`VesselView.Cassini.cs`)
+  and `Vessel.Split` read the same numbers, so release is seamless (0.35 m/s radial, 7.5 rpm spin, test `cassini`). RCS: four clusters
+  of micro-puffs at y 1.6 m, r 1.06 m, az 30+90k (`RcsJets`, `MicroThrusterLength`).
 - Autopilot (`MissionAutopilot.Planetary.cs`, `.Titan.cs`): `TourPlanner` with a deep-space manoeuvre on the V1→V2 leg
   (`DeepSpaceManeuver`: Lambert to the V2 aim + `PlanThroughFlyby` to Earth); `FlybyTrim` inside each SOI on the exact Kepler
   hyperbola (only for tours with a DSM, `HasDsm`); `AimedExit`/`FloatingExit` — next-body date floats so |v_out| matches the

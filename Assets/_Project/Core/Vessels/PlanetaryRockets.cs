@@ -90,7 +90,8 @@ namespace Kare.Space.Core
         /// «Центавр T» (⌀ 4,3 м) — довыведение на опорную и разгон к Венере (C3 ≈ 16,6 км²/с²), дальше всё — двигателем
         /// орбитера 445 Н: коррекции, манёвр в дальнем космосе, торможение у Сатурна (≈ 626 м/с за 96 мин), наведение
         /// на Титан. «Гюйгенс» — три капсулы сверху: лобовой экран, задняя крышка с основным куполом 8,3 м и спускаемый
-        /// модуль с тормозным 3,03 м (GDD §5.3, §4.8). На деле зонд висел сбоку орбитера — в пакете он на носу.
+        /// модуль с тормозным 3,03 м (GDD §5.3, §4.8). В раскладке и ЦМ зонд на носу, а висит, как у настоящего, сбоку
+        /// орбитера экраном наружу (SideMounted) — оттуда же и отделяется (Vessel.Split, VesselView.Cassini.cs).
         /// Пара: стартовая масса ≈ 940 т (2 × 350 т SRMU + 165 т ядро + 40 т II ступень + 23,9 т «Центавр» + 5,6 т КА
         /// + 4,5 т обтекатель), тяговооружённость у земли ≈ 1,25 — тяга SRMU и их топливо меняются только вместе.
         /// </summary>
@@ -135,28 +136,31 @@ namespace Kare.Space.Core
                 // Толчок отделения «Гюйгенса» — 0,35 м/с, как пружины SED (25.12.2004).
                 Name = "Кассини", Kind = SectionKind.Stage, DryMass = 2125, Propellant = 3130,
                 Engine = new EngineDef { Name = "ЖРД 445 Н", ThrustVac = 445, ThrustSL = 300, IspVac = 308, Ignitions = 1000 },
+                // Подвес «Гюйгенса» сбоку: ось на 2,9 м над днищем, верх спускаемого модуля в 0,62 м от оси (контейнер
+                // купола утоплен в обечайку r 0,8), закрутка SED 7,5 об/мин. Пара: cassini_parts.py HUY_Z, HUY_R.
                 EngineCount = 1, Length = 6.8, Diameter = 4.0, RcsTorque = 150, MaxHeatFlux = 2e5, DecouplerPush = 0.35,
+                SideMountHeight = 2.9, SideMountRadius = 0.62, SideMountSpin = 7.5 * 2 * Math.PI / 60,
                 Model = SectionModel.Cassini,
             });
             d.Sections.Add(new SectionDef
             {
                 // Лобовой экран 2,7 м (79 кг, плитки AQ60): держит вход в атмосферу Титана на ≈ 6 км/с.
                 Name = "Гюйгенс / лобовой экран", Kind = SectionKind.Capsule, DryMass = 79, Length = 0.6, Diameter = 2.7,
-                DragScale = 1.3, MaxHeatFlux = 2e6, Model = SectionModel.HuygensShield,
+                DragScale = 1.3, MaxHeatFlux = 2e6, Model = SectionModel.HuygensShield, SideMounted = true,
             });
             d.Sections.Add(new SectionDef
             {
                 // Основной купол 8,3 м (54 м²). Настоящий раскрылся на 160 км, у нас ввод не выше 15 км
                 // (FlightPhysics.ChuteAltitudeMax) — верхнюю атмосферу зонд проходит под одним экраном (≈ 6 м/с у 15 км).
                 Name = "Гюйгенс / задняя крышка", Kind = SectionKind.Capsule, DryMass = 38, Length = 0.5, Diameter = 2.6,
-                ParachuteArea = 54, ChuteAltitude = 15000, MaxHeatFlux = 2e5, Model = SectionModel.HuygensCover,
+                ParachuteArea = 54, ChuteAltitude = 15000, MaxHeatFlux = 2e5, Model = SectionModel.HuygensCover, SideMounted = true,
             });
             d.Sections.Add(new SectionDef
             {
                 // Спускаемый модуль 201 кг с тормозным куполом 3,03 м (7,2 м²): у грунта ≈ 4–5 м/с, как 14.01.2005.
                 // RcsTorque — замена закрутке 7 об/мин: держит днище против потока до входа.
                 Name = "Гюйгенс", Kind = SectionKind.Capsule, DryMass = 201, Length = 0.9, Diameter = 1.3,
-                ParachuteArea = 7.2, ChuteAltitude = 15000, RcsTorque = 30, MaxHeatFlux = 2e5, Model = SectionModel.Huygens,
+                ParachuteArea = 7.2, ChuteAltitude = 15000, RcsTorque = 30, MaxHeatFlux = 2e5, Model = SectionModel.Huygens, SideMounted = true,
             });
             int fairing = d.Sections.Count;
             // Обтекатель 66 футов (20,1 м, ⌀ 5,08) закрывает «Центавр» и КА целиком.
