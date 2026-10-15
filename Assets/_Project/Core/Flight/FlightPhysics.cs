@@ -22,6 +22,9 @@ namespace Kare.Space.Core
         }
         /// <summary>Быстрее — разбился (GDD §4.8).</summary>
         public const double CrashSpeed = 10;
+        /// <summary>Давление, при котором газовый гигант раздавливает борт, Па: зонд «Галилео» замолчал на 22–23 бар
+        /// (Юпитер, 1995). Пара: ExponentialAtmosphere.DeepLapse — по нему давление растёт под уровнем 1 бар.</summary>
+        public const double GasGiantCrushPressure = 2.3e6;
         /// <summary>Порог разрушения от поперечной нагрузки: q·sin α, Па (GDD §4.7).</summary>
         public const double QAlphaLimit = 4000;
         public const double ChuteMaxQ = 25000;
@@ -907,6 +910,14 @@ namespace Kare.Space.Core
             var r = v.Position;
             double rm = r.magnitude;
             var up = r / rm;
+            // Газовый гигант: тверди нет, «высота» — над уровнем 1 бар (может быть отрицательной), гибель — по давлению.
+            if (body.IsGasGiant && body.Parent != null)
+            {
+                v.TerrainAltitude = rm - body.Radius;
+                if (v.StaticPressure > GasGiantCrushPressure)
+                    v.Destroy($"Раздавлен в глубинах атмосферы: {body.Name}, {v.StaticPressure / 1e5:0} бар");
+                return;
+            }
             // Грубый отсев: выше любого рельефа — не считаем шум.
             double maxTerrain = body.Terrain != null ? body.Terrain.Amplitude * 1.5 : 0;
             if (rm - body.Radius > maxTerrain + g.Length + 100)

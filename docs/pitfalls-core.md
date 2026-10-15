@@ -438,6 +438,12 @@ Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`
   the probe goes through the upper atmosphere under the shield (≈ 6 m/s at 15 km is fine).
 - **After `Separate(CassiniOrbiter)` the active vessel is Huygens** (`Universe.Stage` keeps the upper sections); the orbiter is
   debris, so there is no orbiter deflection manoeuvre.
+- **Saturn rings (`Rings.cs`): the lowest-inclination approach puts the ring-plane node ≈ 70° from periapsis — 115k km, ring B; death
+  on approach.** Safe window for rp 78k km and capture apo 9e9 m: ω = 90° ± 5.7° (nodes 145–160k km, F–G gap, like real Cassini).
+  `TourAim` rotates the B-plane side around v∞ (`RingSafeSide`) and aims at the MIDDLE of the safe window, checking with the corridor
+  middle rp, not `rpLast` (Correct shifts it to 58k km → a false "node inside ring C" solution). The sun-frame aim still misses the
+  B-plane angle by 3–4° (≈ 5k km, i 14.28 vs 14.82): `CaptureTrim` → `PlanRingTrim` in the SOI (exact hyperbola, Newton on
+  normal/radial Δv, 2.0 m/s) → ω 89.6°, nodes 158/160k km. Intermediate flybys (Voyager) do not use it.
 
 ## Side-mounted payload separation (15.10.2026, Huygens on Cassini, `Vessel.Split`, `Vessel.SideMountPoint`)
 - **Side mount geometry has one source — the core.** `SectionDef.SideMountHeight/Radius` on the host (Cassini: 2.9 / 0.62 m,
@@ -454,3 +460,58 @@ Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`
 - **Spin goes into `AngularVelocity` in the payload's own axes:** ω of the stack is turned by `SideMountTurn.Inverse`, then
   +7.5 rpm about +Y (the probe's nose). Test `cassini` → `TestHuygensRelease`: place error 0.0000 m, nose·outward −1.000,
   relative 0.350 m/s, spin 7.50 rpm.
+
+## Airless ascent and the staging window (15.10.2026, apollo11, `AscentAutopilot` Vertical phase)
+- **`v.Altitude` is from the mean radius, not from the terrain.** The Vertical phase checked `Altitude > VerticalAltitudeEnd`
+  (2 km) on airless bodies too: an LM landing site at 2.4 km of lunar relief switched to PitchProgram on the first frame,
+  the steep pitch program burned all APS fuel — Pe −129.6 km, "топливо кончилось", docking failed. Fix: without atmosphere the
+  Vertical phase ends only by `AirlessVerticalSpeedEnd` → Guided (Pe 27.2 / Ap 30.3 km, apollo11 9/9).
+- **Any change to the warp schedule moves landing sites.** The staging window (`StageWarpLead`, ×1 for 5 s around staging)
+  shifts frame cadence: descent started at 4.11 instead of 4.10 days, LM landed elsewhere. Same mechanism as the Cassini
+  `ArrivalWindowFactor` regression. After touching `Universe.StageWarp`/`DriveWarp` run the full suite, not only the target missions.
+
+## Flyby pace and stages vanishing on staging (15.10.2026, `Universe.FlybyCap`, `Universe.NoteBorn`)
+- **Auto-warp flew through a flyby in seconds**: `Ladder(horizon)` sees only the time to the next event, and the periapsis is not
+  an event. `FlybyCap`: within ±FlybySpan·τ (τ = r_p/v_p) of periapsis the warp is capped so that 2·FlybySpan·τ ≈ FlybyRealSeconds.
+  Headless Voyager 1: Jupiter at ×1000 for 125 s real time, Ganymede 39 s. The cap is armed only when the vessel approaches from outside the window,
+  otherwise leaving a parking orbit (a hyperbola that starts at periapsis) would be slowed down too.
+- Hyperbolic periapsis time: `Epoch − MeanAnomalyAtEpoch / MeanMotion`; `TimeToPeriapsis` after the pass is NaN.
+- **Spent stages vanished at separation**: a stage born in the air went into physics and was removed below the floor.
+  `NoteBorn(..., passive)` puts it straight into the passive set (up to MaxPassivePhysics).
+- **Ring collision on rails**: a frame at ×1000+ is minutes, the chord between two positions misses the crossing radius by
+  thousands of km. `Universe.CheckRings` takes the equatorial node radius from the conic `r = p/(1+e·cos ν)` and checks both nodes
+  when ≥ half a period elapsed. Previous position is remembered from the first frame only — a vessel first seen already past the plane
+  is not checked (core test `giants` does one physics frame before warp).
+- **Gas giant depth**: below the 1 bar level `ExponentialAtmosphere` used to clamp z to 0 → constant 1 bar, vessel destroyed at the
+  cloud deck. Now a dry adiabat (`EnableDeep(g)`, Γ = g·M(γ−1)/(γR)): Jupiter −132 km → 27 bar / 446 K (Galileo 22 bar / 425 K),
+  crush at `GasGiantCrushPressure` 23 bar.
+
+## Comets (15.10.2026)
+- **Laplace SOI for e ≈ 1**: a·(m/M)^0.4 with Hale–Bopp a = 186 AU gives ~50 000 km — far beyond the nucleus's real reach at perihelion.
+  `SolarSystem` computes the SOI of Kepler bodies from the perihelion distance a(1−e): Halley 36 km, Hale–Bopp 261 km; both must stay above
+  `PatchedConics.RailsFloorRadius` (15.5 / 41 km), otherwise encounters land below the rails floor.
+- **Encounter search calls `LocalStateAt` thousands of times per body**: building a `KeplerOrbit` per call allocates. Kepler bodies keep one
+  cached orbit (`KeplerFixed()`); `LocalStateAt` = 0 bytes (checked in `comets`), `OrbitAt` returns a Clone (callers mutate orbits).
+- **No perturbations → drift**: a fixed ellipse from the 1986 elements puts Halley's 2061 perihelion 54 days early (JD 2473979.8 vs 2474033.5).
+  Fine for 1957–2030s missions; for 2061 use newer elements.
+- **No warp cut on SOI change ≠ no frame break**: after removing the warp drop on Encounter/Escape (§6.11) a ×1e7 rails frame
+  (≈6 days) flew Apollo from the Moon SOI exit straight to the atmosphere — no perigee fix, 34 km, 13 g, crew dead (auto_apollo8/11).
+  `AdvanceRails` now ends the frame on any SOI transition without touching the warp index; autopilots react next frame.
+
+## Maneuver queue (15.10.2026)
+- **Queued node axes**: node k's components are in the axes of the orbit after nodes 0..k−1. Editing node 0 rotates node 1's `Remaining`
+  (test `nodes` checks the shift after a 50 m/s normal edit of node 0). `Remaining` of queued nodes is refreshed
+  only in `PredictActive` (`refreshQueued: true`); `NodePlanner.SyncFromRemaining` must stay node-0-only — `Remaining` of node 0 is the
+  truth while burning (NodeAutopilot subtracts from it), for the rest it is derived.
+- **Old saves**: the `Node` field vanished (now `Nodes`); the reflective reader silently skips unknown fields → node lost. `Reader.Fill`
+  migrates `Node` → `v.Node` explicitly (test `nodes`: regex-converted save loads with 1 node).
+- **Two-burn tests on R-7**: RD-107/108 have 1 ignition — the second NodeAutopilot burn never lights and the test hangs to its step limit.
+  Use `Vessel.UnlimitedIgnitions = true` in try/finally.
+
+## Constructor Δv budget (15.10.2026, `CraftAnalysis.cs`, test `builder`)
+- **Serial stage sum does not model LOR**: `VesselDesign.ComputeStats` adds stage Δv as if every upper stage carries everything above it.
+  Apollo 11 historic design gives 15.9 km/s against a budget of 17.8 → false «не хватит». Excluded from the "historic rocket passes
+  its budget" check, as are station missions (the station is a section in the design but flies as a separate vessel). Don't
+  "fix" the budget to make Apollo pass, because then a single-stack lunar lander would get a budget that is too low.
+- **Circular capture at gas giants costs ~10 km/s** (Jupiter low orbit) and makes every tour mission "not enough". The budget uses an
+  elliptic capture with apoapsis 0.5·SOI, like the real Galileo/Cassini insertions (0.6–0.9 km/s).

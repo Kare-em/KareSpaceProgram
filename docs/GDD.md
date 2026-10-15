@@ -555,6 +555,14 @@ N = 10: 36/10 + 3.6 + 2 + 12 + 6 + 6 = 33.2 M₢ (≈ 55 % of an expendable laun
 
 The scale (1:1) does not change in any mode.
 
+### §8.6 Career mode (implemented, hybrid)
+Sandbox is the default; career is an explicit choice (Esc → "Режим" → Карьера; window "Карьера…"). State — `career.json` in persistentDataPath, separate from flight saves; mode flag in PlayerPrefs.
+- **Currencies:** funds M₢ (start 150, 1957-01-01), science S, prestige P. Annual budget is credited on each 1 January crossed: 300→1500 (1957–65), 3000→2000 (to 1975), 1500→2500 (to 1990), then 3000; ×(1 + 0.5·tanh(P/500)); −25 % while in deficit. Career date only moves forward (= max(date, end of flight)); "wait until 1 January" button.
+- **Contracts** (27): milestones over existing missions (same success check — MissionTracker), with requirements (sputnik → vostok → gemini3 → apollo8 → apollo11 …) and reward P/S/M₢. Prestige × race factor §6.1 against the rival date. Fly with the historic carrier or your own rocket from the builder; Venera-7 and Mars-3 are career-only missions (own rocket only).
+- **Launch cost:** engine 0.5 + 2.5/MN vacuum thrust, structure 0.6/t dry, crew seat 8, extras for complex parts, ops 2 + 0.008/t liftoff mass. Kara-1 ≈ 64, R-7 Vostok ≈ 55, Saturn V ≈ 330 M₢. Whole sections landed on Earth (after ≥ 20 km) refund 30 %.
+- **Science:** once per body×situation (space, SOI, low flyby, orbit, landed; capsule return to Earth), base 2/4/5/6/20/6 × body factor (Earth 1, Moon 2, Venus/Mars 4 … Pluto 12).
+- **Tech tree** (13 nodes, start free): probes, capsule, medium (Ø3.7), hydrogen, docking, heavy (Ø5, F-1), lunar, RTG, superheavy (Ø7.5/10), winged, kerolox, reuse. Cost S + M₢; early access ≤ 3 years before the historic year at ×(1 + 0.5·years). Research time is not modelled. Parts not in the tree are always unlocked.
+
 ## §9 Graphics
 
 Realistic graphics on HDRP: a physically correct sky, physical light units, real eclipse geometry.

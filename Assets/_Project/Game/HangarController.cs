@@ -30,14 +30,31 @@ namespace Kare.Space.Game
         const float LeftW = 360, RightW = 440, TopH = 52, Pad = 8, Row = 30;
         /// <summary>Высота сводки внизу: развёрнутая (таблица ступеней + проверки) и свёрнутая в одну строку.
         /// Пара: зона мыши камеры и строка подсказки (InPreview, HelpLine) берут текущую — StatsH.</summary>
-        const float StatsOpenH = 230, StatsClosedH = 44, StagingClosedH = 40;
+        const float StatsOpenH = 268, StatsClosedH = 44, StagingClosedH = 40;
         /// <summary>Выпадающий список: высота строки и предел высоты (дальше — прокрутка).</summary>
         const float PopupRow = 30, PopupMaxH = 620;
         /// <summary>Иконки деталей (PartIconSet), px IMGUI: в каталоге — в строку высотой 52, в стеке — в строку Row = 30.</summary>
         const float CatalogIcon = 48, StackIcon = 26, IconPad = 3;
 
+        /// <summary>
+        /// Единая точка фильтра каталога для режима карьеры: false — деталь ещё не открыта (не показана в каталоге, а в
+        /// сборке — ошибка «не открыта», запуск закрыт). По умолчанию открыто всё. Сменили правило — CatalogChanged().
+        /// </summary>
+        public static Func<PartDef, bool> PartAvailable = _ => true;
+        /// <summary>Сбросить кеш каталога и перепроверить сборку после смены PartAvailable (открыта новая деталь).</summary>
+        public static void CatalogChanged() => catalogVersion++;
+        static int catalogVersion;
+        int catListVersion = -1, checkedVersion = -1;
+
         Craft craft;
         CraftBuild build;
+        /// <summary>Бюджет Δv выбранной миссии (CraftAnalysis.Budget) и для какой миссии он посчитан: смена цели — пересборка.</summary>
+        DeltaVBudget budget;
+        int budgetFor = -1;
+        /// <summary>Система тел для бюджета: эфемериды нужны только радиусам орбит, одна на сцену.</summary>
+        static SolarSystem budgetSystem;
+        /// <summary>Подсвеченная ступень сводки (строка под мышью или закреплённая кликом), −1 — нет; секции — из StageStats.Sections.</summary>
+        int hoverStage = -1, pinnedStage = -1, shownStage = -1;
         bool dirty = true;
         int selStack = -1, selRadial = -1;
         PartCategory category = PartCategory.Tank;
@@ -79,6 +96,8 @@ namespace Kare.Space.Game
 
         static readonly string[] CategoryNames = { "Командные", "Баки", "Двигатели", "Разделители", "Аэро", "Разное", "Нагрузка" };
         static readonly Color SelColor = new Color(1f, 0.55f, 0.15f);
+        /// <summary>Подсветка ступени из сводки (и её полоса на шкале Δv) — холодный цвет, не путается с выбором SelColor.</summary>
+        static readonly Color StageColor = new Color(0.25f, 0.8f, 1f);
 
         static string Dir => Path.Combine(Application.persistentDataPath, "Crafts");
         static string LastPath => Path.Combine(Dir, "_last.json");
@@ -113,7 +132,16 @@ namespace Kare.Space.Game
         {
             CraftCompiler.AutoStage(craft, onlyUnset: true);
             CraftCompiler.Normalize(craft);
-            build = CraftCompiler.Compile(craft);
+            if (budgetFor != missionIdx)
+            {
+                budgetFor = missionIdx;
+                if (budgetSystem == null) budgetSystem = SolarSystem.CreateReal();
+                try { budget = CraftAnalysis.Budget(MissionCatalog.All[missionIdx], budgetSystem); }
+                catch (Exception e) { budget = null; Debug.LogWarning($"[Hangar] бюджет Δv: {e.Message}"); }
+            }
+            build = CraftCompiler.Compile(craft, budget);
+            CheckAvailable();
+            checkedVersion = catalogVersion;
             if (selStack >= craft.Stack.Count) selStack = craft.Stack.Count - 1;
             if (selRadial >= craft.Radials.Count) selRadial = -1;
             TrackUndo();
@@ -124,6 +152,8 @@ namespace Kare.Space.Game
 
         void Update()
         {
+            // Сменили миссию (◄ ►, список) или карьера открыла деталь — пересчитать бюджет и проверки.
+            if (budgetFor != missionIdx || checkedVersion != catalogVersion) dirty = true;
             if (dirty) Recompile();
             BuildInput();
             if (dirty) Recompile();
@@ -213,6 +243,7 @@ namespace Kare.Space.Game
                 if (p == null) continue;
                 double baseY = layout != null && !p.Fairing ? layout[build.PartSection[i]] + build.PartOffset[i] : y;
                 bool sel = selStack == i && selRadial < 0;
+                curSec = build.PartSection != null && i < build.PartSection.Length ? build.PartSection[i] : -1;
                 if (p.Wing != null && layout != null)
                 {
                     int sec = build.PartSection[i];
@@ -229,7 +260,7 @@ namespace Kare.Space.Game
                 if (p.Fairing && d != null)
                 {
                     int fs = d.Sections.FindIndex(s => s.Kind == SectionKind.Fairing);
-                    if (fs >= 0) { Fairing(d.Sections[fs], (float)layout[fs], sel); continue; }
+                    if (fs >= 0) { curSec = fs; Fairing(d.Sections[fs], (float)layout[fs], sel); continue; }
                 }
                 Part(p, Vector3.up * (float)baseY, Quaternion.identity, sel);
                 y = baseY + p.Length;
@@ -240,6 +271,7 @@ namespace Kare.Space.Game
                 var rad = craft.Radials[g];
                 var s = d.Sections[build.RadialSection[g]];
                 bool sel = selRadial == g;
+                curSec = build.RadialSection[g];
                 for (int c = 0; c < s.RadialCount; c++)
                 {
                     float ang = 2 * Mathf.PI * c / s.RadialCount;
@@ -300,7 +332,40 @@ namespace Kare.Space.Game
             mpb.Clear();
             mpb.SetColor("_BaseColor", sel ? Color.Lerp(col, SelColor, 0.6f) : col);
             r.SetPropertyBlock(mpb);
+            tints.Add(new Tint { R = r, Col = col, Sel = sel, Sec = curSec });
             return go.transform;
+        }
+
+        /// <summary>Деталь предпросмотра: исходный цвет и секция проекта — по ним красится ступень под мышью в сводке.</summary>
+        struct Tint
+        {
+            public MeshRenderer R;
+            public Color Col;
+            public bool Sel;
+            public int Sec;
+        }
+        readonly List<Tint> tints = new List<Tint>();
+        int curSec = -1;
+
+        /// <summary>
+        /// Перекрасить предпросмотр под подсвеченную ступень: её секции — StageColor, остальное — как было. Только
+        /// MaterialPropertyBlock, без перестройки мешей: наведение мыши меняет строку каждый кадр.
+        /// </summary>
+        void ApplyTint()
+        {
+            int k = pinnedStage >= 0 ? pinnedStage : hoverStage;
+            if (k == shownStage) return;
+            shownStage = k;
+            var secs = k >= 0 && build != null && k < build.Stats.Count ? build.Stats[k].Sections : null;
+            foreach (var t in tints)
+            {
+                if (t.R == null) continue;
+                var c = t.Sel ? Color.Lerp(t.Col, SelColor, 0.6f) : t.Col;
+                if (secs != null && secs.Contains(t.Sec)) c = Color.Lerp(c, StageColor, 0.7f);
+                mpb.Clear();
+                mpb.SetColor("_BaseColor", c);
+                t.R.SetPropertyBlock(mpb);
+            }
         }
 
         // ---------------------------------------------------------------- правка
@@ -572,12 +637,14 @@ namespace Kare.Space.Game
         List<PartDef> CatalogList()
         {
             string q = (search ?? "").Trim().ToLowerInvariant();
-            if (catListCat == category && catListQuery == q) return catList;
+            if (catListCat == category && catListQuery == q && catListVersion == catalogVersion) return catList;
             catListCat = category;
             catListQuery = q;
+            catListVersion = catalogVersion;
             catList.Clear();
             foreach (var p in PartCatalog.All)
             {
+                if (!Available(p)) continue;
                 if (q.Length == 0 ? p.Category != category
                     : !((p.Name ?? "").ToLowerInvariant().Contains(q) || p.Id.ToLowerInvariant().Contains(q)
                         || (p.Description ?? "").ToLowerInvariant().Contains(q))) continue;
@@ -585,6 +652,25 @@ namespace Kare.Space.Game
             }
             partsScroll = Vector2.zero;
             return catList;
+        }
+
+        static bool Available(PartDef p)
+        {
+            try { return PartAvailable == null || PartAvailable(p); }
+            catch (Exception e) { Debug.LogWarning($"[Hangar] PartAvailable({p.Id}): {e.Message}"); return true; }
+        }
+
+        /// <summary>Детали, закрытые фильтром карьеры (пресет, файл, старая сборка), — ошибка сборки: запуск недоступен.</summary>
+        void CheckAvailable()
+        {
+            var seen = new HashSet<string>();
+            void One(string id)
+            {
+                var p = PartCatalog.Get(id);
+                if (p != null && seen.Add(id) && !Available(p)) build.Errors.Add($"«{p.Name}» ещё не открыта");
+            }
+            foreach (var cp in craft.Stack) One(cp.Id);
+            foreach (var r in craft.Radials) foreach (var id in r.Parts) One(id);
         }
 
         static string EngineText(PartDef p)
@@ -810,18 +896,25 @@ namespace Kare.Space.Game
             GUI.EndScrollView();
         }
 
+        /// <summary>Шкала Δv: высота полосы и строки с участками бюджета под ней. Пара: StatsOpenH — в него входят обе.</summary>
+        const float BarH = 18, BarLegsH = 18;
+        /// <summary>Колонки таблицы ступеней — доли ширины левой колонки сводки (как Kerbal Engineer: Δv, TWR, перегрузка, время, масса).</summary>
+        static readonly float[] StageCols = { 0, 0.33f, 0.44f, 0.55f, 0.70f, 0.79f, 0.89f };
+
         void Stats(Rect r)
         {
             Panel(r);
             float x = r.x + 10, y = r.y + 8, w = r.width - 20;
-            double dv = 0;
-            foreach (var s in build.Stats) dv += s.DeltaVVac;
+            double dv = CraftAnalysis.Available(build.Stats);
             string twr = build.Stats.Count > 0 ? $"{build.Stats[0].TwrSL:0.00}" : "—";
             if (GUI.Button(new Rect(r.xMax - 36, y, 28, 24), new GUIContent(statsOpen ? "▾" : "▴", statsOpen ? "Свернуть сводку" : "Развернуть сводку"), btnSmall))
                 statsOpen = !statsOpen;
-            string sum = $"Масса {build.Mass / 1000:0.0} т · высота {build.Height:0.0} м · Δv {dv:0} м/с · TWR старта {twr}";
+            string goal = budget != null ? $" из ≈{budget.Total:0}" : "";
+            string sum = $"Масса {build.Mass / 1000:0.0} т · высота {build.Height:0.0} м · Δv {dv:0}{goal} м/с · TWR старта {twr}";
+            var ev = Event.current;
             if (!statsOpen)
             {
+                if (ev.type == EventType.Repaint) { hoverStage = -1; ApplyTint(); }
                 // Свёрнуто: сводка + счётчик проверок; первая ошибка — красным, чтобы не искать, почему запуск серый.
                 float sw = label.CalcSize(new GUIContent(sum)).x;
                 GUI.Label(new Rect(x, y, sw, 24), sum, label);
@@ -834,26 +927,141 @@ namespace Kare.Space.Game
             }
             GUI.Label(new Rect(x, y, w - 40, 24), sum + $" · ширина {build.Width:0.0} м", label);
             y += 28;
-            float colW = w * 0.58f;
+            int hov = -1;
+            DeltaVBar(new Rect(x, y, w - 40, BarH), dv, ref hov);
+            y += BarH + BarLegsH + 6;
+
+            float colW = w * 0.6f;
+            int crew = 0;
+            if (build.Design != null) foreach (var s in build.Design.Sections) crew += s.Crew;
             // Слева — ступени по пробелам (как VesselDesign.ComputeStats: параллельная работа боковушек — одним прожигом).
+            // Наведение подсвечивает ступень в предпросмотре, клик закрепляет (ещё клик — снять).
             var view = new Rect(x, y, colW, r.yMax - y - 6);
-            statsScroll = GUI.BeginScrollView(view, statsScroll, new Rect(0, 0, colW - 20, (build.Stats.Count + 1) * 22));
-            GUI.Label(new Rect(0, 0, colW, 22), "Ступень                      Δv вак (у Земли)   TWR у Земли / вак   время", small);
+            int rows = build.Stats.Count + 2;
+            // Мышь — до BeginScrollView: внутри координаты локальные, и строки за краем прокрутки тоже «содержали» бы её.
+            bool inView = view.Contains(ev.mousePosition);
+            statsScroll = GUI.BeginScrollView(view, statsScroll, new Rect(0, 0, colW - 20, rows * 22));
+            float cw = colW - 20;
+            string[] headTxt = { "Ступень", "Δv вак", "у Земли", "TWR Зем/вак", "макс g", "время", "масса" };
+            for (int c = 0; c < headTxt.Length; c++) GUI.Label(new Rect(cw * StageCols[c], 0, cw * 0.2f, 22), headTxt[c], hintStyle);
+            double sumVac = 0, sumSL = 0, sumT = 0;
             for (int i = 0; i < build.Stats.Count; i++)
             {
                 var s = build.Stats[i];
-                GUI.Label(new Rect(0, (i + 1) * 22, colW, 22),
-                    $"{s.Name}", small);
-                GUI.Label(new Rect(colW * 0.42f, (i + 1) * 22, colW, 22),
-                    $"{s.DeltaVVac:0} ({s.DeltaVSL:0}) м/с     {s.TwrSL:0.00} / {s.TwrVac:0.00}     {s.BurnTime:0} с", small);
+                var row = new Rect(0, (i + 1) * 22, cw, 22);
+                if (inView && row.Contains(ev.mousePosition)) hov = i;
+                bool lit = (pinnedStage >= 0 ? pinnedStage : hoverStage) == i;
+                if (lit)
+                {
+                    GUI.color = new Color(StageColor.r, StageColor.g, StageColor.b, 0.22f);
+                    GUI.DrawTexture(row, Texture2D.whiteTexture);
+                    GUI.color = Color.white;
+                }
+                if (inView && ev.type == EventType.MouseDown && ev.button == 0 && row.Contains(ev.mousePosition))
+                {
+                    pinnedStage = pinnedStage == i ? -1 : i;
+                    ev.Use();
+                }
+                sumVac += s.DeltaVVac;
+                sumSL += s.DeltaVSL;
+                sumT += s.BurnTime;
+                double g = s.MaxAccel / Kare.Space.Core.Constants.G0;
+                bool gBad = crew > 0 && s.HighGTime > FlightPhysics.CrewGTime;
+                Cell(row, 0, Fit(small, $"{i + 1}. {s.Name}", cw * (StageCols[1] - 0.01f)), small);
+                Cell(row, 1, $"{s.DeltaVVac:0}", small);
+                Cell(row, 2, $"{s.DeltaVSL:0}", small);
+                Cell(row, 3, $"{s.TwrSL:0.00} / {s.TwrVac:0.00}", i == 0 && s.TwrSL < 1 ? err : small);
+                Cell(row, 4, $"{g:0.0}", gBad ? warn : small);
+                Cell(row, 5, Duration(s.BurnTime), small);
+                Cell(row, 6, $"{s.StartMass / 1000:0.#} т", small);
             }
+            var tot = new Rect(0, (build.Stats.Count + 1) * 22, cw, 22);
+            Cell(tot, 0, "Итого", label);
+            Cell(tot, 1, $"{sumVac:0}", label);
+            Cell(tot, 2, $"{sumSL:0}", label);
+            Cell(tot, 5, Duration(sumT), label);
             GUI.EndScrollView();
+            if (ev.type == EventType.Repaint)
+            {
+                hoverStage = hov;
+                ApplyTint();
+            }
             // Справа — проверки перед стартом: ошибки запрещают запуск, предупреждения — нет.
             float ex = x + colW + 10, ew = w - colW - 10, ey = y;
             if (build.Errors.Count == 0 && build.Warnings.Count == 0)
                 GUI.Label(new Rect(ex, ey, ew, 22), "✔ Проверки пройдены", label);
             foreach (var e in build.Errors) { GUI.Label(new Rect(ex, ey, ew, 40), "✖ " + e, err); ey += err.CalcHeight(new GUIContent("✖ " + e), ew) + 2; }
             foreach (var e in build.Warnings) { GUI.Label(new Rect(ex, ey, ew, 40), "⚠ " + e, warn); ey += warn.CalcHeight(new GUIContent("⚠ " + e), ew) + 2; }
+        }
+
+        void Cell(Rect row, int col, string text, GUIStyle st)
+        {
+            float cw = row.width;
+            float x0 = cw * StageCols[col], x1 = col + 1 < StageCols.Length ? cw * StageCols[col + 1] : cw;
+            GUI.Label(new Rect(row.x + x0, row.y, x1 - x0, row.height), text, st);
+        }
+
+        static string Duration(double s) => s >= 120 ? $"{(int)(s / 60)} мин {s % 60:00} с" : $"{s:0} с";
+
+        /// <summary>
+        /// Шкала Δv как карта KSP: ступени — отрезками по их вакуумному Δv, сверху — засечки участков бюджета миссии
+        /// (выведение, разгон, захват…) и итоговая черта: зелёная — хватает, красная — нет. Под шкалой — сами участки.
+        /// </summary>
+        void DeltaVBar(Rect r, double have, ref int hov)
+        {
+            var ev = Event.current;
+            double need = budget?.Total ?? 0;
+            double full = Math.Max(have, need) * 1.04;
+            GUI.color = new Color(1, 1, 1, 0.08f);
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            if (full <= 0) return;
+            float px = r.x;
+            int lit = pinnedStage >= 0 ? pinnedStage : hoverStage;
+            for (int i = 0; i < build.Stats.Count; i++)
+            {
+                float sw = (float)(build.Stats[i].DeltaVVac / full * r.width);
+                var seg = new Rect(px, r.y + 2, Mathf.Max(1, sw - 1), r.height - 4);
+                GUI.color = i == lit ? StageColor : i % 2 == 0 ? new Color(0.45f, 0.62f, 0.85f, 0.9f) : new Color(0.32f, 0.45f, 0.65f, 0.9f);
+                GUI.DrawTexture(seg, Texture2D.whiteTexture);
+                GUI.color = Color.white;
+                if (sw > 16) GUI.Label(seg, $"{i + 1}", helpStyle);
+                if (seg.Contains(ev.mousePosition)) hov = i;
+                if (ev.type == EventType.MouseDown && ev.button == 0 && seg.Contains(ev.mousePosition))
+                {
+                    pinnedStage = pinnedStage == i ? -1 : i;
+                    ev.Use();
+                }
+                px += sw;
+            }
+            var legsRect = new Rect(r.x, r.yMax + 2, r.width, BarLegsH);
+            if (budget == null)
+            {
+                GUI.Label(legsRect, "Бюджет миссии не считается: старт в воздухе у цели", hintStyle);
+                return;
+            }
+            // Засечки по нарастающей: где кончается выведение, разгон к цели и т.д.
+            double cum = 0;
+            var legs = new List<string>();
+            foreach (var l in budget.Legs)
+            {
+                cum += l.DeltaV;
+                float mx = r.x + (float)(cum / full * r.width);
+                GUI.color = new Color(1, 1, 1, 0.75f);
+                GUI.DrawTexture(new Rect(mx - 1, r.y - 3, 2, 6), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+                legs.Add($"{l.Name} {l.DeltaV:0}");
+            }
+            bool ok = have >= need;
+            float nx = r.x + (float)(need / full * r.width);
+            GUI.color = ok ? new Color(0.4f, 1f, 0.5f) : new Color(1f, 0.4f, 0.35f);
+            GUI.DrawTexture(new Rect(nx - 1.5f, r.y - 3, 3, r.height + 6), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            string verdict = ok ? $"запас {have - need:0} м/с" : $"не хватает {need - have:0} м/с";
+            string text = $"{MissionCatalog.All[missionIdx].Title}: ≈{need:0} м/с, {verdict}" + (budget.Assists ? " (без гравманёвров)" : "") +
+                          "  ·  " + string.Join(" → ", legs);
+            GUI.Label(legsRect, new GUIContent(Fit(ok ? small : warn, text, legsRect.width),
+                "Оценка по круговым орбитам и гомановским перелётам; потери выведения внутри. Δv ракеты — по вакууму."), ok ? small : warn);
         }
 
         /// <summary>Текст, обрезанный с «…» под ширину w в стиле s (CalcSize меряет без переноса).</summary>

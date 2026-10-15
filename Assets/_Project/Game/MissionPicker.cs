@@ -23,13 +23,17 @@ namespace Kare.Space.Game
 
         static Vector2 scroll;
         static List<MissionDef> sorted;
+        static int sortedFrom;
         static GUIStyle title, hint, head, cell, cellCur, q, tipTitle, tipSub, tipText, tipObj, sketchLabel, close;
 
         /// <summary>Миссии по дате старта: так таблица читается как хроника гонки (§6.1), независимо от порядка в каталоге.</summary>
         static List<MissionDef> Sorted()
         {
-            if (sorted != null && sorted.Count == MissionCatalog.All.Count) return sorted;
-            sorted = new List<MissionDef>(MissionCatalog.All);
+            // Миссии только для карьеры (GDD §8.6: «Венера», «Марс» своей ракетой) в таблицу песочницы не идут —
+            // поэтому кеш сверяется со счётом каталога, а не со своим размером.
+            if (sorted != null && sortedFrom == MissionCatalog.All.Count) return sorted;
+            sortedFrom = MissionCatalog.All.Count;
+            sorted = MissionCatalog.All.FindAll(m => !CareerMissions.IsCareerOnly(m.Id));
             sorted.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
             return sorted;
         }

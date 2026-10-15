@@ -52,9 +52,17 @@ namespace Kare.Space.Game
         int seenMessages;
         float messageTime = -100;
 
+        /// <summary>
+        /// Режим «без интерфейса» (Bind.HideUi, F12; 15.10.2026) — для скриншотов и созерцания. Прячет HUD, подписи карты,
+        /// титры кинокамеры и тосты; меню Esc остаётся — иначе из режима не выйти мышью. Не сохраняется между запусками:
+        /// забытый скрытый HUD при следующем старте выглядел бы как поломка.
+        /// </summary>
+        public static bool UiHidden { get; private set; }
+
         void Update()
         {
             if (KeyBinds.Down(Bind.HudDetails)) details = !details;
+            if (KeyBinds.Down(Bind.HideUi)) UiHidden = !UiHidden;
         }
 
         void Styles()
@@ -74,7 +82,7 @@ namespace Kare.Space.Game
             var boot = GameBootstrap.Instance;
             var u = GameBootstrap.U;
             var v = u?.Active;
-            if (v == null) return;
+            if (v == null || UiHidden) return;
             Styles();
             float s = Mathf.Max(0.75f, Screen.height / BaseHeight);
             GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1));
@@ -267,7 +275,12 @@ namespace Kare.Space.Game
 
         /// <summary>Левая колонка снизу вверх: газ и топливо (ThrustFuel), узел манёвра (NodePanel).
         /// Пара: меняешь высоту одной — колонка сдвигается через NodePanelTop.</summary>
-        const float FlightPanelHeight = 150, ThrustFuelTop = 138, NodePanelHeight = 166;
+        const float FlightPanelHeight = 150, ThrustFuelTop = 138, NodePanelHeight = 224;
+        /// <summary>Ширина панели узла: у межпланетных узлов (Вояджер, §9) строки «После: Ap … · Pe … · → Юпитер» и
+        /// подсказки с назначенными клавишами в 250 не помещались. Пара: NodeLineWidth — ширина строк внутри.</summary>
+        const float NodePanelWidth = 300, NodeLineWidth = NodePanelWidth - 24;
+        /// <summary>Работа двигателя длиннее этого, с, — в «д чч:мм:сс»: «86400 с» не читается.</summary>
+        const double LongBurn = 600;
         static float NodePanelTop(float h) => h - ThrustFuelTop - 6 - NodePanelHeight;
         /// <summary>
         /// Высота и скорость — сверху по центру, сразу под временем миссии (TopCenter: y 8, высота 74): главные цифры
@@ -393,54 +406,72 @@ namespace Kare.Space.Game
 
         void NodePanel(Universe u, Vessel v, float h)
         {
-            var n = v.Node;
+            // Выбранный узел очереди (§6.11): к нему идут клавиши правки — его и показываем.
+            var n = MapView.SelectedNode(v);
             if (n == null) { nodePatches = null; return; }
+            int idx = v.Nodes.IndexOf(n);
             if (Time.unscaledTime >= nodePredictAt)
             {
                 nodePredictAt = Time.unscaledTime + NodePredictPeriod;
                 nodePatches = u.PredictActive();
             }
-            var r = new Rect(12, NodePanelTop(h), 250, NodePanelHeight);
+            var r = new Rect(12, NodePanelTop(h), NodePanelWidth, NodePanelHeight);
             Fill(r, Panel);
             float y = r.y + 6, x = r.x + 12;
             GUI.color = Accent;
             DrawIcon(new Rect(x, y, 24, 24), Icon.Maneuver);
-            GUI.Label(new Rect(x + 30, y, 210, 24), "<b>МАНЁВР</b>", label);
+            GUI.Label(new Rect(x + 30, y, 210, 24), v.Nodes.Count > 1 ? $"<b>МАНЁВР {idx + 1}/{v.Nodes.Count}</b>" : "<b>МАНЁВР</b>", label);
             GUI.color = Color.white;
             y += 26;
             double burn = FlightControl.BurnTime(v, n.Total);
-            string burnText = double.IsInfinity(burn) || double.IsNaN(burn) ? "<color=#ff6050>нет тяги</color>" : $"{burn:0} с работы";
-            GUI.Label(new Rect(x, y, 230, 22), $"Δv <b>{n.Total:0.0}</b> м/с · {burnText}", label);
+            string burnText = double.IsInfinity(burn) || double.IsNaN(burn) ? "<color=#ff6050>нет тяги</color>"
+                            : burn >= LongBurn ? GameCalendar.FormatDuration(burn) + " работы" : $"{burn:0} с работы";
+            GUI.Label(new Rect(x, y, NodeLineWidth, 22), $"Δv <b>{n.Total:0.0}</b> м/с · {burnText}", label);
             y += 22;
             double tLeft = n.Time - u.Time;
             string when = tLeft >= 0 ? "через " + GameCalendar.FormatDuration(tLeft) : $"<color=#ffc840>узел пропущен — {KeyBinds.Label(Bind.NodeDelete)} или {KeyBinds.Label(Bind.NodeNew)}</color>";
-            GUI.Label(new Rect(x, y, 230, 22), when, label);
+            GUI.Label(new Rect(x, y, NodeLineWidth, 22), when, label);
+            y += 22;
+            // Реальный старт: середина прожига — на узле (NodeAutopilot), значит включение за полпрожига до него.
+            // Длительность — со сбросом ступеней (StagedBurnTime), как у автопилота, а не по одной ступени.
+            double staged = FlightControl.StagedBurnTime(v, n.Total), start = tLeft - staged * 0.5;
+            string startText = double.IsInfinity(staged) || double.IsNaN(staged) ? "Старт прожига: —"
+                             : start >= 0 ? "Старт прожига через " + GameCalendar.FormatDuration(start)
+                             : tLeft >= 0 ? "<color=#ffc840>Старт прожига — сейчас</color>" : "";
+            GUI.Label(new Rect(x, y, NodeLineWidth, 22), startText, label);
             y += 22;
             GUI.color = Dim;
-            GUI.Label(new Rect(x, y, 236, 20), $"скор. {n.Prograde:0.0} · норм. {n.Normal:0.0} · рад. {n.Radial:0.0}", small);
+            GUI.Label(new Rect(x, y, NodeLineWidth, 20), $"скор. {n.Prograde:0.0} · норм. {n.Normal:0.0} · рад. {n.Radial:0.0}", small);
             GUI.color = Color.white;
             y += 22;
-            GUI.Label(new Rect(x, y, 236, 22), AfterNode(), small);
-            y += 24;
+            // Две строки: орбита после узла и куда она уводит — вместе они не влезали даже в сжатых единицах.
+            GUI.Label(new Rect(x, y, NodeLineWidth, 38), AfterNode(idx), small);
+            y += 40;
             GUI.color = Dim;
-            GUI.Label(new Rect(x, y, 236, 20), "N апсида · I/K J/L O/U Δv · [ ] время · C круг", small);
-            GUI.Label(new Rect(x, y + 18, 236, 20), "B выполнить · Bksp удалить · Alt точно", small);
+            // Клавиши — из KeyBinds: после переназначения подсказка не врёт.
+            string K(Bind b) => KeyBinds.Label(b);
+            GUI.Label(new Rect(x, y, NodeLineWidth, 20),
+                $"{K(Bind.NodePrograde)}/{K(Bind.NodeRetrograde)} {K(Bind.NodeNormal)}/{K(Bind.NodeAntiNormal)} {K(Bind.NodeRadialOut)}/{K(Bind.NodeRadialIn)} Δv · {K(Bind.NodeEarlier)} {K(Bind.NodeLater)} время", small);
+            GUI.Label(new Rect(x, y + 18, NodeLineWidth, 20),
+                $"{K(Bind.NodeNew)} апсида · {K(Bind.Circularize)} круг · Alt точно", small);
+            GUI.Label(new Rect(x, y + 36, NodeLineWidth, 20),
+                $"{K(Bind.NodeExecute)} выполнить · {K(Bind.NodeDelete)} удалить", small);
             GUI.color = Color.white;
         }
 
         /// <summary>Орбита после узла — ради неё узел и ставят: Ap/Pe или переход в другую сферу влияния.</summary>
-        string AfterNode()
+        string AfterNode(int idx)
         {
             if (nodePatches == null) return "";
             for (int i = 0; i < nodePatches.Count; i++)
             {
                 var p = nodePatches[i];
-                if (!p.AfterNode) continue;
+                if (!p.AfterNode || p.NodeIndex != idx) continue; // первый участок после ЭТОГО узла очереди
                 var o = p.Orbit;
-                string pe = Km(o.PeriapsisRadius - p.Body.Radius);
-                string tail = p.EndType == TransitionType.Atmosphere ? " · <color=#ffc840>вход в атм.</color>"
-                            : p.NextBody != null ? $" · → {p.NextBody.Name}" : "";
-                string ap = o.IsElliptic ? Km(o.ApoapsisRadius - p.Body.Radius) : "∞";
+                string pe = Dist(o.PeriapsisRadius - p.Body.Radius);
+                string tail = p.EndType == TransitionType.Atmosphere ? "\n<color=#ffc840>вход в атм.</color>"
+                            : p.NextBody != null ? $"\n→ {p.NextBody.Name}" : "";
+                string ap = o.IsElliptic ? Dist(o.ApoapsisRadius - p.Body.Radius) : "∞";
                 return $"После: Ap {ap} · Pe {pe}{tail}";
             }
             return "";
@@ -728,5 +759,15 @@ namespace Kare.Space.Game
 
         static string Km(double m) =>
             System.Math.Abs(m) >= 10000 ? (m / 1000).ToString("0.0") + " км" : m.ToString("0") + " м";
+
+        /// <summary>Расстояние сжато для межпланетных орбит: «932512345.6 км» → «6.23 а.е.» / «1.25 млн км».
+        /// Пороги: от 0,1 а.е. — в а.е. (масштаб Солнечной системы, §9), от миллиона км — в млн км, ниже — как Km.</summary>
+        static string Dist(double m)
+        {
+            double a = System.Math.Abs(m);
+            if (a >= 0.1 * Constants.AU) return (m / Constants.AU).ToString("0.00") + " а.е.";
+            if (a >= 1e9) return (m / 1e9).ToString("0.00") + " млн км";
+            return Km(m);
+        }
     }
 }

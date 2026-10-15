@@ -122,8 +122,14 @@ namespace Kare.Space.Game
             var old = new List<Transform>();
             foreach (Transform ch in root) old.Add(ch);
             foreach (var ch in old) { ch.SetParent(null, false); Destroy(ch.gameObject); }
+            tints.Clear();
+            curSec = -1;
             BuildParts();
             FitToFloor();
+            // Новые детали — в исходном цвете; закреплённая ступень могла исчезнуть вместе с правкой.
+            if (pinnedStage >= build.Stats.Count) pinnedStage = -1;
+            shownStage = -1;
+            if (pinnedStage >= 0 || hoverStage >= 0) ApplyTint();
         }
 
         /// <summary>

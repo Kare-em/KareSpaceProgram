@@ -201,6 +201,8 @@ namespace Kare.Space.Game
             gameObject.AddComponent<SaveController>();
             gameObject.AddComponent<FlightView>();
             new GameObject("Flight Audio").AddComponent<FlightAudio>();
+            new GameObject("Auroras").AddComponent<AuroraView>();
+            new GameObject("Comets").AddComponent<CometView>(); // кома и хвосты комет (§9.3), ядро рисует BodyRenderer
             if (PlumeMaterial != null && SmokeMaterial != null && VesselMaterial != null)
             {
                 blasts = new GameObject("Blast Effects").AddComponent<BlastEffects>();

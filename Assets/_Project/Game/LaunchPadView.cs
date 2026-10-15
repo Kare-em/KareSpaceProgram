@@ -145,7 +145,8 @@ namespace Kare.Space.Game
             frameBf = QuaternionD.FromBasis(east.SwapYZ, up.SwapYZ, north.SwapYZ);
 
             top = (float)site.PadHeight;
-            var kind = Classify(v.Design);
+            kind = Classify(v.Design);
+            current = this;
             float z = 0;
             foreach (var s in v.Design.Sections)
             {
@@ -608,7 +609,48 @@ namespace Kare.Space.Game
             return go;
         }
 
-        void OnDestroy() => LitNits = 0;
+        void OnDestroy()
+        {
+            LitNits = 0;
+            if (current == this) current = null;
+        }
+
+        // ------------------------------------------------------------------ газоотвод для облака старта
+
+        /// <summary>Стол сцены (он один — у борта на старте, GameBootstrap): по нему ExhaustTrail направляет облако в лоток.</summary>
+        static LaunchPadView current;
+        Kind kind;
+        /// <summary>Длина лотка от оси стола, м. Пара: PlanR7 (лоток до края плиты −SlabHalf), PlanSaturn (pit ±26 по z).</summary>
+        const float R7TrenchLength = SlabHalf, SaturnTrenchLength = 26;
+        /// <summary>Точка удара струи ближе этого к оси стола — газ идёт в газоотвод/по бетону стола, м (апроны 14–54 м).</summary>
+        const float PadCatch = 30;
+
+        /// <summary>
+        /// Газоотводный лоток стола под точкой groundBf тела b (GDD §7, §9.5): ось лотка в осях тела (единичная), двусторонний ли
+        /// (LC-39: север и юг) и длина от оси, м. false — стола нет, он далеко или без лотка (кольцо «Протона»/«Редстоуна»,
+        /// пьедесталы «Атласа»/«Титана», OLM Starbase — там газ уходит из-под стола во все стороны).
+        /// </summary>
+        public static bool FlameTrench(CelestialBody b, Vector3d groundBf, out Vector3d axisBf, out bool twoWay, out float length)
+        {
+            axisBf = default; twoWay = false; length = 0;
+            var p = current;
+            if (!OnPad(b, groundBf) || (p.kind != Kind.R7 && p.kind != Kind.Saturn)) return false;
+            // Базис стола как в Init: восток = z × зенит, север = зенит × восток.
+            var up = p.anchorBf.normalized;
+            var east = Vector3d.Cross(Vector3d.forward, up).normalized;
+            var north = Vector3d.Cross(up, east);
+            axisBf = p.kind == Kind.R7 ? -north : north;   // у Р-7 лоток на юг (PlanR7), у Saturn — Север–Юг
+            twoWay = p.kind == Kind.Saturn;
+            length = p.kind == Kind.R7 ? R7TrenchLength : SaturnTrenchLength;
+            return true;
+        }
+
+        /// <summary>Точка groundBf тела b — на бетоне стола (облако там — пар и газ, а не пыль поля).</summary>
+        public static bool OnPad(CelestialBody b, Vector3d groundBf)
+        {
+            var p = current;
+            return p != null && p.body == b && (groundBf - p.anchorBf).magnitude < PadCatch;
+        }
 
         void LateUpdate()
         {

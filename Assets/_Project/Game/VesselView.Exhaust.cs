@@ -59,6 +59,8 @@ namespace Kare.Space.Game
         struct KindLook
         {
             public float Bright, Length, Vacuum;
+            /// <summary>Сила ударных ромбов у земли (0 — нет): сажа их прячет, прозрачная струя — показывает.</summary>
+            public float Shock;
             public Color Light;
         }
 
@@ -67,14 +69,16 @@ namespace Kare.Space.Game
             switch (k)
             {
                 // Алюминий в смесевом топливе: раскалённые частицы Al₂O₃ — самый яркий и длинный факел, и в пустоте тоже.
-                case PlumeKind.Solid: return new KindLook { Bright = 1.6f, Length = 1.4f, Vacuum = 0.6f, Light = new Color(1f, 0.82f, 0.6f) };
+                case PlumeKind.Solid: return new KindLook { Bright = 1.6f, Length = 1.4f, Vacuum = 0.6f, Shock = 0.15f, Light = new Color(1f, 0.82f, 0.6f) };
                 // Водород горит почти без сажи: бледно-голубая полупрозрачная струя, в пустоте её почти не видно.
-                case PlumeKind.Hydrolox: return new KindLook { Bright = 0.3f, Length = 0.8f, Vacuum = 0.5f, Light = new Color(0.72f, 0.75f, 1f) };
+                // Зато ромбы у земли ярче самой струи (RS-25 на старте шаттла): прозрачный газ их не прячет.
+                case PlumeKind.Hydrolox: return new KindLook { Bright = 0.3f, Length = 0.8f, Vacuum = 0.5f, Shock = 1.6f, Light = new Color(0.72f, 0.75f, 1f) };
                 // Метан — тоже без сажи: синее ядро, у земли розово-оранжевый хвост (Raptor).
-                case PlumeKind.Methalox: return new KindLook { Bright = 0.6f, Length = 1f, Vacuum = 0.6f, Light = new Color(0.8f, 0.72f, 1f) };
+                case PlumeKind.Methalox: return new KindLook { Bright = 0.6f, Length = 1f, Vacuum = 0.6f, Shock = 1f, Light = new Color(0.8f, 0.72f, 1f) };
                 // АТ/НДМГ: прозрачная оранжево-розовая струя, у земли с бурым NO₂.
-                case PlumeKind.Hypergolic: return new KindLook { Bright = 0.5f, Length = 0.9f, Vacuum = 0.8f, Light = new Color(1f, 0.66f, 0.5f) };
-                default: return new KindLook { Bright = 1, Length = 1, Vacuum = 1, Light = new Color(1f, 0.72f, 0.45f) };
+                case PlumeKind.Hypergolic: return new KindLook { Bright = 0.5f, Length = 0.9f, Vacuum = 0.8f, Shock = 0.3f, Light = new Color(1f, 0.66f, 0.5f) };
+                // Керосин: сажистая оболочка прячет ромбы наполовину (Merlin, РД-107 — видны у самого среза).
+                default: return new KindLook { Bright = 1, Length = 1, Vacuum = 1, Shock = 0.7f, Light = new Color(1f, 0.72f, 0.45f) };
             }
         }
 
@@ -122,16 +126,94 @@ namespace Kare.Space.Game
             return kindGradients[k] = tex;
         }
 
-        /// <summary>Материал факела вида k: копия plumeMat со своим градиентом. Ключ _EMISSIVE_COLOR_MAP — руками
-        /// (рантайм-материалы не валидируются, pitfalls-render).</summary>
+        /// <summary>Шейдер объёмного факела (Settings/Resources — попадает в билд, как шейдер колец).</summary>
+        public const string PlumeShaderName = "Kare/Plume HDRP";
+
+        /// <summary>
+        /// Материал факела вида k на шейдере Kare/Plume HDRP (мягкий край, клочья, ромбы, раскрытие в пустоте — см.
+        /// шапку шейдера). Без шейдера — как раньше, копия plumeMat (HDRP/Unlit) с ключом _EMISSIVE_COLOR_MAP руками
+        /// (рантайм-материалы не валидируются, pitfalls-render). Сам plumeMat не меняем: из него сделана плазма входа.
+        /// </summary>
         Material PlumeMaterial(PlumeKind k)
         {
-            if (k == PlumeKind.Kerolox) return plumeMat;
             if (kindMats.TryGetValue(k, out var m) && m != null) return m;
+            var sh = Shader.Find(PlumeShaderName);
+            if (sh != null)
+            {
+                m = new Material(sh) { name = "Plume " + k + " (runtime)", renderQueue = 3000 };
+                m.SetTexture("_EmissiveColorMap", PlumeGradient(k));
+                return kindMats[k] = m;
+            }
+            if (k == PlumeKind.Kerolox) return plumeMat;
             m = new Material(plumeMat) { name = "Plume " + k + " (runtime)" };
             m.SetTexture("_EmissiveColorMap", PlumeGradient(k));
             m.EnableKeyword("_EMISSIVE_COLOR_MAP");
             return kindMats[k] = m;
+        }
+
+        /// <summary>Раскрытие недорасширенной струи в пустоте (шейдер: радиус × (1 + E·√t), основание — на срезе):
+        /// свечение уходит куполом (J-2, RL10 на снимках — шире ступени), ядро почти не раздувается. Пара:
+        /// PlumeBoundsPad — запас границ меша под это раскрытие, иначе отсечение по frustum резало бы хвост.</summary>
+        const float GlowVacuumExpand = 2.5f, CoreVacuumExpand = 0.4f, PlumeBoundsPad = 1 + GlowVacuumExpand;
+        /// <summary>Клочья (доля модуляции шумом): ядро ровнее, внешнее свечение рвётся сильнее. Снос ячеек шума, 1/с.</summary>
+        const float CoreTurb = 0.35f, GlowTurb = 0.75f, PlumeScroll = 5f;
+        /// <summary>Ударные ромбы: шаг у земли в диаметрах среза (у одиночного сопла 1–2 D; растёт как √(pₐ₀/pₐ)),
+        /// узлов до затухания; ниже ShockPressureEnd атм ромбы гаснут — выше 10–15 км их не видно.</summary>
+        const float ShockCalibers = 1.4f, ShockNodes = 4, ShockPressureEnd = 0.25f;
+        /// <summary>Мягкое касание стола/грунта и подход камеры — в радиусах среза.</summary>
+        const float PlumeSoft = 0.6f, PlumeNear = 0.5f;
+        /// <summary>Средний множитель края поперёк столба (∫|cos|^Limb по прицельному параметру, Limb 1,2 в шейдере):
+        /// светящаяся площадь стала меньше — на столько же меньше и сила света факела (PlumeLight).</summary>
+        const float PlumeLimbMean = 0.75f;
+
+        static readonly int IdEmissive = Shader.PropertyToID("_EmissiveColor"), IdExpand = Shader.PropertyToID("_Expand"),
+            IdAspect = Shader.PropertyToID("_Aspect"), IdTurb = Shader.PropertyToID("_Turb"), IdShock = Shader.PropertyToID("_Shock"),
+            IdSeed = Shader.PropertyToID("_Seed"), IdSoft = Shader.PropertyToID("_SoftDist"), IdNear = Shader.PropertyToID("_NearFade"),
+            IdScroll = Shader.PropertyToID("_Scroll");
+
+        /// <summary>Границы меша струи — с запасом на раскрытие в шейдере (вершины двигает GPU, Unity о них не знает).</summary>
+        static Mesh PadPlumeBounds(Mesh m)
+        {
+            var b = m.bounds;
+            b.extents = new Vector3(b.extents.x * PlumeBoundsPad, b.extents.y, b.extents.z * PlumeBoundsPad);
+            m.bounds = b;
+            return m;
+        }
+
+        /// <summary>
+        /// Кадр факела (§9.5): масштаб ядра и свечения и параметры шейдера. Основание свечения — ровно срез (раньше в
+        /// пустоте раздувалось всё свечение вместе с основанием, и у среза висело кольцо шире сопла); недорасширение —
+        /// раскрытием хвоста в шейдере. Ромбы — только у земли и только на ядре. Без аллокаций: свойства по Id,
+        /// общий mpb с Clear перед каждым рендерером (копии — SyncMirrors через GetPropertyBlock).
+        /// </summary>
+        void UpdatePlumeFx(Part p, float pressure, float len, float coreR, float coreNits, float glowNits, float flicker)
+        {
+            float pa = Mathf.Clamp01(pressure), vac = 1 - pa;
+            float coreLen = len * flicker, glowLen = len * GlowLength * flicker;
+            p.Plume.localScale = new Vector3(coreR, coreLen, coreR);
+            p.Glow.localScale = new Vector3(p.PlumeRadius, glowLen, p.PlumeRadius);
+            float shock = Look(p.Kind).Shock * Mathf.SmoothStep(0, 1, (pa - ShockPressureEnd) / (1 - ShockPressureEnd));
+            float step = ShockCalibers * 2 * p.PlumeRadius / Mathf.Sqrt(Mathf.Max(pa, ShockPressureEnd)) / Mathf.Max(coreLen, 1e-3f);
+            float seed = p.Index * 3.7f;
+            SetPlumeFx(p.CoreR, coreNits * flicker, vac * CoreVacuumExpand, coreLen / Mathf.Max(coreR, 1e-3f), CoreTurb,
+                new Vector4(shock, step, ShockNodes, 0), seed, p.PlumeRadius);
+            SetPlumeFx(p.GlowR, glowNits * flicker, vac * GlowVacuumExpand, glowLen / Mathf.Max(p.PlumeRadius, 1e-3f), GlowTurb,
+                Vector4.zero, seed + 11, p.PlumeRadius);
+        }
+
+        void SetPlumeFx(Renderer r, float nits, float expand, float aspect, float turb, Vector4 shock, float seed, float radius)
+        {
+            mpb.Clear();
+            mpb.SetColor(IdEmissive, new Color(nits, nits, nits, 1));
+            mpb.SetFloat(IdExpand, expand);
+            mpb.SetFloat(IdAspect, aspect);
+            mpb.SetFloat(IdTurb, turb);
+            mpb.SetFloat(IdScroll, PlumeScroll);
+            mpb.SetVector(IdShock, shock);
+            mpb.SetFloat(IdSeed, seed);
+            mpb.SetFloat(IdSoft, radius * PlumeSoft);
+            mpb.SetFloat(IdNear, radius * PlumeNear);
+            r.SetPropertyBlock(mpb);
         }
 
         /// <summary>

@@ -59,6 +59,11 @@ namespace Kare.Space.Game
                     return new BodyLook { Low = new Color(0.70f, 0.66f, 0.60f), High = new Color(0.92f, 0.92f, 0.90f), IceLatitude = 90 };
                 case "titan":
                     return Gas(new Color(0.72f, 0.55f, 0.28f), new Color(0.80f, 0.64f, 0.35f), 3, 0.08f);
+                case "halley":
+                case "halebopp":
+                    // Ядро кометы — одно из самых тёмных тел системы: альбедо ≈ 0,04 (Джотто, 1986). Цвета sRGB:
+                    // 0,16…0,29 — это 0,02…0,07 линейно, в среднем ≈ 0,04. Пара: Albedo в BodyRenderer.Points.
+                    return new BodyLook { Low = new Color(0.16f, 0.15f, 0.14f), High = new Color(0.29f, 0.27f, 0.25f), IceLatitude = 90 };
                 default:
                     return new BodyLook { Low = Rock * 0.7f, High = Rock * 1.3f, IceLatitude = 90 };
             }

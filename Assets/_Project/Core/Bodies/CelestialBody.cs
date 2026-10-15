@@ -13,6 +13,11 @@ namespace Kare.Space.Core
         Schlyter,
         /// <summary>Круговая орбита в плоскости экватора родителя — для спутников внешних планет.</summary>
         Circular,
+        /// <summary>
+        /// Неизменные оскулирующие элементы (кометы, §2.3): чистая задача двух тел вокруг родителя, эпоха — перигелий.
+        /// Возмущения планет не учтены — у Галлея это сдвиг перигелия на месяцы за оборот, для игры терпимо.
+        /// </summary>
+        Kepler,
     }
 
     /// <summary>
@@ -35,6 +40,10 @@ namespace Kare.Space.Core
         public TerrainSettings Terrain;
         /// <summary>Газовый гигант: твёрдой поверхности нет, на «радиусе» (1 бар) корабль гибнет.</summary>
         public bool IsGasGiant;
+        /// <summary>Комета: игровой слой рисует кому и хвосты (CometView), таблица перелётов её пропускает.</summary>
+        public bool IsComet;
+        /// <summary>Расстояние до Солнца, ближе которого комета активна в полную силу, и дальше которого гаснет, м.</summary>
+        public double CometActiveFull, CometActiveOff;
 
         // Вращение по IAU: полюс α0, δ0 (град + град/столетие), меридиан W (град + град/сутки).
         public double PoleRa0, PoleRaRate, PoleDec0, PoleDecRate, W0, WRate;
@@ -46,6 +55,10 @@ namespace Kare.Space.Core
         public double[] Elements, Rates;
         public double CircularRadius, CircularPhase0;
         public bool Retrograde;
+        /// <summary>Kepler: a (м), e, i, Ω, ω (град) и момент перигелия (с от J2000) — задаёт <see cref="SetKepler"/>.</summary>
+        public double KeplerA, KeplerE, KeplerInc, KeplerNode, KeplerArgPe, KeplerPeriTime;
+        /// <summary>Кеш орбиты Kepler: строится один раз, чтобы LocalStateAt (зовётся в поиске встреч на каждом шаге) не аллоцировал.</summary>
+        KeplerOrbit keplerOrbit;
         /// <summary>
         /// Спутник, с которым тело образует заметный барицентр (Земля — Луна). Эфемерида Standish даёт
         /// барицентр, а Земля смещена от него на ~4700 км — учитываем, иначе Луна «плавает».
@@ -101,6 +114,16 @@ namespace Kare.Space.Core
                     CircularState(t, out var r, out var v);
                     return KeplerOrbit.FromState(r, v, Parent.Mu + Mu, t);
                 }
+                case OrbitModelType.Kepler:
+                {
+                    // Копия с эпохой t, как у Standish: потребители могут считать MeanAnomalyAtEpoch «текущей».
+                    // Кеш не отдаём наружу — KeplerOrbit изменяемый.
+                    var k = KeplerFixed();
+                    var o = k.Clone();
+                    o.MeanAnomalyAtEpoch = MathD.WrapPi(k.MeanAnomalyAt(t));
+                    o.Epoch = t;
+                    return o;
+                }
                 default:
                     return null;
             }
@@ -119,6 +142,11 @@ namespace Kare.Space.Core
                 CircularState(t, out r, out v);
                 return;
             }
+            if (OrbitModel == OrbitModelType.Kepler)
+            {
+                KeplerFixed().GetState(t, out r, out v);
+                return;
+            }
             OrbitAt(t).GetState(t, out r, out v);
             if (BarycenterSatellite != null)
             {
@@ -127,6 +155,31 @@ namespace Kare.Space.Core
                 r -= rs * k;
                 v -= vs * k;
             }
+        }
+
+        /// <summary>Задать неизменную гелиоцентрическую орбиту: a (м), e, i/Ω/ω (град, эклиптика J2000), перигелий (с от J2000).</summary>
+        public void SetKepler(double a, double e, double incDeg, double nodeDeg, double argPeDeg, double periTime)
+        {
+            OrbitModel = OrbitModelType.Kepler;
+            KeplerA = a;
+            KeplerE = e;
+            KeplerInc = incDeg;
+            KeplerNode = nodeDeg;
+            KeplerArgPe = argPeDeg;
+            KeplerPeriTime = periTime;
+            keplerOrbit = null;
+        }
+
+        KeplerOrbit KeplerFixed()
+        {
+            if (keplerOrbit == null)
+            {
+                double d2r = Constants.Deg2Rad;
+                // M = 0 в момент перигелия — эпоха орбиты.
+                keplerOrbit = KeplerOrbit.FromElements(Parent.Mu + Mu, KeplerA, KeplerE, KeplerInc * d2r, KeplerNode * d2r,
+                    KeplerArgPe * d2r, 0, KeplerPeriTime);
+            }
+            return keplerOrbit;
         }
 
         void CircularState(double t, out Vector3d r, out Vector3d v)

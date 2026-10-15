@@ -249,6 +249,18 @@ namespace Kare.Space.Game
 
         // ------------------------------------------------------------------ Юпитер, Уран, Нептун
 
+        /// <summary>
+        /// Игровое преувеличение (§9.4): настоящие τ (у Юпитера 1e-6) и альбедо 0,03 дают кольцо, которого глаз не
+        /// видит ни под каким углом — у игрока на пролёте «Вояджера» колец просто нет. Поднимаем τ до ~1e-2…1e-1 и
+        /// альбедо в 2–4 раза: кольцо бледное, но различимое; Сатурн не трогаем — он и так виден.
+        /// Пара: VisualTauCap — узкие кольца Урана (ε, τ 1,5) после усиления не должны стать стеной: мипы усредняют τ,
+        /// а не прозрачность, и издали непрозрачная нить раздувалась бы в широкую яркую полосу.
+        /// </summary>
+        const float JupiterTauGain = 5000, JupiterAlbedoGain = 2.5f;
+        const float UranusTauGain = 20, UranusAlbedoGain = 4;
+        const float NeptuneTauGain = 15, NeptuneAlbedoGain = 3;
+        const float VisualTauCap = 2;
+
         /// <summary>Юпитер: гало 92–122,5 тыс. км и главное кольцо до 129 тыс. км, τ ~1e-6, сплошь пыль
         /// (Ockert-Bell 1999) — видно только на просвет, как на снимках «Вояджера» из тени.</summary>
         static Profile Jupiter()
@@ -258,7 +270,7 @@ namespace Kare.Space.Game
                 new Knot(92000, 0, 1), new Knot(100000, 3e-7f, 1), new Knot(122500, 1e-6f, 1),
                 new Knot(123000, 3e-6f, 1), new Knot(127800, 5e-6f, 1), new Knot(128900, 6e-6f, 1), new Knot(129200, 0, 1),
             };
-            return Simple(knots, null, 90000, 130000, 2048, new Color(0.06f, 0.05f, 0.04f));
+            return Simple(knots, null, 90000, 130000, 2048, new Color(0.06f, 0.05f, 0.04f), JupiterTauGain, JupiterAlbedoGain);
         }
 
         /// <summary>Уран: девять узких колец (Elliot, French 1987) — тёмный материал, альбедо ~0,03, и пыльные
@@ -275,7 +287,7 @@ namespace Kare.Space.Game
                 R(50023, 2, 0.1f, 1),                                                  // λ
                 R(51149, 58, 1.5f, 0),                                                 // ε, 20–96 км по эксцентриситету
             };
-            return Simple(knots, rings, 37000, 52000, 4096, new Color(0.03f, 0.03f, 0.03f));
+            return Simple(knots, rings, 37000, 52000, 4096, new Color(0.03f, 0.03f, 0.03f), UranusTauGain, UranusAlbedoGain);
         }
 
         /// <summary>Нептун: Галле, Леверье, Лассель, Араго, Адамс — пыльные (доля пыли 0,5–0,7), τ 1e-4…4e-3,
@@ -288,13 +300,14 @@ namespace Kare.Space.Game
                 new Knot(53200, 1.5e-4f, 0.6f), new Knot(57100, 1.5e-4f, 0.6f), new Knot(57200, 0, 0.6f),
             };
             var rings = new[] { R(53200, 56, 2e-3f, 0.5f), R(57200, 50, 1e-4f, 0.7f), R(62932, 18, 4e-3f, 0.5f) };
-            return Simple(knots, rings, 40000, 63500, 4096, new Color(0.045f, 0.035f, 0.03f));
+            return Simple(knots, rings, 40000, 63500, 4096, new Color(0.045f, 0.035f, 0.03f), NeptuneTauGain, NeptuneAlbedoGain);
         }
 
         static Band R(double center, double halfWidth, float tau, float dust) => new Band(center - halfWidth, center + halfWidth, tau, dust);
 
-        static Profile Simple(Knot[] knots, Band[] rings, double inner, double outer, int n, Color albedo)
+        static Profile Simple(Knot[] knots, Band[] rings, double inner, double outer, int n, Color albedo, float tauGain, float albedoGain)
         {
+            albedo = new Color(Mathf.Min(albedo.r * albedoGain, 1), Mathf.Min(albedo.g * albedoGain, 1), Mathf.Min(albedo.b * albedoGain, 1));
             double step = (outer - inner) / n;
             var tau = new float[n];
             var col = new Color[n];
@@ -306,6 +319,7 @@ namespace Kare.Space.Game
                     double r = inner + (i + (s + 0.5) / SubSamples) * step;
                     Eval(knots, r, out float t, out float d);
                     if (rings != null) Overlay(rings, r, ref t, ref d, true);
+                    t = Mathf.Min(t * tauGain, VisualTauCap);
                     sumTau += t;
                     sumDust += d * t;
                 }

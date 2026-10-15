@@ -461,3 +461,56 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
   case; Cassini's radius is the 4 m HGA, so puffs would fire from the dish rim, 2 m off the bus. Explicit
   `Quads(1.6, 1.06, 30)` (paired with `cassini_parts.py` RCS_Z/RCS_R, azimuths 30+90k clear the RTGs and Huygens at 270 Blender).
   Huygens (RcsTorque 30 < 0.3·150) gets no jets while attached — correct, its jets are hidden by the max-torque filter.
+
+## Sun disc flicker without glare (15.10.2026, `SunLight.LimitDisc`)
+- **The PBSky sun disc overflows the R11G11B10 buffer at any distance.** Disc = illuminance / solid angle: ~2e9 nit at Earth,
+  ~7e7 at Jupiter; FarSunEv keeps it constant after exposure, ~4e5…1e6 pre-exposed vs a ~65 000 ceiling → Inf. TAA jitter
+  (8-frame cycle) reshuffles those pixels, and the bloom halo pulses. Measured (Voyager at Jupiter, glare off, camera turning
+  0.1°/frame): halo energy 1500…2040, 31 % spread; with the disc capped at 3e4 it is 288…290, 0.5 %. With glare on, the flare hides it.
+- Fix: `hdSun.surfaceTint` = cap / pre-exposed value (it tints only the disc, not the scene lighting). The disc stays white:
+  3e4 is 30 000× white.
+- **Do not take the EV from `exposure.limitMin`**: on the pad the floor is −7.3 while the frame sits at EV 13.4, so the
+  worst-case tint would make the Sun black. Read the actual exposure: `Shader.GetGlobalTexture("_ExposureTexture")`
+  (R32G32, R = 1/(1.2·2^EV), G = EV) + `AsyncGPUReadback` of 1 px. The HDRP getters `HDCamera.GpuExposureValue` and
+  `GetExposureTexture` are internal.
+
+## Moon maps from USGS GeoTIFFs (15.10.2026, `Tools/textures/moons.py`)
+- **ISIS labels: `LongitudeDirection = PositiveWest` does NOT mirror the image.** x still grows eastward (checked on Io: Pele at 105E and Loki
+  at 51E sit exactly where the label puts them with east to the right). Only the centre matters: `CenterLongitude = 180` (Europa, Callisto,
+  Titan, Ganymede, Pluto) -> `np.roll` by W/2 to get lon 0 in the centre, as `BodyRenderer.LatLonUv` expects. Enceladus has `UpperLeftCornerX = 0`
+  with centre 180 -> its centre is already lon 0.
+- Missing data are exact-0 pixels: Pluto 32 %, Charon 34 %, Triton 39 % (night side), Europa/Ganymede/Callisto ~4 % at the poles. The script fills
+  them with a pyramid inpaint plus grain; the fill is a plausible tone, not data.
+- The Voyager Triton colour mosaic is artificially green: only its luminance is used, tinted pinkish. Gray mosaics (Europa, Callisto, Titan, Pluto,
+  Charon...) are tinted: light tone by `bright`, dark tone by `dark` (reddish lineae/tholins).
+- Albedo normalization with a soft knee (hard clip burned Triton/Enceladus caps); Enceladus capped at 0.62 — at 0.85+ the details wash out.
+- Titan: there is no haze shell in the renderer (`SkyController` has profiles only for Earth/Mars), so the map is baked orange and low-contrast (0.5).
+- Moons are loaded from `Resources/MoonMaps/<id>` so the serialized `BodyRenderer.Maps` in Flight.unity needs no rebuild. `Small` (patch colour) is not set for them.
+
+## Comet tails (15.10.2026, `Game/CometView.cs`)
+- **Long objects need per-vertex shell compression**: a tail is 1e10–1e11 m, a single-transform shell scale (as for bodies) would squash
+  it toward the head. Each vertex goes `rel = p − OriginP` → `rel * BodyRenderer.ShellScale(|rel|)` — directions from the camera are kept,
+  everything lands inside far 1e7. On the map `Compression` is false and ShellScale = 1.
+- **HDRP/Unlit ignores vertex colours** — per-vertex fade/flux needs a custom shader (`Kare/Comet Glow HDRP`, ForwardOnly, Blend One One).
+  Output is a fraction of screen white written into the pre-exposed buffer (same convention as body points) — in nits a tail is invisible at EV 12+.
+- Width below `TailMinPx` is widened with flux conservation (colour × real/drawn width), otherwise a distant tail flickers as a 1-px line.
+
+## Plumes 2.0, RCS jets, auroras (15.10.2026, `KarePlumeHDRP.shader`, `KareAuroraHDRP.shader`, `RcsJets.cs`, `AuroraView.cs`)
+- **HDRP/Unlit plume = flat picture**: wall brightness does not depend on the view angle, so the cone edge was a hard line.
+  `Kare/Plume HDRP` (ForwardOnly, Blend One One, Cull Off) makes brightness ~ path through the column (|cos| of the ray angle to the axis),
+  adds 3D noise drifting along the jet and shock diamonds (`_Shock`, set by VesselView from ambient pressure). Vacuum under-expansion is a vertex
+  displacement `1 + _Expand*sqrt(t)` with brightness divided by the same factor. `_ExposureWeight` = 1 for engines (nits x exposure), 0 for RCS (screen fractions).
+- **RCS jets are not a cone**: JetStyle per propellant (hypergolic / micro hydrazine / big) = faint steady part + short ignition flash (decays by `FlashTau`) +
+  white condensate puff in air. Micro thrusters (Voyager/Cassini 0.9 N) get `MicroThrusterLength` (0.22 m); length from the section radius gave a metre
+  cone wider than the bus. Pulse (PWM) frequency 4 Hz must stay below fps/2 (aliasing, see Sun flicker).
+- **`Material.SetColor` converts sRGB -> linear in this project**: a physical 0.02 nit aurora became 0.0015 and vanished. Values given in nits go through
+  `SetVector` (same for `_ColorLow/_ColorHigh` of the aurora).
+- **Aurora brightness is physical, so it follows exposure**: shader outputs nits x `GetCurrentExposureMultiplier()`; night (EV ~ -3..-7) shows it, day side is
+  killed by exposure without extra logic (`_DaySide` only dims the lit side a bit). A real 100 kR arc = 0.02 cd/m2 was barely readable from 400 km at EV -3
+  (measured 15.10.2026), so Earth uses 0.035 ("strong storm").
+- **Aurora ovals are children of the body sphere** (`BodyRenderer` child found by name, lazily): floating origin, far-shell compression and rotation come for
+  free. Root scale = `R * k / sphere.localScale.x` — Earth/Moon/Mars spheres are sunk under the terrain, so the sphere radius != body radius.
+- **Edited .shader is not picked up in Play by itself**: call `AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate)` through `execute_code`, then
+  screenshot. Debug returns (`return float4(float3(day,...),0)`) are handy for isolating a factor, but remove them before finishing.
+- **Smoke ribbon**: HDRP/Lit has no vertex colours — density is set by ribbon width and age by U; volume comes from "cylindrical" normals across
+  `Across` columns, ragged edges (`LumpL/LumpR`), faster spreading in thin air (`Sample.Spread`).

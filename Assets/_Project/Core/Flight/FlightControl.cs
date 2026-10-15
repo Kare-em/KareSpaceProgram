@@ -509,7 +509,13 @@ namespace Kare.Space.Core
                     v.Throttle = 1;
                     FlightControl.PointAt(v, up);
                     Status = "Вертикальный подъём";
-                    if (!v.Body.HasAtmosphere && v.SurfaceSpeed > AirlessVerticalSpeedEnd) Phase = PhaseType.Guided;
+                    // Без атмосферы программы тангажа нет вовсе: высота тут от среднего радиуса, и площадка выше
+                    // VerticalAltitudeEnd (ЛМ на 2,4 км рельефа) уводила в PitchProgram с первого кадра — APS
+                    // выработана при Pe −130 км (apollo11, 15.10.2026).
+                    if (!v.Body.HasAtmosphere)
+                    {
+                        if (v.SurfaceSpeed > AirlessVerticalSpeedEnd) Phase = PhaseType.Guided;
+                    }
                     else if (v.SurfaceSpeed > VerticalSpeedEnd || v.Altitude > VerticalAltitudeEnd) Phase = PhaseType.PitchProgram;
                     break;
 
@@ -759,6 +765,9 @@ namespace Kare.Space.Core
         const double EnergyCutoffAlong = 0.9;
 
         public string Status { get; private set; } = "";
+        /// <summary>Куда автопилот держит нос на этом шаге (P); NaN — ещё не наводился. Читает режим малой тяги
+        /// (Universe.LowThrustBurn): там ориентация ставится сразу, без динамики разворота.</summary>
+        public Vector3d Aim { get; private set; } = new Vector3d(double.NaN, 0, 0);
         bool started;
         ManeuverNode planned;
         bool energyMode;
@@ -889,6 +898,7 @@ namespace Kare.Space.Core
                         kickDir = KickAim(v.Position, v.Velocity, v.Body.Mu, solid, node.TargetExcess, kickDir, out _);
                     dir = kickDir;
                 }
+                Aim = dir;
                 FlightControl.PointAt(v, dir);
                 if (FlightControl.SolidBurning(v))
                 {
@@ -920,12 +930,14 @@ namespace Kare.Space.Core
             if (left < 0.1 || !energyMode && started && Vector3d.Dot(node.Remaining, v.NoseP) < 0)
             {
                 FlightControl.Cutoff(v);
-                v.Node = null;
+                // Исполненный узел снимается, следующий в очереди становится текущим: его остаток — по фактической орбите.
+                NodePlanner.Delete(v, t, node);
                 v.Sas = SasMode.Stability;
                 v.SasHoldValid = false;
                 v.Raise($"Манёвр выполнен, остаток {left:F1} м/с");
                 return AutopilotRequest.Finished;
             }
+            Aim = dir;
             FlightControl.PointAt(v, dir);
             double burn = FlightControl.BurnTime(v, left);
             if (double.IsInfinity(burn) && !v.AnyEngineRunning &&

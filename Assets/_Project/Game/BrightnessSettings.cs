@@ -67,6 +67,24 @@ namespace Kare.Space.Game
             }
         }
 
+        const string GlareKey = "kare.brightness.sunglare";
+        static int glare = -1;
+
+        /// <summary>Блик Солнца в объективе (SunFlare): вкл/выкл — клавиша Bind.SunGlare и флажок в меню Esc.</summary>
+        public static bool SunGlare
+        {
+            get
+            {
+                if (glare < 0) glare = PlayerPrefs.GetInt(GlareKey, 1) != 0 ? 1 : 0;
+                return glare != 0;
+            }
+            set
+            {
+                glare = value ? 1 : 0;
+                PlayerPrefs.SetInt(GlareKey, glare);
+            }
+        }
+
         public static void Save() => PlayerPrefs.Save();
     }
 }

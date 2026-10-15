@@ -196,15 +196,26 @@ namespace Kare.Space.Core
             pluto.Terrain = Ter(3000, 61, craters: 0.3);
             s.Add(Moonlet(Body("charon", "Харон", 1.058e11, 606), 19591, 0), pluto).Terrain = Ter(2500, 62, craters: 0.4);
 
-            // Сферы влияния по Лапласу: r = a·(m/M)^0.4, a — на J2000.
+            // Кометы (§2.3) — в конце списка: индексы прежних тел не сдвигаются (сохранения ссылаются на них).
+            AddComets(s, sun);
+
+            // Сферы влияния по Лапласу: r = a·(m/M)^0.4, a — на J2000. У комет — по перигелию q: при e ≈ 1 большая
+            // полуось уносит «a» за сотню а.е., и сфера Хейла — Боппа вышла бы в 40 тыс. км вокруг 30-км ядра.
             foreach (var b in s.Bodies)
             {
                 if (b.Parent == null) continue;
-                double a = b.OrbitModel == OrbitModelType.Circular ? b.CircularRadius : b.OrbitAt(0).A;
+                double a = b.OrbitModel == OrbitModelType.Circular ? b.CircularRadius
+                    : b.OrbitModel == OrbitModelType.Kepler ? b.KeplerA * (1 - b.KeplerE)
+                    : b.OrbitAt(0).A;
                 b.SoiRadius = a * Math.Pow(b.Mu / b.Parent.Mu, 0.4);
             }
 
             foreach (var b in s.Bodies) ApplyHeightMap(b);
+            // Газовые гиганты: под уровнем 1 бар атмосфера продолжается адиабатой (ExponentialAtmosphere.DeepLapse) —
+            // «поверхности» у них нет, корабль тонет, пока не раздавит (FlightPhysics.GasGiantCrushPressure).
+            foreach (var b in s.Bodies)
+                if (b.IsGasGiant && b.Atmosphere is ExponentialAtmosphere ea)
+                    ea.EnableDeep(b.Mu / (b.Radius * b.Radius));
 
             if (Terrain.Sites.Count == 0)
             {
@@ -218,6 +229,49 @@ namespace Kare.Space.Core
             }
             return s;
         }
+
+        /// <summary>Гравитационная постоянная (CODATA 2018), м³/(кг·с²): массы ядер комет известны в кг, а не как GM.</summary>
+        const double G = 6.6743e-11;
+
+        /// <summary>Юлианская дата TT → секунды игрового времени (от J2000 TT).</summary>
+        static double FromJd(double jd) => (jd - Constants.JD_J2000) * Constants.Day;
+
+        /// <summary>
+        /// 1P/Галлея и C/1995 O1 Хейла — Боппа: оскулирующие элементы (JPL SBDB, эклиптика J2000) на эпоху их перигелиев
+        /// 1986 и 1997 гг. Задача двух тел без возмущений: возле перигелия-эпохи точно (тест comets: сближения с Землёй
+        /// 1986/1997 — до 0,005 а.е.), за оборот Галлея перигелий уезжает: 2061 г. — модель 4 июня против 28 июля.
+        /// Ядра — оценки: масса и размер известны с точностью до множителя ~2, полюса вращения — грубо.
+        /// </summary>
+        static void AddComets(SolarSystem s, CelestialBody sun)
+        {
+            double au = Constants.AU;
+
+            // Галлей: ядро 15×8×8 км (Вега/Джотто 1986) → средний радиус ≈ 5,5 км; масса ≈ 2,2e14 кг (оценка по
+            // плотности ~0,6 г/см³); вращение ≈ 52 ч (в реальности ещё и прецессия 7,4 сут — не моделируем).
+            var halley = s.Add(Iau(Body("halley", "Комета Галлея", G * 2.2e14, 5.5), 78, 0, -62, 0, 0, 360 * 24 / HalleyRotationHours), sun);
+            halley.SetKepler(17.834 * au, 0.96714, 162.26, 58.42, 111.33, FromJd(2446470.96));
+            // Комковатое ядро: низкая частота (крупные «лопасти»), амплитуда ≈ 40 % радиуса — вытянутость 15×8.
+            // Пара: Amplitude·1,5 + 2 км < 10 км — пол рельсов остаётся R + 10 км (PatchedConics.RailsFloorRadius), ниже сферы влияния.
+            halley.Terrain = Ter(2200, 71, craters: 0.15);
+            halley.Terrain.BaseFrequency = 1.2;
+            halley.IsComet = true;
+            halley.CometActiveFull = 1.5 * au;
+            halley.CometActiveOff = 5 * au;
+
+            // Хейл — Бопп: q 0,9141 а.е., e 0,99508 → a ≈ 186 а.е., период ≈ 2500 лет. Ядро ≈ 30 км (оценки 20–35),
+            // масса ≈ 1e16 кг (оценка); вращение 11,35 ч, полюс α 275°, δ −57° (по спиральным струям 1997 г.).
+            var hb = s.Add(Iau(Body("halebopp", "Комета Хейла — Боппа", G * 1e16, 30), 275, 0, -57, 0, 0, 360 * 24 / HaleBoppRotationHours), sun);
+            hb.SetKepler(0.9141 / (1 - 0.99508) * au, 0.99508, 89.43, 282.47, 130.59, FromJd(2450539.64));
+            hb.Terrain = Ter(6000, 72, craters: 0.1);
+            hb.Terrain.BaseFrequency = 1.2;
+            hb.IsComet = true;
+            // Хейл — Бопп «проснулся» на 7 а.е. (открыт в 1995 г. уже с комой) — активность тянется дальше, чем у Галлея.
+            hb.CometActiveFull = 2.5 * au;
+            hb.CometActiveOff = 7 * au;
+        }
+
+        const double HalleyRotationHours = 52;
+        const double HaleBoppRotationHours = 11.35;
 
         public static LaunchSite GetSite(string id) => Terrain.Sites.Find(x => x.Id == id);
     }

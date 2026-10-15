@@ -20,6 +20,10 @@ namespace Kare.Space.Game
         /// <summary>Общий масштаб блика. Единица размера элемента SRP — ≈ 4 % ширины кадра (замер 02.10.2026: лучи
         /// размера 1,1 — 30 px на 640), без множителя блик был звёздочкой. Размеры элементов ниже — в этих долях.</summary>
         const float FlareScale = 10;
+        /// <summary>Общая сила блика (15.10.2026: «блик Солнца слишком яркий» — было 1). Пара: SunLight.FlareDistanceFade —
+        /// множитель по расстоянию поверх этого.</summary>
+        public const float Intensity = 0.45f;
+        public const float Scale = FlareScale;
         /// <summary>Край круга-свечения: доля радиуса под градиент. Ровно 1 гасит элемент целиком (замер: круги
         /// невидимы), 0,1 — резкий белый диск; 0,95 — мягкий ореол.</summary>
         const float GlowEdge = 0.95f;
@@ -35,7 +39,8 @@ namespace Kare.Space.Game
                 // Ядро: плотное свечение вокруг диска.
                 Circle(0, 0.35f, 1.0f, new Color(1f, 0.97f, 0.92f)),
                 // Засветка: мягкий круг почти на весь кадр — «слепит».
-                Circle(0, 2.6f, 0.3f, new Color(1f, 0.96f, 0.90f)),
+                // Засветка вдвое слабее прежней (0,3): кадр, где Солнце в центре, заливало молоком (15.10.2026).
+                Circle(0, 2.6f, 0.15f, new Color(1f, 0.96f, 0.90f)),
                 Rays(),
                 // Призраки линз: шестиугольники по оси Солнце → центр (отрицательная позиция — за центр).
                 Ghost(-0.45f, 0.05f, 0.06f, new Color(0.55f, 0.75f, 1f)),
@@ -99,7 +104,7 @@ namespace Kare.Space.Game
                 lensFlareTexture = RayTexture(),
                 position = 0,
                 uniformScale = 1.1f,
-                localIntensity = 0.6f,
+                localIntensity = 0.35f, // было 0,6 — лучи резали весь кадр (15.10.2026)
                 tint = new Color(1f, 0.97f, 0.93f),
                 preserveAspectRatio = true,
                 blendMode = SRPLensFlareBlendMode.Additive,

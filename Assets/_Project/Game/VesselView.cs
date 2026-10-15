@@ -113,7 +113,6 @@ namespace Kare.Space.Game
         /// Эмиссия HDRP/Lit на корпусе экспозицией почти не гасится: при EV 14,3 замер 01.10.2026 — 20 нит → R≈20
         /// (тёмно-красный), 100 нит → R≈172, 527 нит → белый «кремовый диск». Поэтому десятки нит, а не сотни.</summary>
         const float HeatGlowNits = 60f;
-        static readonly Color HeatGlowTint = new Color(1f, 0.3f, 0.1f);
         /// <summary>След не подходит к камере ближе, радиусов борта: лента, прошедшая сквозь ближнюю плоскость,
         /// режется прямой кромкой на весь кадр (вид сзади, 01.10.2026). Конец ленты в текстуре гаснет в ноль.</summary>
         const float WakeCameraClearance = 2;
@@ -185,6 +184,13 @@ namespace Kare.Space.Game
             public readonly List<Color[]> BodyColors = new List<Color[]>();
 
             public void AddBody(Renderer r, Color[] palette) { BodyR.Add(r); BodyColors.Add(palette); }
+            /// <summary>Сопла отдельными рендерерами (колокола, блоки, качающиеся сопла моделей) — для накала (VesselView.Heat).</summary>
+            public readonly List<Renderer> NozzleR = new List<Renderer>();
+            public readonly List<Color[]> NozzleColors = new List<Color[]>();
+            public void AddNozzle(Renderer r, Color[] palette) { NozzleR.Add(r); NozzleColors.Add(palette); }
+            /// <summary>Накал 0…1 (VesselView.Heat) и что уже покрашено — перекраска только при изменении.</summary>
+            public float NozzleT, SkinT, PaintedNozzle, PaintedSkin;
+            public bool HeatRestored;
         }
 
         readonly List<Part> parts = new List<Part>();
@@ -216,7 +222,6 @@ namespace Kare.Space.Game
         MeshFilter sheathMf;
         LineRenderer plasmaWake;
         Light plasmaLight;
-        bool heatGlowOn;
         string builtSignature;
         double[] baseHeight;
         MaterialPropertyBlock mpb;
@@ -399,6 +404,8 @@ namespace Kare.Space.Game
             foreach (Transform ch in transform) Destroy(ch.gameObject);
             parts.Clear();
             legs.Clear();
+            gimbals.Clear();
+            sepJets.Clear();
             wheels.Clear();
             ResetControls();
             ResetSpaceX();
@@ -523,7 +530,9 @@ namespace Kare.Space.Game
                             palette = new[] { NozzleColor, MetalColor, col, PolishedColor };
                             break;
                     }
-                    part.AddBody(AddRenderer(m.gameObject, model, palette), palette);
+                    // Сопла аппарата из Blender качаются на своих шарнирах (VesselView.Gimbal): корпус — без них.
+                    var body = craft ? GimbalModelNozzles(m, part, i, model, palette) : model;
+                    part.AddBody(AddRenderer(m.gameObject, body, palette), palette);
                     if (craft) AddDeployParts(m, i, s, boot.DeployFor(s.Model), palette);
                     if (craft) AddWheels(m, boot.WheelsFor(s.Model), palette);
                 }
@@ -656,17 +665,22 @@ namespace Kare.Space.Game
                             b.transform.localPosition = new Vector3(0, nr * 1.4f, 0);
                             b.transform.localScale = new Vector3(2 * nr / UpperEngineModelDiameter, nr * 1.4f / UpperEngineModelHeight,
                                                                  2 * nr / UpperEngineModelDiameter);
-                            AddRenderer(b, upperEngineFbx, StageColor, MetalColor, NozzleColor);
+                            var upPal = new[] { StageColor, MetalColor, NozzleColor };
+                            part.AddNozzle(AddRenderer(b, upperEngineFbx, upPal), upPal);
+                            AddGimbal(b.transform, i, b.transform.localPosition, true);
                             continue;
                         }
-                        if (!blocks) { AddRenderer(b, bell, NozzleColor); continue; }
+                        // Шарнир — горловина над колоколом (у блоков и РД-0110 начало модели уже у верха).
+                        AddGimbal(b.transform, i, b.transform.localPosition + new Vector3(0, blocks ? 0 : nr * 1.4f, 0), true);
+                        var nozPal = new[] { NozzleColor };
+                        if (!blocks) { part.AddNozzle(AddRenderer(b, bell, nozPal), nozPal); continue; }
                         // Блок вписан в габарит колокола: ширина 2·nr, высота 1,4·nr от среза до днища ступени.
                         // Начало модели — у верха, поэтому поднят на высоту колокола; широкой стороной — по касательной.
                         float w = 2 * nr / EngineModelWidth;
                         b.transform.localPosition += new Vector3(0, nr * 1.4f, 0);
                         b.transform.localRotation = Quaternion.Euler(0, 90 - a * Mathf.Rad2Deg, 0);
                         b.transform.localScale = new Vector3(w, nr * 1.4f / EngineModelHeight, w);
-                        AddRenderer(b, engineFbx, NozzleColor);
+                        part.AddNozzle(AddRenderer(b, engineFbx, nozPal), nozPal);
                     }
                     // Общий факел на связку: струи у земли сливаются в один столб, отдельные 9 факелов
                     // дали бы 18 аддитивных слоёв и пересвет на стыках.
@@ -1106,16 +1120,7 @@ namespace Kare.Space.Game
             float k = Mathf.Clamp01((heat - PlasmaStart) / (PlasmaFull - PlasmaStart));
             bool on = k > 0.001f && Vessel.SurfaceSpeed > 100;
             k = on ? k * k * (3 - 2 * k) : 0;
-            // Накал гаснет вместе с плазмой; MPB перезаписывается целиком, поэтому базовый цвет — заново.
-            if (on || heatGlowOn)
-            {
-                // Альфа = 1: Color * float умножает и её (см. SetEmissive).
-                var glow = HeatGlowTint * (HeatGlowNits * k);
-                glow.a = 1;
-                foreach (var p in parts)
-                    for (int j = 0; j < p.BodyR.Count; j++) Paint(p.BodyR[j], p.BodyColors[j], glow);
-            }
-            heatGlowOn = on;
+            // Накал обшивки — с тепловой инерцией, по деталям: VesselView.Heat.
             plasma.gameObject.SetActive(on);
             if (!on) return;
             float r = (float)radius;
@@ -1437,7 +1442,7 @@ namespace Kare.Space.Game
 
         Renderer AddPlume(GameObject go, Mesh mesh, PlumeKind kind)
         {
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshFilter>().sharedMesh = PadPlumeBounds(mesh);
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = PlumeMaterial(kind);
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -1485,7 +1490,7 @@ namespace Kare.Space.Game
             float core = coreNits * coreR * len * sh.Core;
             float glowLen = len * GlowLength;
             float glow = glowNits * glowR * glowLen * sh.Glow;
-            light.intensity = PlumeWalls * (core + glow) * (1 + (flicker - 1) * PlumeLightFlicker);
+            light.intensity = PlumeWalls * PlumeLimbMean * (core + glow) * (1 + (flicker - 1) * PlumeLightFlicker);
             float center = (core * len * sh.CoreCenter + glow * glowLen * sh.GlowCenter) / Mathf.Max(core + glow, 1e-6f);
             light.transform.localPosition = new Vector3(0, -center, 0);
         }
@@ -1606,6 +1611,7 @@ namespace Kare.Space.Game
             UpdatePlasma(airflow, com, vesselLen, vesselR);
             UpdateAeroFx(airflow, plasma != null && plasma.gameObject.activeSelf);
             UpdateControls(airflow);
+            UpdateGimbals();
             UpdateSpaceX();
             foreach (var p in parts)
             {
@@ -1632,8 +1638,6 @@ namespace Kare.Space.Game
                 float len = p.PlumeRadius * PlumeLengthSL * look.Length * (0.4f + 0.6f * thr);
                 float flicker = Flicker(PlumeFlicker, p.Index);
                 float coreR = p.PlumeRadius * (1 + vac * PlumeVacuumWidth * CoreSpread);
-                p.Plume.localScale = new Vector3(coreR, len * flicker, coreR);
-                p.Glow.localScale = new Vector3(p.PlumeRadius * spread, len * GlowLength * flicker, p.PlumeRadius * spread);
                 // Яркость на единицу площади: раздувшаяся струя тусклее (§9.5).
                 float bright = thr * look.Bright * Mathf.Lerp(1, VacuumBrightness * look.Vacuum, vac) * BrightnessSettings.Plume;
                 float coreNits = CoreNits * bright, glowNits = GlowNits * bright / spread;
@@ -1641,32 +1645,52 @@ namespace Kare.Space.Game
                 // в вакууме экспозиция ставилась под ядро втрое ярче нарисованного, и всё вокруг было на 1,7 EV темнее.
                 // Без ползунка «Факел»: экспозиция под него не подстраивается, и он убавляет факел относительно сцены.
                 ReportPlume(coreNits / BrightnessSettings.Plume);
-                SetPlumeColor(p.CoreR, coreNits * flicker);
-                SetPlumeColor(p.GlowR, glowNits * flicker);
+                // Масштаб и шейдер (объём, клочья, ромбы, раскрытие в пустоте) — VesselView.Exhaust.UpdatePlumeFx.
+                UpdatePlumeFx(p, pressure, len, coreR, coreNits, glowNits, flicker);
                 PlumeLight(p.PlumeLight, p.Kind, coreNits, glowNits, coreR, p.PlumeRadius * spread, len, flicker);
                 if (p.Mirrors != null) SyncMirrors(p, true);
             }
+            UpdateHeat(airflow, vesselLen);
+            UpdateSeparationFx(pressure);
         }
 
+        /// <summary>Факелы нижней связки: в пределах SmokeBand м по оси борта от самого нижнего среза (Р-7 — центральный
+        /// блок и четыре боковых, срезы почти вровень; верхняя ступень при горячем разделении — уже выше полосы).</summary>
+        const float SmokeBand = 4f;
+
         /// <summary>
-        /// Срез самой нижней работающей связки — источник дыма для ExhaustTrail (GDD §9.5): точка в осях Unity,
-        /// радиус общего факела, дроссель. Нижней — потому что дым у старта идёт из-под пакета, а верхние
-        /// работающие ступени в шлейфе неотличимы. false — ничего не горит или борт не виден.
+        /// Срез нижней работающей связки — источник дыма для ExhaustTrail (GDD §9.5): точка в осях Unity, радиус слитой
+        /// струи, радиус одного факела, дроссель. Связка, а не одно сопло: было — нижний факел одного блока, и у Р-7 шлейф
+        /// шёл иглой из-под бокового блока, уже самого пакета (замечание 15.10). Центр — среднее по тяге (дроссель·r²),
+        /// радиус слитой струи — по сумме площадей √Σr²: струи сливаются в одну с тем же импульсом. Верхние работающие
+        /// ступени в шлейфе неотличимы. false — ничего не горит или борт не виден.
         /// </summary>
-        public bool ExhaustSource(out Vector3 pos, out float radius, out float throttle)
+        public bool ExhaustSource(out Vector3 pos, out float radius, out float nozzleRadius, out float throttle)
         {
-            pos = default; radius = 0; throttle = 0;
+            pos = default; radius = 0; nozzleRadius = 0; throttle = 0;
             if (!visible) return false;
-            Part best = null;
+            float low = float.PositiveInfinity;
             foreach (var p in parts)
-                if (p.Plume != null && !p.NoSmoke && p.Throttle > 0.01f && (best == null || p.Tr.localPosition.y < best.Tr.localPosition.y))
-                    best = p;
-            if (best == null) return false;
-            pos = best.Plume.position;
-            radius = best.PlumeRadius;
-            throttle = best.Throttle;
+                if (Smokes(p)) low = Mathf.Min(low, transform.InverseTransformPoint(p.Plume.position).y);
+            if (float.IsPositiveInfinity(low)) return false;
+            var c = Vector3.zero;
+            float wsum = 0, area = 0;
+            foreach (var p in parts)
+            {
+                if (!Smokes(p) || transform.InverseTransformPoint(p.Plume.position).y > low + SmokeBand) continue;
+                float r2 = p.PlumeRadius * p.PlumeRadius, w = p.Throttle * r2;
+                c += p.Plume.position * w;
+                wsum += w;
+                area += r2;
+                throttle = Mathf.Max(throttle, p.Throttle);
+                nozzleRadius = Mathf.Max(nozzleRadius, p.PlumeRadius);
+            }
+            pos = c / wsum;
+            radius = Mathf.Sqrt(area);
             return true;
         }
+
+        bool Smokes(Part p) => p.Plume != null && !p.NoSmoke && p.Throttle > 0.01f;
 
         /// <summary>Дрожание факела и плазмы, доля. Было 1 + 0,05·sin 53t + 0,03·sin 31t: 8,4 Гц близко к
         /// половине частоты кадров, и при 15–30 к/с синус шёл через кадр «ярко/тускло» — замер 02.10.2026 на взлёте:

@@ -61,8 +61,9 @@ namespace Kare.Space.Game
                     GUI.color = Color.white;
                 }
             }
+            // Склейка выше — часть картинки и остаётся; надпись ракурса — интерфейс, её прячет F12.
             float left = flashUntil - Time.unscaledTime;
-            if (left <= 0 || string.IsNullOrEmpty(flashText)) return;
+            if (left <= 0 || string.IsNullOrEmpty(flashText) || FlightHud.UiHidden) return;
             if (flashStyle == null)
                 flashStyle = new GUIStyle(GUI.skin.box) { fontSize = 18, alignment = TextAnchor.MiddleCenter, padding = new RectOffset(14, 14, 6, 6) };
             var size = flashStyle.CalcSize(new GUIContent(flashText));

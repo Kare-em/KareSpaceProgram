@@ -48,6 +48,16 @@ namespace Kare.Space.Core
         /// перелёт к Луне шёл 16,6 мин реального времени, половина — спуск по лестнице.
         /// </summary>
         public const double AutoWarpLead = 2;
+        /// <summary>
+        /// Окно пролёта (§6.11): автоускорение у планеты/луны не проносит перицентр за доли секунды — игрок должен успеть
+        /// посмотреть. Масштаб пролёта τ = r_p / v_p (время, за которое корабль проходит у перицентра свою высоту
+        /// от центра); окно ±FlybySpan·τ проходится примерно за FlybyRealSeconds реального времени. Пара: ступень
+        /// в окне — наибольшая Warps[i] ≤ 2·FlybySpan·τ / FlybyRealSeconds, т. е. фактически 60…180 с (ступени идут
+        /// через ×3…×10). Вояджер у Юпитера: τ ≈ 1e4 с, окно ≈ 17 ч на ×1000 — минута; раньше пролёт шёл на ×1e5 за 0,6 с.
+        /// 15.10.2026: 60 → 6 с по просьбе игрока («в 10 раз быстрее»): минута у каждой луны тянула тур Вояджера.
+        /// </summary>
+        public const double FlybySpan = 3;
+        public const double FlybyRealSeconds = 6;
         /// <summary>Остаток прожига в вакууме, с, выше которого автопилот ускоряет физику до AutoPhysicsWarp: разгон к Луне
         /// идёт ≈ 5,5 мин, на ×10 — полминуты. Шаг интегратора тот же (см. MaxPhysicsWarp), точность импульса не теряется:
         /// apollo8 при 60 и при 15 вышел на одну и ту же орбиту 109,9 × 110,3 км, а кадров стало 5512 → 4693.</summary>
@@ -58,6 +68,26 @@ namespace Kare.Space.Core
         /// Пара: больше CollisionGrace — части успевают разойтись, пока физика ещё идёт.
         /// </summary>
         public const double StageRailsGrace = 5;
+        /// <summary>
+        /// Окно разделения (§6.11), с модельного времени: за столько до выработки ступени (если есть следующая) и столько же
+        /// после разделения время идёт ×1 — на ×30 физики отделение занимало 0,2 с реального времени и его не было видно.
+        /// После окна возвращается прежнее ускорение игрока; автоускорение выбирает своё само. Пара: StageRailsGrace —
+        /// рельсы закрыты те же 5 с, так что возврат на ×1000 не уводит на рельсы раньше, чем части разошлись.
+        /// </summary>
+        public const double StageWarpLead = 5;
+        /// <summary>
+        /// Режим малой тяги (§6.11): прожиг автопилота манёвра в вакууме с ускорением ниже этого, м/с², идёт крупным шагом
+        /// и ускоряется выше ×MaxPhysicsWarp. Коррекция «Вояджера» (4 × 0,89 Н на ≈ 0,8 т, ≈ 0,005 м/с²) в 30 м/с — это
+        /// 6000 с работы, на ×30 — больше 3 мин реального времени у экрана, где ничего не происходит. Упрощение: ориентация
+        /// держится кинематически (нос сразу на импульс, без разворота), шаг — LowThrustMaxStep вместо MaxStep. Прирост
+        /// скорости за шаг a·h ≤ 0,04 м/с — меньше MinCorrection миссии (0,05), а дуга орбиты за шаг ≤ LowThrustOrbitShare
+        /// рад, так что импульс тот же. Пара: «Кассини» (445 Н на 5,6 т, 0,08 м/с²) порог не задевает — его захват у
+        /// Сатурна остаётся на проверенной физике ×10.
+        /// </summary>
+        public const double LowThrustAccel = 0.02, LowThrustMaxStep = 2, LowThrustOrbitShare = 1e-3;
+        /// <summary>Потолок ускорения в режиме малой тяги: 75 подшагов × 2 с = 150 с модельного времени за кадр, ×1000
+        /// при 60 к/с — 17 с, т. е. 9 подшагов. Пара: индекс 5 в Warps; MaxPhysicsSubsteps.</summary>
+        public const double LowThrustMaxWarp = 1000;
 
         public readonly SolarSystem System;
         public double Time { get; private set; }
@@ -69,6 +99,9 @@ namespace Kare.Space.Core
         public bool RailsActive { get; private set; }
         /// <summary>Момент последнего разделения активного борта — для StageRailsGrace.</summary>
         double lastStageTime = double.NegativeInfinity;
+        /// <summary>Ускорение игрока, снятое окном разделения (−1 — не снималось), и было ли оно «клавишами».</summary>
+        int stageHeldWarp = -1;
+        bool stageHeldPlayer;
 
         public AscentAutopilot Ascent;
         public NodeAutopilot NodePilot;
@@ -104,6 +137,9 @@ namespace Kare.Space.Core
         public bool AutoWarp;
         public bool AutoWarpPaused;
         bool autoDriving;
+        /// <summary>Тело, к которому активный борт пришёл по гиперболе извне окна пролёта: только такой пролёт замедляем,
+        /// а уход с орбиты (перицентр — точка прожига, окно уже идёт) — нет.</summary>
+        CelestialBody flybyBody;
         /// <summary>Ступень выбрал игрок клавишами (WarpUp/WarpDown), а не сценарий/сброс через SetWarp. Только такая
         /// ×5…×10 у манёвра остаётся физикой, а не сбрасывается в ×1: тесты ядра задают ускорение SetWarp и ждут сброса.</summary>
         bool playerWarp;
@@ -245,9 +281,11 @@ namespace Kare.Space.Core
         {
             if (parts.Count == 0) return;
             fresh.RemoveAll(f => Time > f.until || !f.a.Alive || !f.b.Alive);
+            parent.SeparatedAt = Time;
             foreach (var d in parts)
             {
                 d.NoCollideUntil = Time + CollisionGrace;
+                d.SeparatedAt = Time;
                 d.Event += OnVesselEvent;
                 Vessels.Add(d);
                 var pilot = BoosterLandingAutopilot.TryStart(d, parent);
@@ -314,6 +352,11 @@ namespace Kare.Space.Core
         /// а время шло бы ×10.</summary>
         public void WarpUp()
         {
+            if (StagingWindow(Active))
+            {
+                Post("Ускорение ×1: разделение ступени");
+                return;
+            }
             TakeManualWarp();
             int next = WarpIndex + 1;
             if (Active != null && next < Warps.Length && Warps[next] > MaxPhysicsWarp)
@@ -321,6 +364,7 @@ namespace Kare.Space.Core
                 // Манёвр (§6.11): рельсы закрыты и на прожиге, и в окне перед ним — иначе ускорение проскочило бы
                 // старт и автопилот начал бы прожиг с опозданием. Физика до ×MaxPhysicsWarp остаётся.
                 string why = RailsBlocker(Active) ?? (WarpLimitTime() <= Time + 1 ? "подходит манёвр" : null);
+                if (why != null && Warps[next] <= LowThrustMaxWarp && LowThrustBurn(Active, out _)) why = null;
                 if (why != null)
                 {
                     Post("Больше ×" + MaxPhysicsWarp + " нельзя: " + why);
@@ -365,6 +409,8 @@ namespace Kare.Space.Core
         {
             WarpIndex = Math.Max(0, Math.Min(Warps.Length - 1, index));
             playerWarp = false;
+            // Ступень задана явно («/», «,», сценарий) — запомненная окном разделения больше не нужна.
+            stageHeldWarp = -1;
         }
 
         /// <summary>Почему нельзя на рельсы; null — можно.</summary>
@@ -405,6 +451,7 @@ namespace Kare.Space.Core
             if (Mission != null && Mission.Tick(this)) Mission = null;
             if (Lunar != null && Lunar.Tick(this)) Lunar = null;
             DriveWarp();
+            StageWarp();
             double warp = Warps[WarpIndex];
             bool rails = WarpIndex > 0 && Active != null && RailsBlocker(Active) == null && !(autoDriving && autoPhysics);
             if (rails && WarpLimitTime() <= Time + 1)
@@ -449,12 +496,17 @@ namespace Kare.Space.Core
                 double sim = Math.Min(realDt * Math.Min(warp, MaxPhysicsWarp), MaxPhysicsSubsteps * FlightPhysics.MaxStep);
                 // ×1 не режем: кадр 0,1 с — это 5 подшагов, а замедлять время ниже реального незачем.
                 if (warp <= 1) sim = realDt;
+                double step = FlightPhysics.MaxStep;
+                bool lowThrust = warp > MaxPhysicsWarp && LowThrustBurn(Active, out step);
+                if (lowThrust) sim = Math.Min(realDt * Math.Min(warp, LowThrustMaxWarp), MaxPhysicsSubsteps * step);
+                else step = FlightPhysics.MaxStep;
                 EffectiveWarp = sim / realDt;
                 RailsActive = false;
-                AdvancePhysics(sim);
+                AdvancePhysics(sim, step, lowThrust);
                 CheckDocking();
             }
             System.Update(Time);
+            CheckRings();
             PinWreck(Active);
             Vessels.RemoveAll(v => !v.Alive && v != Active);
         }
@@ -476,11 +528,14 @@ namespace Kare.Space.Core
 
         // ---------------------------------------------------------------- полная физика
 
-        void AdvancePhysics(double dt)
+        /// <param name="maxStep">Наибольший подшаг; больше MaxStep — только в режиме малой тяги (LowThrustBurn).</param>
+        /// <param name="holdAim">Малая тяга: нос ставится на импульс автопилота манёвра без динамики разворота —
+        /// на шаге 2 с регулятор ориентации раскачался бы.</param>
+        void AdvancePhysics(double dt, double maxStep = FlightPhysics.MaxStep, bool holdAim = false)
         {
             if (Active != null && Active.OnRails) LeaveRails(Active);
             double t0 = Time; // положения бортов вне физики относятся к началу кадра
-            int n = Math.Max(1, (int)Math.Ceiling(dt / FlightPhysics.MaxStep - 1e-9));
+            int n = Math.Max(1, (int)Math.Ceiling(dt / maxStep - 1e-9));
             double h = dt / n;
             var physics = new List<Vessel>();
             var passive = PassivePhysicsSet();
@@ -504,15 +559,18 @@ namespace Kare.Space.Core
                     if (v.OnRails) LeaveRails(v);
                     FlightControl.Update(v, Time);
                 }
+                if (holdAim) HoldAim(Active);
                 RunAutopilots(h);
+                if (holdAim) HoldAim(Active);
                 foreach (var p in Recoveries)
                     if (p.Running && physics.Contains(p.Vessel)) p.Update(Time, h);
-                NoteBorn(known, stamp);
+                NoteBorn(known, stamp, passive);
                 foreach (var v in physics) FlightPhysics.Step(v, Time, h);
+                if (holdAim && Active != null) Active.AngularVelocity = Vector3d.zero;
                 Time += h;
                 foreach (var v in physics) { CheckSoi(v); stamp[v] = Time; }
                 if (Collisions) Collide(physics);
-                NoteBorn(known, stamp);
+                NoteBorn(known, stamp, passive);
             }
             foreach (var v in Vessels)
             {
@@ -524,11 +582,21 @@ namespace Kare.Space.Core
             eventValid = false;
         }
 
-        /// <summary>Новые борта кадра (разделение, расстыковка) — с моментом, к которому относится их Position.</summary>
-        void NoteBorn(HashSet<Vessel> known, Dictionary<Vessel, double> stamp)
+        /// <summary>
+        /// Новые борта кадра (разделение, расстыковка) — с моментом, к которому относится их Position. Родившийся в воздухе
+        /// сразу берётся в физику (passive): набор считается раз в начале кадра, и ступень, отделившаяся на подшаге, в него
+        /// не попадала — в конце кадра MovePassive видел борт ниже «пола» рельсов и списывал «сгорел в атмосфере».
+        /// Боковые блоки Р-7 и первые ступени исчезали в момент отделения (замер 15.10.2026: 4 из 4 блоков «Спутника»
+        /// погибли в том же кадре на 60 км). Пара: MaxPassivePhysics — тот же предел числа бортов.
+        /// </summary>
+        void NoteBorn(HashSet<Vessel> known, Dictionary<Vessel, double> stamp, HashSet<Vessel> passive)
         {
             foreach (var v in Vessels)
-                if (known.Add(v)) stamp[v] = Time;
+                if (known.Add(v))
+                {
+                    stamp[v] = Time;
+                    if (passive.Count < MaxPassivePhysics && NeedsPassivePhysics(v)) passive.Add(v);
+                }
         }
 
         void RunAutopilots(double h)
@@ -749,7 +817,7 @@ namespace Kare.Space.Core
             Docking = null;
             Lunar = null;
             Mission = null;
-            v.Node = null;
+            v.Nodes.Clear(); // после телепорта орбита другая — весь план манёвров недействителен
             // Над дневной стороной, чуть к утреннему терминатору — как FlightDebug.Reentry: и свет есть, и рельеф с тенями.
             var s = (System.Sun.Position - body.Position).normalized;
             var pole = body.Orientation * Vector3d.forward;
@@ -886,6 +954,13 @@ namespace Kare.Space.Core
             autoPhysics = false;
             if (RailsBlocker(v) != null)
             {
+                // Малая тяга: лестница по остатку работы двигателя — к отсечке ускорение само спускается в обычную физику.
+                if (LowThrustBurn(v, out _))
+                {
+                    double left = FlightControl.BurnTime(v, v.Node.Remaining.magnitude);
+                    int lt = Ladder(Math.Min(left, NextEventTime() - Time), Array.IndexOf(Warps, LowThrustMaxWarp));
+                    if (Warps[lt] > AutoPhysicsWarp) return lt;
+                }
                 bool air = v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop;
                 if (v.AnyEngineRunning && v.Node != null && !air && FlightControl.BurnTime(v, v.Node.Remaining.magnitude) > AutoBurnWarpMin)
                     return Array.IndexOf(Warps, AutoPhysicsWarp);
@@ -894,8 +969,11 @@ namespace Kare.Space.Core
                 if (Mission != null && Mission.PhysicsWarpOk(this)) return Array.IndexOf(Warps, AutoPhysicsWarp);
                 return 0;
             }
-            double next = NextEventTime();
-            int i = Ladder(Math.Min(WarpLimitTime(), next) - Time, Warps.Length - 1);
+            // Смена сферы влияния лестницу не тормозит (15.10.2026): рельсы и так останавливаются на границе
+            // (AdvanceRails), а темп у самого тела задаёт FlybyCap уже внутри новой сферы.
+            double next = NextSlowEventTime();
+            int cap = FlybyCap(v);
+            int i = Ladder(Math.Min(WarpLimitTime(), next) - Time, cap);
             if (i > 0) return i;
             // Рельсы кончились (окно NodeWarpMargin + полпрожига перед узлом): автопилоты работают и в ускоренной
             // физике, так что ждём старта прожига на ×5…×10, а не на ×1 — иначе каждое окно стоило ≈ 100 с реального времени.
@@ -905,9 +983,103 @@ namespace Kare.Space.Core
                 double burn = FlightControl.StagedBurnTime(v, v.Node.Total);
                 start = v.Node.Time - (double.IsInfinity(burn) ? 0 : burn / 2);
             }
-            i = Ladder(Math.Min(start, next) - Time, Array.IndexOf(Warps, AutoPhysicsWarp));
+            i = Ladder(Math.Min(start, next) - Time, Math.Min(cap, Array.IndexOf(Warps, AutoPhysicsWarp)));
             autoPhysics = i > 0;
             return i;
+        }
+
+        /// <summary>
+        /// Потолок ступени у пролёта (FlybySpan): в окне ±FlybySpan·τ у перицентра — темп наблюдения, вне окна —
+        /// лестница по расстоянию до окна, симметрично на подходе и на уходе (не выше обычной лестницы событий).
+        /// </summary>
+        int FlybyCap(Vessel v)
+        {
+            int top = Warps.Length - 1;
+            if (v.IsLanded || v.Body.Parent == null) { flybyBody = null; return top; }
+            var o = v.OnRails && v.Orbit != null ? v.Orbit : KeplerOrbit.FromState(v.Position, v.Velocity, v.Body.Mu, Time);
+            if (o.IsElliptic)
+            {
+                flybyBody = null;
+                return top;
+            }
+            double rp = o.PeriapsisRadius;
+            double vp = Math.Sqrt(o.Mu * (2 / rp - 1 / o.A));
+            double tau = rp / vp;
+            // У гиперболы перицентр — момент M = 0; TimeToPeriapsis после него даёт NaN, здесь нужен и прошедший.
+            double dt = o.Epoch - o.MeanAnomalyAtEpoch / o.MeanMotion - Time;
+            double outside = Math.Abs(dt) - FlybySpan * tau;
+            if (dt > 0 && outside > 0) flybyBody = v.Body;
+            if (flybyBody != v.Body) return top;
+            int pace = 0;
+            while (pace < top && Warps[pace + 1] <= 2 * FlybySpan * tau / FlybyRealSeconds) pace++;
+            return outside <= 0 ? pace : Math.Max(pace, Ladder(outside, top));
+        }
+
+        /// <summary>
+        /// Режим малой тяги (LowThrustAccel): автопилот манёвра ведёт прожиг в вакууме, ускорение крошечное, в физике
+        /// никого, кроме активного. step — допустимый подшаг: не больше LowThrustMaxStep и LowThrustOrbitShare
+        /// орбитального времени √(r³/μ) — у планеты шаг сам мельчает до MaxStep.
+        /// </summary>
+        public bool LowThrustBurn(Vessel v, out double step)
+        {
+            step = FlightPhysics.MaxStep;
+            if (v == null || v != Active || !v.Alive || v.IsLanded || NodePilot == null || v.Node == null) return false;
+            if (!v.AnyEngineRunning || double.IsNaN(NodePilot.Aim.x) || StagingWindow(v)) return false;
+            if (v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop) return false;
+            double accel = FlightControl.AvailableThrust(v, out _) / v.Mass;
+            if (!(accel > 0) || accel >= LowThrustAccel) return false;
+            foreach (var p in Recoveries) if (p.Running) return false;
+            if (PassivePhysicsSet().Count > 0) return false;
+            double r = v.Position.magnitude;
+            step = MathD.Clamp(LowThrustOrbitShare * Math.Sqrt(r * r * r / v.Body.Mu), FlightPhysics.MaxStep, LowThrustMaxStep);
+            return true;
+        }
+
+        /// <summary>Нос — сразу на импульс автопилота манёвра, вращение снято (режим малой тяги).</summary>
+        void HoldAim(Vessel v)
+        {
+            if (v == null || NodePilot == null || double.IsNaN(NodePilot.Aim.x)) return;
+            var nose = v.Attitude * Vector3d.up;
+            v.Attitude = QuaternionD.FromToRotation(nose, NodePilot.Aim.SwapYZ) * v.Attitude;
+            v.AngularVelocity = Vector3d.zero;
+        }
+
+        /// <summary>Идёт окно разделения активного борта: ступень вот-вот выработается или только что отделилась.</summary>
+        public bool StagingWindow(Vessel v)
+        {
+            if (v == null || !v.Alive || v != Active) return false;
+            if (Time - lastStageTime < StageWarpLead) return true;
+            return !v.OnRails && v.AnyEngineRunning && v.HasNextStage && v.BurnoutIn() < StageWarpLead;
+        }
+
+        /// <summary>
+        /// Окно разделения (StageWarpLead): ускорение ×1. Автоускорение выбирает ступень заново каждый кадр (DriveWarp),
+        /// ему достаточно срезать её здесь; ступень игрока запоминаем и возвращаем после окна.
+        /// </summary>
+        void StageWarp()
+        {
+            if (StagingWindow(Active))
+            {
+                if (WarpIndex == 0) return;
+                if (!autoDriving && stageHeldWarp < 0)
+                {
+                    stageHeldWarp = WarpIndex;
+                    stageHeldPlayer = playerWarp;
+                    Post("Ускорение ×1: разделение ступени");
+                }
+                WarpIndex = 0;
+                autoPhysics = false;
+                return;
+            }
+            if (stageHeldWarp < 0) return;
+            // Ступень игрока возвращаем только поверх ×1 окна; сам он мог её сменить — тогда SetWarp сбросил запомненную.
+            if (!autoDriving && WarpIndex == 0)
+            {
+                WarpIndex = stageHeldWarp;
+                playerWarp = stageHeldPlayer;
+                Post("Ускорение восстановлено: ×" + Warps[WarpIndex]);
+            }
+            stageHeldWarp = -1;
         }
 
         /// <summary>Наибольшая ступень не выше max, у которой до события остаётся AutoWarpLead реальных секунд.</summary>
@@ -930,6 +1102,15 @@ namespace Kare.Space.Core
                 eventValid = true;
             }
             return nextEvent.Time;
+        }
+
+        /// <summary>Ближайшее событие, к которому автоускорение спускается по лестнице: вход в атмосферу / к рельефу.
+        /// Вход в сферу влияния и выход из неё — не повод сбавлять (§6.11, 15.10.2026).</summary>
+        double NextSlowEventTime()
+        {
+            double t = NextEventTime();
+            var type = nextEvent.Type;
+            return type == TransitionType.Encounter || type == TransitionType.Escape ? double.PositiveInfinity : t;
         }
 
         /// <summary>Момент, раньше которого ускорение надо прервать (манёвр, довыведение).</summary>
@@ -986,8 +1167,15 @@ namespace Kare.Space.Core
                     int warpBefore = WarpIndex;
                     HandleTransition(a, nextEvent);
                     eventValid = false;
-                    // Ускорение снижено у новой цели — остаток кадра не доигрывать на старом.
+                    // Ускорение снижено у новой цели — остаток кадра не доигрывать на старом. Под автопилотом после смены
+                    // сферы — тоже: темп пролёта (FlybyCap) считается в следующем кадре, иначе на ×1e7 перицентр
+                    // проходил бы в остатке этого кадра.
                     if (WarpIndex < warpBefore) break;
+                    if (autoDriving && nextEvent.Type == TransitionType.Encounter) break;
+                    // Смена сферы ускорение больше не снижает (§6.11), но кадр на ней обрывается: автопилот должен увидеть
+                    // новое тело до того, как рельсы уйдут дальше. На ×1e7 остаток кадра — до 6 сут: «Аполлон» с выхода из
+                    // сферы Луны долетал до атмосферы без коррекции перигея (34 км вместо 45, 13 g — auto_apollo8, 15.10.2026).
+                    if (nextEvent.Type == TransitionType.Encounter || nextEvent.Type == TransitionType.Escape) break;
                     // После смены тела предел другой: посадку на Луну планируют уже в её сфере влияния.
                     limit = WarpLimitTime();
                     if (nextEvent.Type == TransitionType.Atmosphere) break;
@@ -1031,7 +1219,9 @@ namespace Kare.Space.Core
             {
                 if (v.Position.magnitude < floor)
                 {
-                    LoseVessel(v);
+                    // Место в физике есть (keep) — борт ждёт следующего кадра, где PassivePhysicsSet его возьмёт:
+                    // так ведёт себя ступень, отделившаяся на последнем подшаге кадра (см. NoteBorn).
+                    if (!keep) LoseVessel(v);
                     return;
                 }
                 EnterRails(v, double.IsNaN(since) ? Time : since);
@@ -1076,21 +1266,11 @@ namespace Kare.Space.Core
                     v.Position = r;
                     v.Velocity = vel;
                     v.Orbit = KeplerOrbit.FromState(r, vel, v.Body.Mu, Time);
+                    // Ручное ускорение при входе в сферу больше не снижается (15.10.2026, просьба игрока): темп
+                    // выбирает он сам, сообщение остаётся подсказкой.
                     Post(tr.Type == TransitionType.Escape
                         ? $"Выход из сферы влияния → {v.Body.Name}"
                         : $"Вход в сферу влияния: {v.Body.Name}");
-                    // Ручное ускорение у новой цели — не выше того, что оставляет AutoWarpLead секунд до перицентра:
-                    // на ×10⁷ пролёт Сатурна (≈ 50 сут в сфере) проходил за пару кадров — ни колец, ни коррекции (§6.11).
-                    if (tr.Type == TransitionType.Encounter && !autoDriving)
-                    {
-                        double tPe = v.Orbit.TimeToPeriapsis(Time);
-                        int cap = tPe > 0 ? Ladder(tPe, Warps.Length - 1) : 0;
-                        if (WarpIndex > cap)
-                        {
-                            SetWarp(cap);
-                            Post($"Ускорение снижено до ×{Warps[cap]:0}: подход к телу {v.Body.Name}");
-                        }
-                    }
                     break;
                 }
                 case TransitionType.Atmosphere:
@@ -1146,7 +1326,10 @@ namespace Kare.Space.Core
         {
             var v = Active;
             if (v == null || !v.Alive || v.IsLanded) return new List<OrbitPatch>();
-            return PatchedConics.Predict(v.Body, v.Position, v.Velocity, Time, v.Node, maxPatches);
+            // Все узлы по очереди (§6.11): на каждый узел очереди — свой участок сверх maxPatches, иначе
+            // прогноз обрывался бы на последнем манёвре. Остатки узлов очереди пересчитываются тут же (refresh).
+            return PatchedConics.PredictNodes(v.Body, v.Position, v.Velocity, Time, v.Nodes,
+                maxPatches + Math.Max(0, v.Nodes.Count - 1), true);
         }
 
         /// <summary>Поставить узел манёвра на орбите активного корабля (компоненты — в осях орбиты на момент узла).</summary>

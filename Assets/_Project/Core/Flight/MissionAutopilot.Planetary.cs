@@ -20,6 +20,14 @@ namespace Kare.Space.Core
         const double LateCorrection = 75 * 86400;
         /// <summary>Ранняя коррекция — через столько после выхода из сферы влияния: промах разгона/пролёта ещё дёшев.</summary>
         const double EarlyCorrection = 5 * 86400;
+        /// <summary>
+        /// Окно поиска сближения на перелёте тура — столько плановых перелётов (до tour.Times[i]), но не меньше
+        /// ArrivalWindowMin. ClosestApproach берёт глобальный минимум окна: при 40 годах «Кассини» после манёвра в дальнем
+        /// космосе находил сближение с Венерой виток спустя (5124 сут вместо 613) — поздняя коррекция и подправка пролёта
+        /// пропадали, пролёт уходил мимо коридора (15.10.2026, от сдвига такта кадров окном разделения). Пара: опоздание
+        /// против плана меньше (Factor − 1) перелёта, иначе настоящее сближение выпадет из окна.
+        /// </summary>
+        const double ArrivalWindowFactor = 1.5, ArrivalWindowMin = 60 * 86400;
         /// <summary>Коррекцию меньше этого не делаем, м/с: 0,1 м/с у Юпитера — сотни километров у перицентра.</summary>
         const double MinCorrection = 0.05;
         /// <summary>Запас перед серединой прожига зонда (тяга 3,6 Н на 825 кг: 10 м/с — 40 мин), с.</summary>
@@ -131,7 +139,8 @@ namespace Kare.Space.Core
                     foreach (var x in WaitUntil(early, () => $"Перелёт к {target.Name}: коррекция через {Clock(early - T)}")) yield return x;
                     foreach (var x in Correct(tour, i, "Коррекция")) yield return x;
                 }
-                double arrival = Arrival(target);
+                double arrival = Arrival(target,
+                    Math.Max(ArrivalWindowMin, ArrivalWindowFactor * (tour.Times[i] - T)));
                 // У планеты захвата сфера больше: Сатурн 54,8 млн км при v∞ 5,4 км/с — 118 сут > LateCorrection.
                 double lateLead = capture
                     ? Math.Max(LateCorrection, CaptureLateFactor * target.SoiRadius / Math.Max(1, tour.VIn[i].magnitude))
@@ -423,7 +432,16 @@ namespace Kare.Space.Core
                     }
                     if (side.sqrMagnitude < 1e-6) side = Vector3d.Cross(uv, h);
                     double rp = double.IsNaN(rpLast) ? 0.5 * (floor + top) : rpLast, v2 = Math.Max(vrel.sqrMagnitude, 1);
-                    return side.normalized * (rp * Math.Sqrt(1 + 2 * body.Mu / (rp * v2)));
+                    // Кольца проверяем по перицентру ЦЕЛИ (середина коридора), а не прицела: rpLast — лишь поправка на
+                    // ошибку конических сечений (у Сатурна 58 тыс. км при цели 80), по нему находился «узел внутри
+                    // кольца C», а реальный перицентр 79 тыс. клал узел на 86 тыс. — в кольцо C (auto_cassini, 15.10.2026).
+                    double rpRing = 0.5 * (floor + top);
+                    // Захват — эллипс с тем же перицентром: его узлы ближе гиперболических, проверяем по нему.
+                    double e = equatorial
+                        ? (CaptureApoapsis - rpRing) / (CaptureApoapsis + rpRing)
+                        : 1 + rpRing * v2 / body.Mu;
+                    side = RingSafeSide(body, body.PoleAt(ta), uv, side.normalized, rpRing, v2, e);
+                    return side * (rp * Math.Sqrt(1 + 2 * body.Mu / (rp * v2)));
                 };
             }
             var next = tour.Bodies[i + 1];
@@ -447,6 +465,75 @@ namespace Kare.Space.Core
                 rp = MathD.Clamp(rp, floor, top);
                 return FlybyTour.AimVector(body, vrel, vout, rp);
             };
+        }
+
+        /// <summary>
+        /// Запас узла орбиты от края плотных колец, м. Пара: при перицентре 80 тыс. км и захвате до 9 млн км узел
+        /// при ω = 90° — на p ≈ 159 тыс. км, край F — 140 тыс.; запас 5 тыс. км оставляет ω ± 5,6°.
+        /// </summary>
+        const double RingNodeMargin = 5e6;
+
+        /// <summary>
+        /// Сторона прицела (единичная, поперёк v∞) у планеты с плотными кольцами: плоскость подлёта поворачивается
+        /// вокруг v∞ от предпочтительной side0 ровно настолько, чтобы оба узла (пересечения экватора) легли вне колец.
+        /// При наименьшем наклонении узел приходился в ≈ 70° от перицентра — на 115 тыс. км, в кольцо B: «Кассини» гиб
+        /// на подлёте (auto_cassini, 15.10.2026). Настоящий подходил с перицентром над кольцами (ω ≈ 90°), плоскость
+        /// пересекал в щели F–G. Граница допустимого угла уточняется делением пополам — прицел непрерывен по v∞,
+        /// иначе коррекции (итерации по прицелу) прыгали бы на шаг перебора.
+        /// </summary>
+        /// <param name="e">Эксцентриситет проверяемой орбиты с перицентром rp (захватный эллипс или сама гипербола).</param>
+        static Vector3d RingSafeSide(CelestialBody body, Vector3d pole, Vector3d uv, Vector3d side0, double rp, double v2, double e)
+        {
+            if (!Rings.DenseSpan(body, out double inner, out double outer)) return side0;
+            var ortho = Vector3d.Cross(uv, side0);
+            double eh = 1 + rp * v2 / body.Mu; // эксцентриситет гиперболы — для направления на перицентр
+            double cosInf = 1 / eh, sinInf = Math.Sqrt(Math.Max(0, 1 - cosInf * cosInf));
+            Vector3d Side(double phi) => side0 * Math.Cos(phi) + ortho * Math.Sin(phi);
+            bool Clear(double phi)
+            {
+                var s = Side(phi);
+                var hh = Vector3d.Cross(s, uv); // нормаль орбиты: b × v∞
+                var node = Vector3d.Cross(pole, hh);
+                if (node.sqrMagnitude < 1e-6) return false; // плоскость колец
+                node = node.normalized;
+                var peri = uv * cosInf + s * sinInf; // перицентр гиперболы: от −v∞ на угол асимптоты
+                double c = Vector3d.Dot(peri, node);
+                return NodeClear(c) && NodeClear(-c);
+            }
+            bool NodeClear(double cosNu)
+            {
+                double den = 1 + e * cosNu;
+                if (den <= 1e-9) return true; // ветвь гиперболы до узла не доходит
+                double r = rp * (1 + e) / den;
+                return r > outer + RingNodeMargin || r < inner - RingNodeMargin;
+            }
+            if (Clear(0)) return side0;
+            const double step = Math.PI / 180;
+            // Граница a ↔ b (Clear(a) ≠ Clear(b)) — делением пополам, к допустимой стороне.
+            double Edge(double bad, double good)
+            {
+                for (int it = 0; it < 30; it++)
+                {
+                    double mid = 0.5 * (bad + good);
+                    if (Clear(mid)) good = mid; else bad = mid;
+                }
+                return good;
+            }
+            for (int k = 1; k <= 180; k++)
+                for (int sgn = 1; sgn >= -1; sgn -= 2)
+                {
+                    double hi = sgn * k * step;
+                    if (!Clear(hi)) continue;
+                    // Окно допустимых плоскостей узкое (ω = 90° ± 5,7°), а ошибка сшивки конических сечений — градусы:
+                    // с прицелом на самый край окна узел ложился в кольцо A. Целимся в середину окна.
+                    double near = Edge(sgn * (k - 1) * step, hi);
+                    int j = k;
+                    while (j < 180 && Clear(sgn * (j + 1) * step)) j++;
+                    double far = j < 180 ? Edge(sgn * (j + 1) * step, sgn * j * step) : sgn * Math.PI;
+                    double phi = 0.5 * (near + far);
+                    return Side(phi);
+                }
+            return side0; // безопасной плоскости нет (v∞ в самой плоскости колец) — как было
         }
 
         /// <summary>

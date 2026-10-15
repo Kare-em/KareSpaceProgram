@@ -272,7 +272,7 @@ namespace Kare.Space.Game
 
         void OnGUI()
         {
-            if (toast == null || Time.realtimeSinceStartup > toastUntil) return;
+            if (toast == null || Time.realtimeSinceStartup > toastUntil || FlightHud.UiHidden) return;
             Styles();
             // Поверх HUD и меню: тост — ответ на нажатие клавиши, его должно быть видно в любом режиме.
             GUI.depth = -100;

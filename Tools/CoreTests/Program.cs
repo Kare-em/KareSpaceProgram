@@ -55,7 +55,9 @@ static partial class Program
         Run("separation", TestSeparation, only);
         Run("craft", TestCraft, only);
         Run("craftparams", TestCraftParams, only);
+        Run("builder", TestBuilder, only);
         Run("collide", TestCollide, only);
+        Run("giants", TestGiants, only);
         Run("undock", TestUndock, only);
         Run("craft_fly", TestCraftFly, only);
         Run("karman", TestKarman, only);
@@ -81,12 +83,15 @@ static partial class Program
         Run("cassini", TestCassini, only);
         Run("autoplan", TestAutoPlan, only);
         Run("patches", TestPatches, only);
+        Run("comets", TestComets, only);
         Run("booster", TestBooster, only);
         Run("booster_defer", TestBoosterDefer, only);
         Run("starship", TestStarship, only);
         Run("starship_catch", TestStarshipCatch, only);
         Run("save", TestSave, only);
         Run("save_booster", TestSaveBooster, only);
+        Run("nodes", TestNodes, only);
+        Run("career", TestCareer, only);
         // Миссии целиком автопилотом Y без рук и с автоускорением: «auto» — все, «auto_<id>» — одна.
         foreach (var id in AutoMissions)
             Run("auto_" + id, () => TestAuto(id), only == "auto" ? "auto_" + id : only);
@@ -1038,6 +1043,51 @@ static partial class Program
     }
 
     /// <summary>Столкновения бортов: медленный удар — отскок с сохранением импульса, быстрый — гибель обоих.</summary>
+    /// <summary>
+    /// Газовые гиганты и кольца (§2): под облаками борт тонет по сухой адиабате и сминается на 23 бар (как зонд
+    /// «Галилео»); плоскость плотных колец Сатурна убивает и в физике, и на рельсах, щель Энке и пыльное D — нет.
+    /// </summary>
+    static void TestGiants()
+    {
+        var (u0, _) = StartMission("sputnik");
+        var jup = u0.System.Get("jupiter");
+        jup.Atmosphere.Sample(-132e3, out double p, out _, out double t);
+        Check("giants: Юпитер −132 км ≈ «Галилео» (22 бар, 425 K)", p > 18e5 && p < 30e5 && t > 400 && t < 460, $"{p / 1e5:F1} бар, {t:F0} K");
+
+        foreach (var (depth, alive) in new[] { (10e3, true), (150e3, false) })
+        {
+            var (u, _) = StartMission("sputnik");
+            var j = u.System.Get("jupiter");
+            u.Teleport(j, 1000e3, false);
+            var v = u.Active;
+            v.Position = v.Position.normalized * (j.Radius - depth);
+            v.Velocity = Vector3d.Cross(j.AngularVelocity, v.Position);
+            for (int i = 0; i < 20 && v.Alive; i++) u.Advance(0.05);
+            Check($"giants: Юпитер −{depth / 1000:0} км — {(alive ? "цел" : "раздавлен")}", v.Alive == alive,
+                $"{v.StaticPressure / 1e5:F1} бар; {v.DestroyReason}");
+        }
+
+        // Пересечение плоскости колец Сатурна снизу вверх под 10°, за 20 км до неё.
+        foreach (var (rKm, warp, dies) in new[] { (105000.0, 0, true), (133584.0, 0, false), (70000.0, 0, false), (105000.0, 5, true) })
+        {
+            var (u, _) = StartMission("sputnik");
+            var s = u.System.Get("saturn");
+            u.Teleport(s, 1000e3, false);
+            var v = u.Active;
+            var axis = s.AngularVelocity.normalized;
+            var dir = (v.Position - axis * Vector3d.Dot(v.Position, axis)).normalized;
+            var east = Vector3d.Cross(axis, dir).normalized;
+            double r = rKm * 1e3, sp = Math.Sqrt(s.Mu / r), inc = 10 * Math.PI / 180;
+            v.Position = dir * r - axis * 20e3;
+            v.Velocity = (east * Math.Cos(inc) + axis * Math.Sin(inc)) * sp;
+            u.Advance(0.05); // CheckRings помнит прошлое положение с первого кадра — на рельсах первый кадр уже за плоскостью
+            if (warp > 0) u.SetWarp(warp);
+            for (int i = 0; i < (warp > 0 ? 3 : 200) && v.Alive; i++) u.Advance(0.05);
+            Check($"giants: Сатурн {rKm:0} км{(warp > 0 ? $", рельсы ×{u.EffectiveWarp:0}" : "")} — {(dies ? "столкновение" : "пролёт")}",
+                v.Alive != dies, $"z {Vector3d.Dot(v.Position, axis) / 1000:F0} км; {v.DestroyReason}");
+        }
+    }
+
     static void TestCollide()
     {
         foreach (double speed in new[] { 1.5, 20.0 })

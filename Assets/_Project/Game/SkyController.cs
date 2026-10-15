@@ -117,7 +117,7 @@ namespace Kare.Space.Game
                 float comp = BrightnessSettings.Ev;
                 exposure.compensation.Override(comp);
                 exposure.fixedExposure.Override(MapEv - comp);
-                float evMin = Mathf.Lerp(EvMin, SunlitEvMin, SunlitWeight(FlightView.Main));
+                float evMin = Mathf.Lerp(EvMin, SunlitEvMin - FarSunEv, SunlitWeight(FlightView.Main));
                 // Экспозиция ведётся по факелу «как задуман» (без ползунка «Факел»), а реальная яркость — с ним:
                 // так ползунок меняет факел относительно сцены, а не съедается экспозицией.
                 float plume = VesselView.PlumePeakNits, plumeReal = plume * BrightnessSettings.Plume;
@@ -168,6 +168,14 @@ namespace Kare.Space.Game
         /// (замер 01.10.2026: белый кадр на 124 км, при пределе 12 — нормальный). Ночью предел — EvMin.
         /// </summary>
         public const float SunlitEvMin = 12;
+        /// <summary>
+        /// Сдвиг предела на свету вдали от Солнца, ступени EV (§9.3): освещённость падает как (1 а. е. / r)², у Юпитера
+        /// (5,2 а. е.) — в 27 раз, на 4,75 ступени. Глаз и камера с автоэкспозицией к этому привыкают, а предел
+        /// SunlitEvMin держал экспозицию «как у Земли» — «Вояджер» у Юпитера выходил чёрным силуэтом (скрин 15.10.2026).
+        /// Ближе 1 а. е. не сдвигаем (Меркурий, Венера настроены по замерам). Пара: SunLight — та же 1/r² у света.
+        /// Ограничено снизу EvMin: у Нептуна (30 а. е.) сдвиг 9,8 → предел 2,2.
+        /// </summary>
+        static float FarSunEv => Mathf.Min(SunlitEvMin - EvMin, Mathf.Max(0, 2 * Mathf.Log((float)SunLight.DistanceAu, 2)));
         /// <summary>Высота, к которой небо уже чёрное и предел выходит на SunlitEvMin, м.
         /// Пара: кадр на 25 км — небо почти чёрное; у поверхности гистограмме не мешаем (закаты).</summary>
         const double DarkSkyAltitude = 30000;

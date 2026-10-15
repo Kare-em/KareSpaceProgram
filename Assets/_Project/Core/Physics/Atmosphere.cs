@@ -120,8 +120,25 @@ namespace Kare.Space.Core
             Top = top;
         }
 
+        /// <summary>
+        /// Рост температуры вглубь под уровнем 1 бар (z &lt; 0), К/м; 0 — глубже нуля атмосфера не идёт (грунт).
+        /// Сухая адиабата Γ = g·M·(γ−1)/(γ·R), давление p₀·(T/T₀)^(γ/(γ−1)). Проверка на Юпитере: зонд «Галилео»
+        /// потерян на −132 км при 22 бар и 425 К; модель даёт Γ = 2,0 К/км, 433 К и 25 бар.
+        /// </summary>
+        public double DeepLapse;
+
+        /// <summary>Включить глубокую атмосферу газового гиганта по ускорению свободного падения на уровне 1 бар.</summary>
+        public void EnableDeep(double g) => DeepLapse = g * MolarMass * (Gamma - 1) / (Gamma * R);
+
         public override void Sample(double z, out double pressure, out double density, out double temperature)
         {
+            if (z < 0 && DeepLapse > 0)
+            {
+                temperature = SurfaceTemperature - DeepLapse * z;
+                pressure = SeaLevelPressure * Math.Pow(temperature / SurfaceTemperature, Gamma / (Gamma - 1));
+                density = pressure * MolarMass / (R * temperature);
+                return;
+            }
             if (z < 0) z = 0;
             temperature = Math.Max(MinTemperature, SurfaceTemperature - LapseRate * z);
             if (z >= Top)

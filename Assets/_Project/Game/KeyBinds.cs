@@ -15,7 +15,8 @@ namespace Kare.Space.Game
         AirBrake, DragChute, TrimReset,
         AutoTakeoffLanding, ToMoon, ManeuverToTarget, Dock, NodeNew, NodeDelete, NodeExecute, Circularize,
         NodePrograde, NodeRetrograde, NodeNormal, NodeAntiNormal, NodeRadialOut, NodeRadialIn, NodeLater, NodeEarlier,
-        CinematicCamera, LookAtBody, MapResetView, QuickSave, QuickLoad, MapFocus, HudDetails,
+        CinematicCamera, LookAtBody, MapResetView, QuickSave, QuickLoad, MapFocus, HudDetails, SunGlare, HideUi,
+        NodeWindow, NodeAdd, NodeSelectNext,
     }
 
     /// <summary>
@@ -59,6 +60,8 @@ namespace Kare.Space.Game
             Add(Bind.StageFocus, C, "Вид на ступень", KeyCode.F2);
             Add(Bind.SplitScreen, C, "Сплит-скрин", KeyCode.F3);
             Add(Bind.DeferLanding, C, "Отложить посадку ступени", KeyCode.F4);
+            Add(Bind.SunGlare, C, "Блик Солнца вкл / выкл", KeyCode.F11);
+            Add(Bind.HideUi, C, "Скрыть / показать интерфейс", KeyCode.F12);
 
             Add(Bind.QuickSave, G, "Быстрое сохранение", KeyCode.F9);
             Add(Bind.QuickLoad, G, "Быстрая загрузка", KeyCode.F10);
@@ -106,6 +109,9 @@ namespace Kare.Space.Game
             Add(Bind.NodeRadialIn, N, "Манёвр: радиально внутрь", KeyCode.U);
             Add(Bind.NodeLater, N, "Манёвр позже", KeyCode.RightBracket);
             Add(Bind.NodeEarlier, N, "Манёвр раньше", KeyCode.LeftBracket);
+            Add(Bind.NodeWindow, N, "Окно манёвров", KeyCode.Alpha4);
+            Add(Bind.NodeAdd, N, "Добавить манёвр в очередь (после последнего)", KeyCode.Insert);
+            Add(Bind.NodeSelectNext, N, "Следующий манёвр очереди (выбор)", KeyCode.Quote);
             Load();
         }
 

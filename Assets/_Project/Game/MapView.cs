@@ -211,9 +211,9 @@ namespace Kare.Space.Game
             var u = GameBootstrap.U;
             if (!IsOpen || u?.Active == null || Camera == null) return;
             var v = u.Active;
-            if (KeyBinds.Down(Bind.MapResetView)) ResetView(v);
+            if (!Typing && KeyBinds.Down(Bind.MapResetView)) ResetView(v); // печать в окне манёвров — не клавиши карты
             // Tab на карте — смена фокуса (в полёте та же клавиша — «Ручная стыковка», FlightInput её на карте пропускает).
-            if (KeyBinds.Down(Bind.MapFocus)) CycleFocus(u, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1);
+            if (!Typing && KeyBinds.Down(Bind.MapFocus)) CycleFocus(u, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1);
             // Ось облёта — полюс тела в фокусе; у борта — полюс тела, вокруг которого он летит.
             var body = focus ?? v.Body;
             FloatingOrigin.Refresh(); // фокус мог смениться (Tab) — ноль за ним, до расчёта камеры и линий
@@ -243,6 +243,7 @@ namespace Kare.Space.Game
             Camera.transform.SetPositionAndRotation(center - rot * Vector3.forward * distance, rot);
             Camera.nearClipPlane = Mathf.Max(1, distance * 1e-4f);
             Camera.farClipPlane = Mathf.Max(distance * 20, 1e9f);
+            NodesUpdate(u, v); // перетаскивание ручек/ромба узла — до прогноза: траектория идёт за рукой (MapView.Nodes)
 
             if (Time.unscaledTime >= nextPredict)
             {
@@ -270,15 +271,13 @@ namespace Kare.Space.Game
                     int n = Sample(p.Orbit, p.Body, System.Math.Max(p.StartTime, u.Time), EndOf(p, u.Time), buf);
                     SetLine(used++, n, col, width);
                     MarkApsides(p, u.Time, col);
-                    // Узел — начало первого куска «после импульса» (§6.11): там и рисуем ромб с Δv.
-                    if (p.AfterNode && v.Node != null && (i == 0 || !patches[i - 1].AfterNode))
-                        marks.Add(new Mark { World = At(p, p.StartTime), Text = $"◆ Манёвр {v.Node.Total:0.0} м/с", Color = NodeColor });
 
                     if (p.EndType == TransitionType.Atmosphere) Descent(p, ref used, width);
                     else if (p.NextBody != null && !double.IsInfinity(p.EndTime))
                         marks.Add(new Mark { World = At(p, p.EndTime), Text = $"SOI → {p.NextBody.Name}", Color = col });
                 }
             }
+            NodeMarks(u, v); // ромбы всех узлов очереди и ручки выбранного (§6.11, MapView.Nodes)
             // Кольцо верха атмосферы в плоскости орбиты — видно, на какой высоте начнётся торможение.
             if (v.Body.HasAtmosphere && v.Alive && !v.IsLanded)
             {
@@ -544,7 +543,7 @@ namespace Kare.Space.Game
         void OnGUI()
         {
             var u = GameBootstrap.U;
-            if (!IsOpen || u?.Active == null || Camera == null) return;
+            if (!IsOpen || u?.Active == null || Camera == null || FlightHud.UiHidden) return;
             if (markStyle == null)
                 markStyle = new GUIStyle(GUI.skin.box) { fontSize = 14, alignment = TextAnchor.MiddleLeft, padding = new RectOffset(6, 6, 2, 2) };
             // Подписи с подложкой и раздвижкой: Ap/Pe/вход в атмосферу у суборбиты лежат рядом и сливались.
@@ -566,20 +565,25 @@ namespace Kare.Space.Game
                 GUI.color = new Color(1, 1, 1, alpha);
                 markStyle.normal.textColor = Color.Lerp(m.Color, Color.white, 0.4f);
                 GUI.Label(r, m.Text, markStyle);
-                if (m.Body != null && Event.current.type == EventType.MouseDown && Event.current.button == 0 && r.Contains(Event.current.mousePosition))
+                if (m.Body != null && Event.current.type == EventType.MouseDown && Event.current.button == 0 && r.Contains(Event.current.mousePosition) &&
+                    !NodeUiContains(Event.current.mousePosition))
                 {
                     SetFocus(u.Active, m.Body);
                     Event.current.Use();
                 }
             }
+            DrawNodes(u, u.Active);
             FocusPanel(u);
             TransferPanel(u);
+            NodeWindow(u, u.Active);
+            NodePopup(u, u.Active);
+            NodesMouse(u, u.Active); // последним: кнопки панелей уже забрали свои нажатия
             GUI.color = Color.white;
             markStyle.normal.textColor = Color.white;
             // Клавиши — подписями из KeyBinds: переназначил, сменилась и строка.
             var hint = $"КАРТА · ПКМ — вращать, СКМ — двигать, колесо — масштаб, {KeyBinds.Label(Bind.MapFocus)} — фокус, " +
                        $"{KeyBinds.Label(Bind.MapResetView)} — к аппарату, {KeyBinds.Label(Bind.Transfers)} — перелёты, " +
-                       $"{KeyBinds.Label(Bind.NodeNew)} — манёвр, {KeyBinds.Label(Bind.Map)} — назад";
+                       $"ЛКМ по орбите — манёвр, {KeyBinds.Label(Bind.NodeWindow)} — окно манёвров, {KeyBinds.Label(Bind.Map)} — назад";
             float hw = markStyle.CalcSize(new GUIContent(hint)).x;
             GUI.Label(new Rect((Screen.width - hw) * 0.5f, Screen.height - 165, hw, 22), hint, markStyle); // над нижними панелями HUD
         }
@@ -608,8 +612,17 @@ namespace Kare.Space.Game
 
             // Меню перелётов (F6) — кнопкой тоже: клавишу на карте не видно.
             GUI.color = transfersOpen ? new Color(0.45f, 0.85f, 1f) : Color.white;
-            if (GUI.Button(new Rect(x, y + 6, wdt, rowH), $"Перелёты ({KeyBinds.Label(Bind.Transfers)})", listStyle)) { transfersOpen = !transfersOpen; nextRows = 0; planResult = null; }
+            if (GUI.Button(new Rect(x, y + 6, wdt, rowH), $"Перелёты ({KeyBinds.Label(Bind.Transfers)})", listStyle)) { transfersOpen = !transfersOpen; nextRows = 0; planResult = null; nodeWindowOpen = false; }
             y += rowH + 6;
+            // Окно манёвров (§6.11) — на месте меню перелётов, поэтому они взаимно исключают друг друга.
+            GUI.color = nodeWindowOpen ? new Color(0.45f, 0.85f, 1f) : Color.white;
+            if (GUI.Button(new Rect(x, y + 2, wdt, rowH), $"Манёвры ({KeyBinds.Label(Bind.NodeWindow)})", listStyle))
+            {
+                nodeWindowOpen = !nodeWindowOpen;
+                if (nodeWindowOpen) transfersOpen = false;
+                else GUIUtility.keyboardControl = 0;
+            }
+            y += rowH + 2;
 
             // Аппараты (§6.13): щелчок — управление им, как PageUp/PageDown. Сначала управляемые, обломки — следом,
             // не больше VesselRows строк: после пакета Р-7 обломков с десяток.
@@ -630,6 +643,7 @@ namespace Kare.Space.Game
                     rows++;
                 }
             GUI.color = Color.white;
+            HudHits.Add(new Rect(x, 230, wdt + 60, y - 230)); // щелчок по списку — не щелчок по орбите (MapView.Nodes)
         }
     }
 }

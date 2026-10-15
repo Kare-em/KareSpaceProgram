@@ -13,7 +13,7 @@ namespace Kare.Space.Game
     /// Детей создаёт сам: радиусы и рельеф — из Core.
     /// </summary>
     [DefaultExecutionOrder(-50)]
-    public sealed class BodyRenderer : MonoBehaviour
+    public sealed partial class BodyRenderer : MonoBehaviour
     {
         public static BodyRenderer Instance { get; private set; }
 
@@ -57,7 +57,10 @@ namespace Kare.Space.Game
         BodyMapSet MapFor(string id)
         {
             if (Maps != null) foreach (var m in Maps) if (m.Id == id) return m;
-            return default;
+            // Карты спутников NASA/JPL/USGS лежат в Resources/MoonMaps/<id>.jpg (Tools/textures/moons.py): подхват по имени,
+            // без правки сериализованного Maps в сцене — пересобирать Flight не нужно.
+            var moon = Resources.Load<Texture2D>("MoonMaps/" + id);
+            return moon != null ? new BodyMapSet { Id = id, Map = moon } : default;
         }
         /// <summary>Тайл ряби, м, и скорость её сноса, м/с. Пара: UV0 патча — в тайлах GroundTile, поэтому
         /// масштаб воды задаётся через _BaseColorMap_ST = GroundTile / WaterTile.</summary>
@@ -213,6 +216,7 @@ namespace Kare.Space.Game
             AddPatchDecal(p.transform);
             p.SetActive(false);
             waterMat = BuildWaterMaterial();
+            BuildPoints();
         }
 
         /// <summary>
@@ -426,6 +430,7 @@ namespace Kare.Space.Game
                 e.Tr.localScale = Vector3.one * (float)(e.SphereRadius * k);
             }
             UpdatePatch(FlightView.Main);
+            UpdatePoints(FlightView.Main);
             // Снос ряби: только дробная часть, чтобы смещение не копило ошибку float.
             float wk = (float)(GroundTile / WaterTile);
             waterOffset.x = Frac(waterOffset.x + Time.deltaTime * WaterDrift / WaterTile);

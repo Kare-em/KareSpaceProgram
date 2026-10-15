@@ -262,6 +262,8 @@ namespace Kare.Space.Core
         /// <summary>Секция проекта для каждой радиальной группы.</summary>
         public int[] RadialSection;
         public double Mass, Height, Width, ComHeight;
+        /// <summary>Бюджет Δv выбранной миссии (Compile с миссией), null — без цели. Сравнение — CraftAnalysis.CheckBudget.</summary>
+        public DeltaVBudget Budget;
         public bool Ok => Errors.Count == 0 && Design != null;
     }
 
@@ -320,6 +322,20 @@ namespace Kare.Space.Core
                 }
             }
             return res;
+        }
+
+        /// <summary>
+        /// Сборка с целью: те же проверки плюс сравнение Δv с бюджетом миссии (§5.4 — «хватит ли ракеты»). Оценка не точна,
+        /// поэтому нехватка — предупреждение, а не ошибка: запуск остаётся доступен.
+        /// </summary>
+        public static CraftBuild Compile(Craft craft, DeltaVBudget budget)
+        {
+            var b = Compile(craft);
+            b.Budget = budget;
+            if (b.Design == null) return b;
+            string w = CraftAnalysis.CheckBudget(budget, b.Stats);
+            if (w != null) b.Warnings.Add(w);
+            return b;
         }
 
         public static CraftBuild Compile(Craft craft)
@@ -681,6 +697,7 @@ namespace Kare.Space.Core
             }
             if (engine && b.Stats.Count > 0 && b.Stats[0].TwrSL < 1)
                 b.Errors.Add($"TWR первой ступени у земли {b.Stats[0].TwrSL:F2} < 1 — не оторвётся");
+            CraftAnalysis.CheckGLoad(d, b.Stats, b.Warnings);
             // Каждый разделитель с грузом над ним — в списке ступеней.
             for (int k = 0; k + 1 < blocks.Count; k++)
             {

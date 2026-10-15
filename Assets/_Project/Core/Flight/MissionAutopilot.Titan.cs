@@ -22,6 +22,12 @@ namespace Kare.Space.Core
         /// <summary>Подправить перицентр в сфере Сатурна, если он ушёл от цели дальше этого, м.</summary>
         const double CapturePeTolerance = 2e6;
         /// <summary>
+        /// Ньютон коррекции у колец: итераций, проба импульса (м/с) и точность прицела (м). Пара: 50 км прицела — доля
+        /// окна без колец (ω ± 5,7° у перицентра 80 тыс. км ≈ ± 8 тыс. км по картинной плоскости).
+        /// </summary>
+        const int RingTrimIterations = 12;
+        const double RingTrimProbe = 0.01, RingTrimTolerance = 5e4;
+        /// <summary>
         /// Угол входа «Гюйгенса» к горизонту на верхней границе атмосферы Титана, градусы (у настоящего ≈ 65°).
         /// Крутой вход — широкий коридор: прицельная дальность 0–3,3 тыс. км попадает, середина ≈ 1,4 тыс. км.
         /// </summary>
@@ -106,12 +112,84 @@ namespace Kare.Space.Core
             double rpGoal = planet.Radius + 0.5 * (o.Min + o.Max);
             var v = V;
             var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, planet.Mu, T);
-            if (Math.Abs(orbit.PeriapsisRadius - rpGoal) < CapturePeTolerance || orbit.TimeToPeriapsis(T) < 10 * 86400) yield break;
-            var fix = TransferPlanner.PlanPerigee(planet, v.Position, v.Velocity, T, rpGoal, T + CorrectionTurn);
+            if (orbit.TimeToPeriapsis(T) < 10 * 86400) yield break;
+            // У планеты с кольцами правим не только перицентр, но и плоскость: прицел из-за сферы промахивался по углу
+            // картинной плоскости на 3–4° (≈ 5 тыс. км), окно без колец — ω = 90° ± 5,7°, и узел ложился в кольцо A.
+            // Здесь гипербола точная, а до перицентра 4 мес.: те же 5 тыс. км стоят ≈ 0,5 м/с.
+            var fix = Rings.HasDense(planet)
+                ? PlanRingTrim(planet, v.Position, v.Velocity, rpGoal, T + CorrectionTurn)
+                : Math.Abs(orbit.PeriapsisRadius - rpGoal) < CapturePeTolerance ? null
+                : TransferPlanner.PlanPerigee(planet, v.Position, v.Velocity, T, rpGoal, T + CorrectionTurn);
             if (fix == null || fix.DeltaV < MinCorrection) yield break;
             u.SetNode(fix.Time, fix.Prograde, fix.Normal, fix.Radial);
             u.Post($"Коррекция перицентра у {planet.Name}: {(orbit.PeriapsisRadius - planet.Radius) / 1e6:F0} → {(rpGoal - planet.Radius) / 1e6:F0} тыс. км, {fix.DeltaV:F1} м/с");
             foreach (var x in Burn($"Коррекция перицентра у {planet.Name}")) yield return x;
+        }
+
+        /// <summary>
+        /// Прицел гиперболы по вектору состояния: смещение входящей асимптоты от центра (b, м) и её направление uv.
+        /// Входящая скорость — P/e + Q·√(1 − 1/e²) (P — к перицентру, Q — по движению в нём); h ∥ b × v∞.
+        /// </summary>
+        static Vector3d AsymptoteAim(double mu, Vector3d r, Vector3d v, out Vector3d uv)
+        {
+            var h = Vector3d.Cross(r, v);
+            var ev = Vector3d.Cross(v, h) / mu - r.normalized;
+            double e = Math.Max(ev.magnitude, 1 + 1e-9);
+            var hn = h.normalized;
+            var P = ev / ev.magnitude;
+            var Q = Vector3d.Cross(hn, P);
+            uv = P / e + Q * Math.Sqrt(1 - 1 / (e * e));
+            double vinf = Math.Sqrt(Math.Max(1, v.sqrMagnitude - 2 * mu / r.magnitude));
+            return Vector3d.Cross(uv, hn) * (h.magnitude / vinf);
+        }
+
+        /// <summary>
+        /// Коррекция в сфере планеты с кольцами: перицентр rpGoal и плоскость, у которой оба узла захватного эллипса
+        /// вне колец (RingSafeSide — тот же выбор, что у прицела TourAim). Импульс поперёк скорости, Ньютон по двум
+        /// осям картинной плоскости. null — гипербола не та (уже эллипс) или Ньютон не сошёлся.
+        /// </summary>
+        TransferPlan PlanRingTrim(CelestialBody planet, Vector3d r, Vector3d v, double rpGoal, double tc)
+        {
+            double mu = planet.Mu;
+            var orbit = KeplerOrbit.FromState(r, v, mu, T);
+            if (orbit.IsElliptic) return null;
+            orbit.GetState(tc, out var rc, out var vc);
+            AsymptoteAim(mu, rc, vc, out var uv);
+            double v2 = Math.Max(vc.sqrMagnitude - 2 * mu / rc.magnitude, 1);
+            var pole = planet.PoleAt(tc + orbit.TimeToPeriapsis(tc));
+            var hh = pole - uv * Vector3d.Dot(pole, uv);
+            if (hh.sqrMagnitude < 1e-6) return null;
+            var side0 = Vector3d.Cross(uv, hh.normalized);
+            double e = (CaptureApoapsis - rpGoal) / (CaptureApoapsis + rpGoal);
+            var side = RingSafeSide(planet, pole, uv, side0, rpGoal, v2, e);
+            var bGoal = side * (rpGoal * Math.Sqrt(1 + 2 * mu / (rpGoal * v2)));
+            var pro = vc.normalized;
+            var nrm = Vector3d.Cross(rc, vc).normalized;
+            var rad = Vector3d.Cross(pro, nrm);
+            var e1 = Vector3d.Cross(uv, nrm).normalized;
+            var e2 = Vector3d.Cross(uv, e1);
+            double dn = 0, dr = 0;
+            Vector3d Err(double n, double d) => AsymptoteAim(mu, rc, vc + nrm * n + rad * d, out _) - bGoal;
+            for (int it = 0; it < RingTrimIterations; it++)
+            {
+                var f = Err(dn, dr);
+                double f1 = Vector3d.Dot(f, e1), f2 = Vector3d.Dot(f, e2);
+                if (Math.Sqrt(f1 * f1 + f2 * f2) < RingTrimTolerance)
+                {
+                    var plan = new TransferPlan { Time = tc, Normal = dn, Radial = dr };
+                    plan.ArrivalTime = tc + orbit.TimeToPeriapsis(tc);
+                    return plan;
+                }
+                var fn = Err(dn + RingTrimProbe, dr) - f;
+                var fr = Err(dn, dr + RingTrimProbe) - f;
+                double a = Vector3d.Dot(fn, e1) / RingTrimProbe, b = Vector3d.Dot(fr, e1) / RingTrimProbe;
+                double c = Vector3d.Dot(fn, e2) / RingTrimProbe, d = Vector3d.Dot(fr, e2) / RingTrimProbe;
+                double det = a * d - b * c;
+                if (Math.Abs(det) < 1e-12) return null;
+                dn -= (d * f1 - b * f2) / det;
+                dr -= (-c * f1 + a * f2) / det;
+            }
+            return null;
         }
 
         /// <summary>

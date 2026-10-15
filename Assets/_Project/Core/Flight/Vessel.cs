@@ -75,6 +75,10 @@ namespace Kare.Space.Core
         /// <summary>Обломок радиальной группы: азимут его копии в пакете, рад. Вид поворачивает блок на этот угол, чтобы
         /// косой конус бокового Р-7 и после отделения лежал носком к бывшей оси пакета. Физики не касается.</summary>
         public double RadialYaw;
+        /// <summary>Время последнего разделения с участием борта (Universe.AddSeparated): у обломка — миг отделения,
+        /// у оставшегося — последней ступени. По нему вид зажигает тормозные РДТТ, осадку и увод САС. Не сохраняется:
+        /// после загрузки NaN — эффекты разделения не повторяются.</summary>
+        public double SeparatedAt = double.NaN;
 
         // Секции.
         public bool[] Attached;
@@ -191,7 +195,42 @@ namespace Kare.Space.Core
         public Vessel ControlTransfer;
         /// <summary>Перезапуски двигателей без счёта (настройка меню Esc, §6.3). В ядре по умолчанию — честный счёт: тесты миссий.</summary>
         public static bool UnlimitedIgnitions;
-        public ManeuverNode Node;
+        /// <summary>
+        /// Узлы манёвров по возрастанию времени (§6.11, как в KSP: «разгон → коррекция → торможение» планируется
+        /// разом). Первый — текущий: его исполняет NodeAutopilot и по нему ограничивают ускорение. Компоненты
+        /// второго и дальше — в осях орбиты ПОСЛЕ предыдущих узлов, их Remaining пересчитывает прогноз
+        /// (PatchedConics.PredictNodes с refresh). Порядок держит NodePlanner.Sort.
+        /// </summary>
+        public List<ManeuverNode> Nodes = new List<ManeuverNode>();
+
+        /// <summary>
+        /// Текущий (ближайший) узел — то, что раньше было единственным узлом: автопилоты читают и ставят его,
+        /// не зная об очереди. null — удалить текущий (следующий становится текущим); новый узел заменяет текущий,
+        /// а узлы очереди, оказавшиеся не позже него, снимаются: их оси считались от орбиты, которой уже не будет.
+        /// </summary>
+        public ManeuverNode Node
+        {
+            get => Nodes != null && Nodes.Count > 0 ? Nodes[0] : null;
+            set
+            {
+                if (Nodes == null) Nodes = new List<ManeuverNode>();
+                if (value == null)
+                {
+                    if (Nodes.Count > 0) Nodes.RemoveAt(0);
+                    return;
+                }
+                if (Nodes.Count == 0) Nodes.Add(value);
+                else Nodes[0] = value;
+                for (int i = Nodes.Count - 1; i > 0; i--)
+                    if (Nodes[i] == value || Nodes[i].Time <= value.Time) Nodes.RemoveAt(i);
+            }
+        }
+
+        /// <summary>Снять узел из очереди (исполнен или удалён игроком); следующий становится текущим.</summary>
+        public void RemoveNode(ManeuverNode n)
+        {
+            if (n != null) Nodes?.Remove(n);
+        }
 
         // Телеметрия (обновляет физика).
         public double Altitude, TerrainAltitude, SurfaceSpeed, VerticalSpeed, HorizontalSpeed;
@@ -686,6 +725,21 @@ namespace Kare.Space.Core
         /// <summary>Остался ли запуск у двигателя секции (с настройкой «бесконечные перезапуски» — всегда).</summary>
         public bool CanIgnite(int i) => UnlimitedIgnitions || IgnitionsLeft[i] > 0;
 
+        /// <summary>Через сколько секунд выработается первая из работающих секций при нынешнем газе (запас на посадку
+        /// не в счёт — на нём ступень глохнет, см. BurnPropellant), с; ∞ — ничего не горит.</summary>
+        public double BurnoutIn()
+        {
+            double t = double.PositiveInfinity;
+            var secs = Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+            {
+                if (!Attached[i] || !Running[i]) continue;
+                double flow = secs[i].Engine.MassFlow * EnginesLit(i) * EffectiveThrottle(i);
+                if (flow > 0) t = Math.Min(t, Math.Max(0, UsablePropellant(i)) / flow);
+            }
+            return t;
+        }
+
         /// <summary>Списать топливо за dt; при выработке — останов.</summary>
         public void BurnPropellant(double dt)
         {
@@ -1151,7 +1205,9 @@ namespace Kare.Space.Core
                         if (any)
                         {
                             double push = secs[a.Section].DecouplerPush > 0 ? secs[a.Section].DecouplerPush : StagePush;
-                            debris.Add(Split(mask, push));
+                            var d = Split(mask, push);
+                            FireRetros(d, mask);
+                            debris.Add(d);
                             Raise($"Отделение: {secs[a.Section].Name}");
                         }
                     }
@@ -1221,6 +1277,19 @@ namespace Kare.Space.Core
             if (next >= secs.Count || !Attached[next] || Flipped[next]) return;
             if (secs[next].UllageMotors) SettledTimer = Math.Max(SettledTimer, 3);
             Arm(next);
+        }
+
+        /// <summary>Тормозные РДТТ отделённой ступени (Separation.Retro): назад по оси, без отдачи — они на самой
+        /// ступени, — и лёгкое кувыркание от несоосности их тяги.</summary>
+        void FireRetros(Vessel d, bool[] mask)
+        {
+            for (int i = 0; i < mask.Length; i++)
+            {
+                if (!mask[i] || !Separation.Retro(Design.Sections[i].Model, out var r)) continue;
+                d.Velocity -= NoseP * r.DeltaV;
+                d.AngularVelocity += new Vector3d(Separation.RetroTumble, 0, 0);
+                return;
+            }
         }
 
         /// <summary>Толчок пиропушителей при разделении ступеней, м/с (§5): обломок уходит назад, с отдачей.</summary>

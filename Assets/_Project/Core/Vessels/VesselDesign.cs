@@ -258,6 +258,25 @@ namespace Kare.Space.Core
         public double Propellant;
         /// <summary>Секции, чьи двигатели работают в этой строке, — по ним HUD и конструктор показывают баки ступени.</summary>
         public readonly List<int> Sections = new List<int>();
+        /// <summary>
+        /// Наибольшее ускорение от тяги в пустоте, м/с² (к концу прожига, на почти пустых баках), и сколько секунд оно выше
+        /// предела экипажа FlightPhysics.CrewGLimit (§4.7). Тяга по вакууму — оценка сверху: в полёте перегрузка = тяга/масса,
+        /// а у Земли тяга меньше. Конструктор предупреждает по ним (CraftAnalysis.CheckGLoad), что без дросселя экипаж погибнет.
+        /// </summary>
+        public double MaxAccel, HighGTime;
+
+        /// <summary>
+        /// Участок прожига с постоянной тягой thrust и расходом flow от массы m0 до m1: обновить MaxAccel и HighGTime.
+        /// Ускорение thrust/m растёт с выработкой; выше предела оно, пока m &lt; thrust/(CrewGLimit·g0), — время по расходу точно.
+        /// </summary>
+        public void AddAccel(double thrust, double flow, double m0, double m1)
+        {
+            if (m1 <= 0 || flow <= 0) return;
+            MaxAccel = Math.Max(MaxAccel, thrust / m1);
+            double mLimit = thrust / (FlightPhysics.CrewGLimit * Constants.G0);
+            double dm = Math.Min(m0, mLimit) - m1;
+            if (dm > 0) HighGTime += dm / flow;
+        }
     }
 
     /// <summary>Проект ракеты: секции снизу вверх и последовательность ступеней (пробел).</summary>
@@ -382,6 +401,7 @@ namespace Kare.Space.Core
                     BurnTime = prop[idx] / (s.Engine.MassFlow * s.EngineCount),
                     Propellant = prop[idx],
                 });
+                res[res.Count - 1].AddAccel(tv, s.Engine.MassFlow * s.EngineCount, m0, m1);
                 res[res.Count - 1].Sections.Add(idx);
                 prop[idx] = 0;
             }
@@ -468,6 +488,7 @@ namespace Kare.Space.Core
                     st.BurnTime += dt;
                     st.EndMass = m1;
                     st.Propellant += flow * dt;
+                    st.AddAccel(tv, flow, m0, m1);
                     for (int i = 0; i < n; i++)
                     {
                         if (!running[i]) continue;

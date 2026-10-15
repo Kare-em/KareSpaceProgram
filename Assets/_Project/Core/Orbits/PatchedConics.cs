@@ -33,6 +33,8 @@ namespace Kare.Space.Core
         public CelestialBody NextBody;
         /// <summary>Участок начинается после манёвра.</summary>
         public bool AfterNode;
+        /// <summary>Индекс узла (в списке PredictNodes), импульсом которого начат участок; −1 — участок начат не узлом.</summary>
+        public int NodeIndex = -1;
     }
 
     /// <summary>
@@ -210,31 +212,59 @@ namespace Kare.Space.Core
         public static List<OrbitPatch> Predict(CelestialBody body, Vector3d r, Vector3d v, double t,
             ManeuverNode node = null, int maxPatches = 4)
         {
+            return PredictNodes(body, r, v, t, node != null ? new[] { node } : null, maxPatches);
+        }
+
+        /// <summary>
+        /// Прогноз с цепочкой узлов (§6.11: несколько манёвров разом, как в KSP): узлы применяются по очереди,
+        /// каждый — в свой момент на участке, где он оказался. Узлы в прошлом и пустые (Δv ≈ 0) пропускаются.
+        /// refreshQueued — пересчитать Remaining у узлов со второго: их компоненты заданы в осях орбиты после
+        /// предыдущих узлов, а та меняется при каждой правке предыдущих (у первого Remaining ведёт тяга,
+        /// трогать его нельзя — частичный прожиг уменьшает именно Remaining).
+        /// </summary>
+        public static List<OrbitPatch> PredictNodes(CelestialBody body, Vector3d r, Vector3d v, double t,
+            IList<ManeuverNode> nodes, int maxPatches = 4, bool refreshQueued = false)
+        {
             var list = new List<OrbitPatch>();
-            bool nodePending = node != null && node.Time > t && node.Total > 1e-3;
+            int ni = 0, count = nodes?.Count ?? 0;
+            int lastIndex = -1;
             bool afterNode = false;
             for (int k = 0; k < maxPatches; k++)
             {
+                // Пропуск узлов в прошлом (исполняемый сейчас — его время уже наступило — сюда не попадает:
+                // его остаток уже в скорости корабля по мере прожига).
+                while (ni < count && (nodes[ni] == null || nodes[ni].Time <= t)) ni++;
                 var orbit = KeplerOrbit.FromState(r, v, body.Mu, t);
                 var next = FindNext(orbit, body, t, DefaultHorizon(orbit, body));
                 var patch = new OrbitPatch
                 {
-                    Body = body, Orbit = orbit, StartTime = t, AfterNode = afterNode,
+                    Body = body, Orbit = orbit, StartTime = t, AfterNode = afterNode, NodeIndex = lastIndex,
                     EndTime = next.Time, EndType = next.Type, NextBody = next.NewBody,
                 };
-                if (nodePending && node.Time < next.Time)
+                // Пустой узел не режет участок: следующий узел может оказаться на этом же участке.
+                while (ni < count && nodes[ni].Time < next.Time)
                 {
-                    // Манёвр раньше события: режем участок, применяем импульс, ищем заново.
-                    patch.EndTime = node.Time;
-                    patch.EndType = TransitionType.None;
-                    patch.NextBody = body;
-                    list.Add(patch);
-                    orbit.GetState(node.Time, out r, out v);
-                    v += node.Remaining;
-                    t = node.Time;
-                    nodePending = false;
-                    afterNode = true;
-                    continue;
+                    if (refreshQueued && ni > 0) nodes[ni].Remaining = nodes[ni].WorldDeltaV(orbit);
+                    if (nodes[ni].Total > 1e-3) break;
+                    ni++;
+                }
+                if (ni < count && nodes[ni].Time < next.Time)
+                {
+                    var node = nodes[ni];
+                    {
+                        // Манёвр раньше события: режем участок, применяем импульс, ищем заново.
+                        patch.EndTime = node.Time;
+                        patch.EndType = TransitionType.None;
+                        patch.NextBody = body;
+                        list.Add(patch);
+                        orbit.GetState(node.Time, out r, out v);
+                        v += node.Remaining;
+                        t = node.Time;
+                        lastIndex = ni;
+                        ni++;
+                        afterNode = true;
+                        continue;
+                    }
                 }
                 list.Add(patch);
                 if (next.Type != TransitionType.Escape && next.Type != TransitionType.Encounter) break;

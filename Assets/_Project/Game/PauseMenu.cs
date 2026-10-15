@@ -18,6 +18,9 @@ namespace Kare.Space.Game
 
         void OnDestroy() => IsOpen = false; // статик переживает перезагрузку сцены
 
+        // Карьера (GDD §8): оплата пуска, наука и контракты полёта — компонент рядом с меню, GameBootstrap не трогаем.
+        void Awake() { if (GetComponent<CareerFlight>() == null) gameObject.AddComponent<CareerFlight>(); }
+
         void Update()
         {
             // Ожидание новой клавиши в «Управлении» забирает кадр целиком: Esc там — отмена, а не выход из меню.
@@ -25,9 +28,11 @@ namespace Kare.Space.Game
             if (!Input.GetKeyDown(KeyCode.Escape)) return;
             // Esc из таблицы миссий и из «Управления» возвращает в меню, а не в полёт.
             if (IsOpen && MissionPicker.Open) MissionPicker.Open = false;
+            else if (IsOpen && CareerWindow.Open) CareerWindow.Open = false;
             else if (IsOpen && ControlsMenu.Open) ControlsMenu.Close();
             else if (IsOpen && savesOpen) savesOpen = false;
-            else { IsOpen = !IsOpen; MissionPicker.Open = false; ControlsMenu.Close(); savesOpen = false; }
+            else if (IsOpen && OrbitSpawnMenu.Open) OrbitSpawnMenu.Open = false;
+            else { IsOpen = !IsOpen; MissionPicker.Open = false; CareerWindow.Open = false; ControlsMenu.Close(); savesOpen = false; OrbitSpawnMenu.Open = false; }
         }
 
         static bool savesOpen;
@@ -64,6 +69,11 @@ namespace Kare.Space.Game
                 MissionPicker.Draw(boot.Mission, SelectMission);
                 return;
             }
+            if (CareerWindow.Open)
+            {
+                CareerWindow.Draw(SelectMission);
+                return;
+            }
             if (ControlsMenu.Open)
             {
                 ControlsMenu.Draw();
@@ -74,9 +84,18 @@ namespace Kare.Space.Game
                 DrawSaves();
                 return;
             }
+            if (OrbitSpawnMenu.Open)
+            {
+                OrbitSpawnMenu.Draw(GameBootstrap.U, () => IsOpen = false);
+                return;
+            }
 
-            float h = 70 + Row * 5 + 30 + 4 * (Row + 8) + 20 + 30 + (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
-            var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
+            float h = 70 + Row * 5 + 30 + 5 * (Row + 8) + 20 + 30 + (Row + 4) + 16 + 30 + 2 * Row + 20 + CareerBlock + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
+            // Панель выше окна (1250 px было при 1080) — низ с читами уходил за экран и кнопку «На орбиту…» не находили.
+            // Не влезает — ужимаем всю панель матрицей GUI: мышь пересчитывается ею же, раскладку трогать не нужно.
+            float scale = Mathf.Min(1, (Screen.height - 2 * ScreenMargin) / h);
+            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
+            var r = new Rect((Screen.width / scale - Width) / 2, (Screen.height / scale - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
             GUI.color = Color.white;
@@ -111,6 +130,9 @@ namespace Kare.Space.Game
             float half = (w - 8) / 2;
             if (GUI.Button(new Rect(x, y, half, Row), "Управление (клавиши)…", button)) ControlsMenu.Open = true;
             if (GUI.Button(new Rect(x + half + 8, y, half, Row), "Сохранения…", button)) savesOpen = true;
+            y += Row + 8;
+            // Читы и телепорт (§4.7) — своим окном (OrbitSpawnMenu): быстрые орбиты, любое тело, топливо и перезапуски.
+            if (GUI.Button(new Rect(x, y, w, Row), "Читы и телепорт: орбита любого тела…", button)) OrbitSpawnMenu.Open = true;
             y += Row + 20;
 
             // Выбор миссии: таблица с описаниями и схемами полёта (MissionPicker), перезапуск сцены с другой миссией.
@@ -118,6 +140,17 @@ namespace Kare.Space.Game
             if (GUI.Button(new Rect(x, y, w, Row), $"{boot.Mission?.Title ?? "—"}  —  выбрать из таблицы…", button))
                 MissionPicker.Open = true;
             y += Row + 4 + 16;
+
+            // Режим (§8.5): песочница по умолчанию, карьера — явный выбор; засчитывается с ближайшего пуска.
+            GUI.Label(new Rect(x, y, w, 24), CareerStore.Active ? "Режим: карьера (с ближайшего пуска)" : "Режим: песочница", label); y += 30;
+            float third = (w - 16) / 3;
+            GUI.color = CareerStore.Active ? Color.white : new Color(1f, 0.8f, 0.4f);
+            if (GUI.Button(new Rect(x, y, third, Row), "Песочница", button) && CareerStore.Active) CareerStore.Leave();
+            GUI.color = CareerStore.Active ? new Color(1f, 0.8f, 0.4f) : Color.white;
+            if (GUI.Button(new Rect(x + third + 8, y, third, Row), "Карьера", button) && !CareerStore.Active) CareerStore.Enter(false);
+            GUI.color = Color.white;
+            if (GUI.Button(new Rect(x + 2 * (third + 8), y, third, Row), "Карьера…", button)) CareerWindow.Open = true;
+            y += Row + 20;
 
             // Графика (GDD §9): RT и DLSS — RenderQuality применяет на лету, без перезапуска.
             GUI.Label(new Rect(x, y, w, 24), "Графика", label); y += 30;
@@ -150,7 +183,11 @@ namespace Kare.Space.Game
                 BrightnessSettings.PlumeMin, BrightnessSettings.PlumeMax, "×{0:0.00}"); y += Row + 6;
             // Ночь — подсветка ландшафта (NightLight): грунт виден и при факеле, и у прожекторов стола.
             BrightnessSettings.Night = Slider(x, y, w, "Ночь", BrightnessSettings.Night,
-                BrightnessSettings.NightMin, BrightnessSettings.NightMax, "{0:P0}"); y += Row + 6 + 20;
+                BrightnessSettings.NightMin, BrightnessSettings.NightMax, "{0:P0}"); y += Row + 6;
+            // Блик Солнца (SunFlare) — то же, что клавиша Bind.SunGlare.
+            bool glare = GUI.Toggle(new Rect(x, y, w, Row), BrightnessSettings.SunGlare,
+                $"  Блик Солнца в объективе ({KeyBinds.Label(Bind.SunGlare)})", toggle); y += Row + 20;
+            if (glare != BrightnessSettings.SunGlare) { BrightnessSettings.SunGlare = glare; BrightnessSettings.Save(); }
             if (Event.current.type == EventType.MouseUp) BrightnessSettings.Save();
 
             // Звук (§9.3): общая громкость синтезированного звука полёта, применяет FlightAudio через AudioListener.
@@ -158,33 +195,22 @@ namespace Kare.Space.Game
             SoundSettings.Volume = Slider(x, y, w, "Громкость", SoundSettings.Volume, 0, 1, "{0:P0}"); y += Row + 6 + 20;
             if (Event.current.type == EventType.MouseUp) SoundSettings.Save();
 
-            // Читы для тестов: телепорт и бесконечное топливо. Миссия при этом не засчитывается честно — это отладка.
-            GUI.Label(new Rect(x, y, w, 24), "Читы (для тестов)", label); y += 30;
-            boot.InfiniteFuel = GUI.Toggle(new Rect(x, y, w, Row), boot.InfiniteFuel, "  Бесконечное топливо", toggle); y += Row;
-            // Зажигания у исторических двигателей считанные (Vessel.IgnitionsLeft) — тумблер снимает лимит для свободного полёта.
-            Vessel.UnlimitedIgnitions = GUI.Toggle(new Rect(x, y, w, Row), Vessel.UnlimitedIgnitions,
-                "  Бесконечные перезапуски двигателей", toggle); y += Row;
-            var u = GameBootstrap.U;
-            var earth = u?.System.Get("earth");
-            var moon = u?.System.Get("moon");
-            var mars = u?.System.Get("mars");
-            float hw = (w - 4) / 2;
-            if (GUI.Button(new Rect(x, y, hw, Row), "Орбита Земли 200 км", small)) Jump(u, earth, 200e3, true);
-            if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Луны 100 км", small)) Jump(u, moon, 100e3, true);
-            y += Row + 4;
-            if (GUI.Button(new Rect(x, y, hw, Row), "Над Луной 15 км (H — посадка)", small)) Jump(u, moon, 15e3, false);
-            if (GUI.Button(new Rect(x + hw + 4, y, hw, Row), "Орбита Марса 300 км", small)) Jump(u, mars, 300e3, true);
-            y += Row + 10;
             // Атрибуция карт тел — условие лицензии CC BY 4.0 (BodyRenderer.Maps).
             GUI.Label(new Rect(x, y, w, CreditsBlock), Credits, credit);
+            GUI.matrix = Matrix4x4.identity;
         }
 
+        /// <summary>Поля над и под панелью паузы, когда её ужимает под высоту окна, px.</summary>
+        const float ScreenMargin = 10;
+
         /// <summary>Строка атрибуции карт тел и её высота. Пара: код строки в OnGUI.</summary>
-        const string Credits = "Карты планет: Solar System Scope (solarsystemscope.com), CC BY 4.0. Луна: NASA SVS / LRO.";
-        const float CreditsBlock = 22;
+        const string Credits = "Карты планет: Solar System Scope (solarsystemscope.com), CC BY 4.0. Луна: NASA SVS / LRO. Карты спутников: NASA/JPL/USGS (public domain).";
+        const float CreditsBlock = 36;
+        /// <summary>Блок «Режим»: подпись, ряд кнопок, отступ. Пара: код блока в OnGUI.</summary>
+        const float CareerBlock = 30 + Row + 20;
 
         /// <summary>Высота блока «Яркость»: заголовок, два ползунка, отступ. Пара: код блока в OnGUI.</summary>
-        const float BrightnessBlock = 30 + 3 * (Row + 6) + 20;
+        const float BrightnessBlock = 30 + 3 * (Row + 6) + Row + 20;
         const float SoundBlock = 30 + (Row + 6) + 20;
         /// <summary>Строка «Детализация» в блоке «Графика» и ширина её подписи. Пара: код строки в OnGUI.</summary>
         const float DetailBlock = Row + 4, DetailLabel = 110;
@@ -224,13 +250,6 @@ namespace Kare.Space.Game
             MissionPicker.Open = false;
             IsOpen = false;
             Reload();
-        }
-
-        void Jump(Universe u, CelestialBody body, double alt, bool orbital)
-        {
-            if (u == null || body == null) return;
-            u.Teleport(body, alt, orbital);
-            IsOpen = false;
         }
 
         static void Reload() =>

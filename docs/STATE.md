@@ -61,7 +61,8 @@ Esc: "Infinite fuel", "Infinite engine restarts" (`Vessel.UnlimitedIgnitions`), 
 
 ## Maneuvers
 `NodePlanner`; keys N (node; repeat — next reference point) / B (execute/abort) / Bksp (delete) /
-C (circularize), I-K / L-J / O-U — Δv along the axes, `[ ]` — time shift, Alt — fine step.
+C (circularize), I-K / L-J / O-U — Δv along the axes, `[ ]` — time shift, Alt — fine step. Keys act on the **selected** node of the queue — see
+"Manual maneuvers (15.10.2026)".
 
 ## Part physics
 - Stack aerodynamic moment §4.6 (`StackAeroTorque`: nose CNα 2, cross-flow, damping, stabilizers
@@ -149,6 +150,11 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
 - Body maps — Solar System Scope (CC BY 4.0, attribution line in the Esc menu): Mercury and Mars 8k, Venus (clouds) 4k,
   Jupiter and Saturn 4k, Uranus and Neptune 2k; Earth — day 8k, night lights, clouds. Saturn's rings — `BodyRenderer.AddRing`
   (72.2–141.35 thousand km). Conversion and albedo normalization — `Tools/textures/sss_convert.py`. Rings of Uranus/Neptune were not made.
+- Moon maps (15.10.2026) — real NASA/JPL/USGS mosaics (public domain; credit in Esc): Phobos (Viking, Stooke/DLR), Deimos (USGS Viking
+  cylindrical, 1440x720 — the only source found), Io, Europa, Ganymede, Callisto (Voyager+Galileo), Enceladus, Titan (Cassini ISS 938 nm),
+  Triton (Voyager 2), Pluto, Charon (New Horizons). `Textures/Bodies/Resources/MoonMaps/<id>.jpg` (4k, Phobos/Deimos 2k), picked up by
+  `BodyRenderer.MapFor` via `Resources.Load` — the scene `Maps` array is not touched. Script: `Tools/textures/moons.py`
+  (GeoTIFFs from planetarymaps.usgs.gov / `asc-pds-services` mosaic bucket; brightness -> geometric albedo, gray maps tinted).
 - R-7 family (`HistoricRockets.cs`): "Sputnik" (8K71PS, block A reaches orbit itself), "Vostok" (8K72K + block E),
   "Luna-9/Mechta/Vympel/Flyby" — "Molniya-M" (8K78M, blocks I and L + Ye-6). Block A + 4 side blocks (radial group ×4,
   RD-107 ~120 s), all five fired at once. "Kara-1" remained the 10 t reference. R-7 table trusses rest against the side blocks.
@@ -163,7 +169,11 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   `WFX_Nuke` (R/4). Time by Froude 1/√scale, in vacuum the smoke systems are extinguished. Fields `GameBootstrap.BlastPrefab/
   BigBlastPrefab`, materials — menu Kare/Convert WarFX to HDRP. Not verified in Play (brightness, scale, timing).
 - Separation: a flash and a white ring of pyro bolts at the upper end of the new debris piece, flying together with it.
-- Dust under the jet in vacuum below 30 m (Moon): 60 m/s fan without deceleration, ground colour of the body from `BodyVisuals`.
+- Ground cloud at liftoff/landing (`Game/ExhaustTrail.Ground.cs`, 15.10.2026): 160-puff pool per vessel, scale k = (thrust/4 MN)^1/3
+  (0.35..3): in air (ρ ≥ 0.05) puffs below 60·k m billow radially (32·√k m/s, drag τ 3.5·√k s), rise by buoyancy, wind drift, live 10+8k s
+  (≤30); on R-7/LC-39 pads 80 % exit along the flame trench (`LaunchPadView.FlameTrench`); young smoke darker → white steam; flame
+  forward-scatter glow = emission 0.6·I/d²·0.85/π from active "Plume Light"s. Thin air/vacuum (Moon, Mars): flat dust fan below 30·k m
+  (k from 45 kN), 90·√k m/s at 1–5°, ballistic with body g, Mars drag τ = 0.05/ρ, streak billboards, ground colour from `BodyVisuals`.
 - Not adopted: Rainy VFX and AQUAS-Lite — not HDRP (see `pitfalls-tools.md`).
 
 
@@ -425,6 +435,23 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   a snap. Clicking the preview releases text-field focus (hotkeys work only with `keyboardControl == 0`).
 - Docking: Z is blocked in dock mode, dock mode resets on enable; CraftCompiler warns about docking ports (`dock-1` description).
 
+## Constructor 2.2: engineer readout (15.10.2026, `Core/Vessels/CraftAnalysis.cs`, `Game/HangarController.cs`)
+- **Mission Δv budget** (`CraftAnalysis.Budget(MissionDef, SolarSystem)` → `DeltaVBudget{Legs, Total, Assists}`): legs from objectives —
+  ascent (v_circ + 1800 loss − Earth rotation at the site latitude), Hohmann raise, rendezvous, TLI/interplanetary departure,
+  capture (elliptic, apoapsis 0.5 SOI at gas giants), landing (direct / from orbit / aerobraked), ascent, return, deorbit. Missions
+  that start in the air (`Approach`) have no budget. Checked in test `builder`: vostok ≈9.4 km/s, karman ≈2 km/s, apollo11 16–19 km/s.
+- `CraftCompiler.Compile(craft, budget)` → `CraftBuild.Budget` + warning «Δv … < ≈… м/с для «миссия» … не хватит» (warning, not error:
+  the estimate is rough, the launch stays open).
+- Stats panel (expanded): **Δv bar** — stage segments by vacuum Δv, white ticks at the end of each budget leg, green/red "need" line,
+  legs listed below (tooltip explains the method). **Stage table** à la Kerbal Engineer: Δv vac / at Earth, TWR Earth/vac, max g,
+  burn time, start mass, totals row. TWR<1 on stage 1 in red, max g in orange when the crew would be over the limit.
+- **Crew g-load**: `StageStats.MaxAccel`, `HighGTime` (time above `FlightPhysics.CrewGLimit` = 9 g, from mass flow, §4.7);
+  `CraftAnalysis.CheckGLoad` warns for crewed designs when `HighGTime > CrewGTime` (10 s).
+- **Stage highlight**: hover a table row or bar segment → that stage's sections tint cyan in the 3D preview (MPB only, no rebuild);
+  click pins (click again to unpin). Collapsed panel clears the hover.
+- **Career hook**: `HangarController.PartAvailable` (`Func<PartDef,bool>`, default all true) hides parts from the catalog and turns used
+  locked parts into an error «… ещё не открыта» (launch blocked); after changing the rule call `HangarController.CatalogChanged()`.
+
 ## Controls menu, warp x30, plumes, cinematic camera (15.10.2026)
 - **Key rebinding** (`Game/KeyBinds.cs`, `Game/ControlsMenu.cs`): every action is a `Bind` with group/title/default
   (+ alt key), stored in PlayerPrefs; Esc → "Управление (клавиши)…" — two-column list, click a key → press a new one
@@ -504,3 +531,60 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   the Titan SOI (real: 20 d before), main chute at 15 km (FlightPhysics.ChuteAltitudeMax; real 160 km), no orbiter deflection
   manoeuvre (orbiter debris follows towards Titan — after the release the active vessel is Huygens).
 - Pitfalls — `docs/pitfalls-core.md` "Cassini".
+
+## Comets (15.10.2026, `Core/Bodies/SolarSystem.cs` AddComets, `Game/CometView.cs`)
+- 1P/Halley (`halley`, index 21) and C/1995 O1 Hale–Bopp (`halebopp`, 22) — Sun children appended after Charon (planet indices unchanged).
+  `OrbitModelType.Kepler`: fixed heliocentric ellipse from osculating elements (ecliptic J2000, `CelestialBody.SetKepler(a, e, i°, Ω°, ω°, tPeri)`),
+  no perturbations. Halley R 5.5 km, 2.2e14 kg, 52 h; Hale–Bopp R 30 km, 1e16 kg, 11.35 h (estimates). `IsComet`, `CometActiveFull/Off`
+  (Halley 1.5/5 AU, Hale–Bopp 2.5/7 AU). Nucleus = ordinary BodyRenderer body: lumpy terrain (`Ter`), albedo 0.04 (`BodyVisuals`, points table).
+- Checked (core test `comets`): perihelia 0.586 / 0.914 AU, Earth distance 11.04.1986 0.416 AU, 22.03.1997 1.315 AU, Hale–Bopp at discovery 7.15 AU;
+  SOI 36 km / 261 km (> rails floor); autoplan LEO → comet answers "not enough Δv" (14.3 / 32.8 km/s) in < 0.1 s.
+  Model Halley 2061 perihelion is 54 d early (no planetary perturbations).
+- `CometView` (bootstrap, order 120): per comet 3 dynamic meshes — coma billboard, dust strip (curved toward −v, yellow-white), ion strip
+  (straight antisolar, blue); shader `Kare/Comet Glow HDRP` (additive, vertex colour × profile texture, fraction of white, depth clamped to far).
+  Activity = 1 − smoothstep(Full, Off, r); brightness ∝ (1 AU/r)² capped ×2; dimmed by day (sky) like body points. Sizes per comet — `Profile`
+  (Hale–Bopp ion 1e8 km, dust 6e7 km). Transfer table skips comets (`MapView.Transfers.BuildRows`); map orbit lines/focus are automatic.
+- Unverified visually: tail brightness/width, coma with the camera inside it, map look.
+
+## Manual maneuvers (15.10.2026, `Core/Flight/NodePlanner.cs`, `Game/MapView.Nodes.cs`, GDD §6.11, §9.6)
+- **Node queue**: `Vessel.Nodes` (ordered by time); `Vessel.Node` = the first (next to execute); `v.Node = n` (autopilots) replaces the
+  first and drops queued nodes not later than it. Prediction `PatchedConics.PredictNodes` applies nodes in turn; `OrbitPatch.NodeIndex` —
+  index of the last applied node. Components (prograde/normal/radial) of node k are in the axes of the orbit after nodes 0..k−1;
+  `Remaining` is refreshed by `PredictActive` (`refreshQueued`). Nodes keep `MinGap` = 30 s between each other and `MinLead` = 30 s from now.
+  NodeAutopilot executes node 0, then deletes it → the next becomes current (B again). Saves keep the list; old saves with one `Node` migrate.
+- **Map**: LMB click on the trajectory → popup "Добавить манёвр" (`NodePlanner.InsertAt`, between nodes too). Selected node — 6 handles of
+  constant screen length (58 px): prograde/retrograde yellow-green, normal/antinormal magenta, radial cyan (filled dot = +, ring = −).
+  Drag a handle: Δv rate = 10·((d−3)/50)² m/s per second (d — pull along the handle, px; Alt ×0.1), prediction every 0.05 s while dragging.
+  Drag the diamond: node slides to the nearest orbit point within ±half a period (can walk to later revolutions). The node being executed
+  by the autopilot is locked (no handles, window greyed).
+- **Node window** (key 4 or map button "Манёвры"; same place as transfers, mutually exclusive): table №, T−, Δv, burn, **real burn start =
+  T − StagedBurnTime/2**; + at Ap / + at Pe / + one orbit (after the last node) / delete; fields prograde/normal/radial/T− with ±0.1/1/10/100;
+  orbit −1/+1, circularize; result "После: Ap/Pe" + encounter/SOI exit/atmosphere. Typing in a field mutes flight keys (`MapView.Typing`);
+  Enter/Esc or a click outside drops focus.
+- **HUD node panel** shows the selected node ("МАНЁВР k/N") and "Старт прожига через …" (StagedBurnTime, as NodeAutopilot).
+- Keys: **4** — node window, **Ins** — add node after the last one (Ap), **'** — select next node of the queue. Test `nodes` (19 checks).
+
+## Plumes 2.0, RCS, aurora (15.10.2026)
+- **Plume** (`Game/VesselView.Exhaust.cs`, shader `Settings/Resources/KarePlumeHDRP.shader`): rim fall-off by view angle, drifting turbulence, shock diamonds at
+  low altitude (fade with altitude/node number), under-expanded dome in vacuum; propellant colours and `BrightnessSettings.Plume` unchanged.
+- **Smoke trail** (`Game/ExhaustTrail.cs`): lit round column (cylindrical normals), lumpy edges, wider in thin air; launch-pad puffs are hemisphere-normal
+  meshes with random roll.
+- **RCS** (`Game/RcsJets.cs`): quad blocks with small bell nozzles; jet style by RCS type (hypergolic, micro-thruster, big), ignition flash, condensate puff in
+  atmosphere, PWM pulses for partial commands.
+- **Aurora** (`Game/AuroraView.cs`, `Kare/Aurora HDRP`, hook in `GameBootstrap`): Earth, Jupiter, Saturn, Uranus, Neptune, Ganymede; two ovals per body
+  (3 curtains each, 640 segments), additive emission, night-shifted centre, shimmer/rays by noise; no per-frame allocations (2 SetVector per oval).
+- Screenshots: `Captures/fx_aurora_earth.png`, `fx_aurora_jupiter.png`, `fx_plume_vacuum.png`. Pitfalls — `docs/pitfalls-render.md`.
+
+## Gimbal, heating, separation FX (15.10.2026)
+- **Gimbal (TVC)** `Game/VesselView.Gimbal.cs`: bells and model nozzles (split from the FBX `NozzleColor` slot by `SplitNozzles`) tilt with the control input, slewing at `GimbalRateDeg` 10°/s; roll by differential tilt for off-axis nozzles. View only — physics TVC is unchanged.
+- **Heating** `Game/VesselView.Heat.cs`: nozzle glow builds up with time under thrust (tau 5 s heating / 35 s cooling). Regen bells glow only at the lip (0.25); solids and radiative nozzles glow at 0.85. Re-entry skin heating uses the aero heat flux (tau 2.5/15 s), the lee side gets 0.3 of it, and the colour is capped at orange (0.6). Heat survives a view rebuild and a separation.
+- **Separation** `Core/Flight/Separation.cs` + `Game/VesselView.Separation.cs`:
+  - Core: S-IC retros take 15 m/s off the spent stage, S-II retros 23 m/s, plus a tumble of 0.03 rad/s (`Vessel.FireRetros`).
+  - `Vessel.SeparatedAt` stores the time of separation (it is not saved).
+  - Jets: retro jets on the spent stage, ullage motors on the new bottom stage for 3.8 s, LES tower jettison (2 jets), and hot-staging vents (8 radial vents at the interstage while the upper engine fires on an attached lower section).
+- **Cheats window** `Game/OrbitSpawnMenu.cs` DrawQuick: Esc → «Читы и телепорт…». The pause panel is scaled through GUI.matrix so it fits 1080 px.
+
+## Career mode (15.10.2026, `Core/Career/*`, `Game/Career*.cs`, GDD §8.6)
+- Core: `CareerState` (funds/science/prestige, date, completed contracts, tech, science log, JSON), `CareerContracts` (27 milestones over missions + `CareerMissions` career-only `career_venera`, `career_mars`, registered at runtime), `CareerTech` (13 nodes, part-id prefixes), `CareerPricing` (launch price by parts or by sections, recovery 30 %), `CareerObserver` (science per body×situation, refund for landed sections). API: `Career.Current`, `Career.IsPartUnlocked(id|PartDef)` (sandbox — everything open). Test group `career`.
+- Game: `CareerStore` (career.json + PlayerPrefs mode; BeforeSceneLoad wires `HangarController.PartAvailable = Career.IsPartUnlocked`), `CareerFlight` (added by `PauseMenu.Awake`: on a fresh launch charges the price — own rocket by `Crafts/_last.json`, historic by sections; locked parts / no money → modal with time stopped: to builder / wait for budget / fly outside career; observer messages to HUD; contract result popup; date advances in OnDestroy), `CareerWindow` (Esc → "Карьера…": stats, tabs Contracts / Technologies / Log, buttons "Лететь (ист.)", "Своя ракета…", "Изучить", "Ждать до 1 января", "Новая карьера…").
+- A loaded flight save is not charged again; switching to career mid-flight counts from the next launch. MissionPicker hides career-only missions.

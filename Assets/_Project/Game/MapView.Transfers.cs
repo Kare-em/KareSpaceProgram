@@ -45,6 +45,7 @@ namespace Kare.Space.Game
                 instance.transfersOpen = true;
             }
             else instance.transfersOpen = !instance.transfersOpen;
+            if (instance.transfersOpen) instance.nodeWindowOpen = false; // одно место на экране с окном манёвров
             instance.nextRows = 0;
             instance.planResult = null;
         }
@@ -77,6 +78,7 @@ namespace Kare.Space.Game
             GUI.color = Color.white;
             GUI.Box(box, GUIContent.none);
             GUI.Box(box, GUIContent.none); // вторая подложка — плотнее на ярком диске планеты
+            HudHits.Add(box); // щелчок по меню — не щелчок по орбите (MapView.Nodes)
             float x0 = box.x + pad, y = box.y + pad;
 
             cellStyle.alignment = TextAnchor.MiddleLeft;
@@ -154,13 +156,14 @@ namespace Kare.Space.Game
             double r1 = closed ? orbit.A : PatchedConics.RailsFloorRadius(body) + 50e3;
             string note = closed ? null : "сначала замкнутая орбита";
 
+            // Кометы (e ≈ 1) — не для гомановской оценки: числа вышли бы бессмысленными; к ним — автоплан (узел, Lambert).
             foreach (var m in body.Children)
-                rows.Add(ToMoon(u, v, body, m, r1, closed, note));
+                if (!m.IsComet) rows.Add(ToMoon(u, v, body, m, r1, closed, note));
             if (body.Parent != null && body.Parent.Parent != null)
                 rows.Add(ToParent(u, body, r1, note));
             if (body.Parent != null && body.Parent.Parent == null)
                 foreach (var p in body.Parent.Children)
-                    if (p != body) rows.Add(ToPlanet(u, body, p, r1, note));
+                    if (p != body && !p.IsComet) rows.Add(ToPlanet(u, body, p, r1, note));
             rows.Sort((a, b) => Dist(a.Target, u.Time).CompareTo(Dist(b.Target, u.Time)));
         }
 

@@ -292,3 +292,32 @@ Read before working through MCP, debugging in Play, and bulk file edits.
   call works (the active vessel shrinks to the probe).
 - RCS jets can be checked without keys: `u.Active.RcsTranslate = new Vector3d(0.6, 0.6, 0.6)` (outside dock mode
   FlightInput does not overwrite it); `PauseMenu.IsOpen` has a private setter — close it via reflection.
+
+
+- CoreTests apphost `CoreTests.exe` fails with "Failed to resolve hostfxr.dll" (no system dotnet). Run the dll with Unity's
+  dotnet: `"$D" Tools/CoreTests/bin/<cfg>/<tfm>/CoreTests.dll <name>`. Console output is cp866 — pipe through
+  `iconv -f cp866 -t utf-8` before grep. A dead session can leave an orphaned CoreTests.exe holding the exe lock — kill it before building.
+- Baseline comparison of a core regression: `git archive HEAD Assets/_Project/Core Tools/CoreTests | tar -x -C <scratch>/base`,
+  copy the untracked `Tools/CoreTests/CoreTests.csproj` there, build and run the same test in both trees, diff the logs.
+- RCS/main jets (`RcsJets`) use `_EmissiveExposureWeight = 0`: their brightness is in screen units and does not depend on
+  auto-exposure (`SkyController.FarSunEv`). Overbright jets are fixed by `JetScreen`/`MainJetBright`, not by exposure.
+
+## Teleports for render checks (15.10.2026)
+- `Teleport(sun, 5 AU)` → "Раздавлен в глубинах атмосферы: Солнце", NaN everywhere. To view the far Sun, use
+  `Teleport(jupiter, 3e9, true)` (5.08 AU). The altitude reads 23 m on the first call; the next frame shows 3e9.
+- Frame series without blocking: `EditorApplication.update += cb` with `Time.frameCount` dedup and
+  `ScreenCapture.CaptureScreenshot("Temp/x_" + n + ".png")`; the capture lands at the end of the frame (a setting changed in the same
+  callback already shows up in that frame).
+- `execute_code` right after `play` may time out — repeat; `refresh_unity` fails once with `'NoneType' ... 'sendall'` — repeat.
+
+## Map mouse input and compile checks under Play mode (15.10.2026)
+- **LateUpdate runs before OnGUI**: a map click handled in LateUpdate fires before panel buttons see the event → clicking a button also
+  dropped a node. Map clicks (`MapView.NodesMouse`) are taken at the END of OnGUI: buttons already set the event to Used; button-less panel
+  backgrounds are filtered by `HudHits` (every panel that should block clicks must call `HudHits.Add(rect)` on Repaint). Continuous drags
+  then run in LateUpdate via `Input.GetMouseButton(0)`.
+- **IMGUI input order ≠ draw order**: the first control drawn gets MouseDown, the last one is drawn on top. Labels with click handlers
+  drawn under a window must check the window rect themselves (`NodeUiContains`).
+- **Compile check while another agent is in Play mode**: `refresh_unity compile=request` returns `compile_started:false` and
+  `EditorApplication.isCompiling` stays true until Play ends — the console shows no errors yet. Offline check without touching Temp: build
+  an rsp from `Kare.Space.Game.csproj` (DefineConstants + all HintPath refs, minus Core) + `Assets/_Project/{Game,Core}/**/*.cs`,
+  `-nostdlib -langversion:9.0 -out:<scratchpad>`, run `DotNetSdk/dotnet.exe DotNetSdk/sdk/8.0.318/Roslyn/bincore/csc.dll @game.rsp` (~20 s).

@@ -42,13 +42,92 @@ namespace Kare.Space.Game
         /// к осям, поэтому чистая команда по X/Z даёт косинус 0,707: при полной силе только от 1 струя
         /// получала 0,55 и уходила в импульсы. Пара: QuadPhaseDeg.</summary>
         const float AlignMin = 0.35f, AlignFull = 0.7f;
-        /// <summary>Яркость у среза в единицах экрана (вес экспозиции 0, 1 ≈ белый): аддитив, две стенки конуса.
-        /// Струя видна по рассеянному свету, поэтому в тени Земли тусклее. Пара: градиент JetGradient (пик ≈ 0,8).
-        /// 0,55 на скрине «Союза» с 9 м было не различить (тонкий конус, ~3 пкс у среза) — поднято до 1,8.</summary>
-        const float JetScreen = 1.8f, ShadowShare = 0.45f;
+        /// <summary>Струя видна по рассеянному свету и собственному свечению вспышки: в тени Земли ровная часть тусклее.</summary>
+        const float ShadowShare = 0.45f;
         /// <summary>Дрожание длины и яркости, доля; частота как у факела (VesselView.FlickerHz) — без алиасинга.</summary>
         const float Flicker = 0.12f, FlickerHz = 5f;
-        static readonly Color JetTint = new Color(1f, 0.97f, 0.9f);
+
+        /// <summary>
+        /// Вид струи по типу РСУ (§4.9, §9.5). Ровная часть — в долях экрана (вес экспозиции 0, 1 ≈ белый). Было одно
+        /// на всех: сплошной бело-жёлтый конус 1,8 — «сопли» из корпуса. На съёмках с МКС и «Аполлонов» струя
+        /// гиперголика в пустоте — почти прозрачный широкий веер, видимый в основном в миг зажигания: непрореагировавшие
+        /// капли дают короткую вспышку, потом газ прозрачен. Холодный газ не светится вовсе. Крупные ЖРД (PRCS шаттла
+        /// 3,9 кН, Draco 400 Н) — короткий жёлто-оранжевый язык. В воздухе — белое облачко конденсата.
+        /// Steady — ровная часть, Flash — пик вспышки зажигания (гаснет за FlashTau), AtmoPuff — облачко у земли.
+        /// </summary>
+        struct JetStyle
+        {
+            public float Steady, Flash, AtmoPuff;
+            public Color Tint, FlashTint;
+        }
+
+        static readonly JetStyle Hypergolic = new JetStyle
+            { Steady = 0.3f, Flash = 2.2f, AtmoPuff = 0.45f, Tint = new Color(0.92f, 0.94f, 1f), FlashTint = new Color(1f, 0.82f, 0.55f) };
+        /// <summary>Гидразиновые микро-ЖРД (0,9 Н «Вояджера»/«Кассини») и перекись «Меркурия»: еле заметный «пшик».</summary>
+        static readonly JetStyle Micro = new JetStyle
+            { Steady = 0.16f, Flash = 0.9f, AtmoPuff = 0.3f, Tint = new Color(0.92f, 0.94f, 1f), FlashTint = new Color(1f, 0.9f, 0.75f) };
+        static readonly JetStyle Big = new JetStyle
+            { Steady = 0.4f, Flash = 3f, AtmoPuff = 0.5f, Tint = new Color(1f, 0.8f, 0.55f), FlashTint = new Color(1f, 0.6f, 0.28f) };
+        /// <summary>Холодный газ (азот/метан Super Heavy, Starship): в пустоте почти не видно, у земли — белое облачко
+        /// (газ остывает при расширении, влага конденсируется — так их и видно на трансляциях).</summary>
+        static readonly JetStyle ColdGas = new JetStyle
+            { Steady = 0.04f, Flash = 0, AtmoPuff = 0.55f, Tint = Color.white, FlashTint = Color.white };
+        static readonly Color PuffTint = new Color(0.95f, 0.96f, 0.98f);
+
+        static JetStyle StyleOf(SectionModel m)
+        {
+            switch (m)
+            {
+                case SectionModel.SuperHeavy: case SectionModel.Starship: return ColdGas;
+                case SectionModel.Voyager: case SectionModel.VoyagerPM: case SectionModel.Cassini: case SectionModel.Mercury: return Micro;
+                case SectionModel.ShuttleOrbiter: case SectionModel.Buran: case SectionModel.CrewDragon: return Big;
+                default: return Hypergolic;
+            }
+        }
+
+        /// <summary>Вспышка зажигания гаснет за FlashTau, с (экспонента): короче кадра на 4 Гц ШИМ — каждый импульс
+        /// начинается своей вспышкой, как на съёмке стыковок. Пара: PulseHz, PuffHold.</summary>
+        const float FlashTau = 0.05f;
+        /// <summary>Облачко в воздухе (§9.5): давление, с которого оно в полную силу, атм; отпускание, с (газ рассеивается
+        /// медленнее, чем гаснет свечение в пустоте), раздувание к концу отпускания, сужение струи противодавлением.
+        /// Тень: облачко светит только отражённым Солнцем — без Солнца почти чёрное.</summary>
+        const float PuffPressure = 0.3f, AtmoRelease = 0.4f, AtmoBillow = 1.5f, AtmoNarrow = 0.45f, PuffShadow = 0.08f;
+        /// <summary>Конус струи: радиус у среза, раскрытие и степень профиля (ProcMesh.Plume) — веер ≈ 40° полуугла:
+        /// недорасширенная струя в пустоте раскрывается широко (течение Прандтля–Майера). Пара: Length — длина веера.</summary>
+        const float JetR0 = 0.06f, JetGrow = 14f, JetPower = 0.5f;
+        /// <summary>Клочья и снос шума струи (шейдер Kare/Plume HDRP): газ РСУ ровнее факела.</summary>
+        const float JetTurb = 0.25f, JetScroll = 3f;
+        /// <summary>Сопло на блоке (доли ребра корпуса hs): срез, горло, высота раструба. У квада СМ «Аполлона» ребро
+        /// ≈ 0,4 м, сопло Ø ≈ 12 см на выносе ≈ 12 см. Пара: HousingPerJet.</summary>
+        const float RcsBellExit = 0.16f, RcsBellThroat = 0.07f, RcsBellHeight = 0.3f;
+        /// <summary>Ровная яркость основного микро-ЖРД (коррекция «Вояджера»), доли экрана.</summary>
+        const float MainJetScreen = 0.5f;
+        /// <summary>Корпус блока сопел (§9.5): ребро — доля длины струи в пределах [Min, Max]. У квада СМ «Аполлона»
+        /// ≈ 0,4 м при струе 1,4 м; у микро-ЖРД «Вояджера» (струя 0,22) — 8 см. Пара: LengthPerRadius, MicroThrusterLength.</summary>
+        const float HousingPerJet = 0.35f, HousingMin = 0.06f, HousingMax = 0.5f;
+        /// <summary>Пропорции корпуса: высота вдоль оси и толщина от обшивки — доли ребра. Пара: срез сопел в Rebuild.</summary>
+        const float HousingTall = 1.2f, HousingDeep = 0.8f;
+        /// <summary>Цвет корпуса — как у сопел в палитре вида (VesselView.NozzleColor): тёмный металл, читается на белом баке.</summary>
+        static readonly Color HousingColor = new Color(0.20f, 0.18f, 0.17f);
+        /// <summary>Короче этого «пшик» не гаснет, с: импульс ШИМ на 4 Гц при скважности 0,1 длится 25 мс — это
+        /// полтора кадра, глаз его не ловил. Пара: PulseHz.</summary>
+        const float PuffHold = 0.12f;
+
+        /// <summary>
+        /// Основные ЖРД без факела (гидразиновые «Вояджера», 4 × 0,89 Н — VesselView.KindOf даёт None): у настоящих
+        /// видимого факела нет, но коррекция идёт часами, и без струи не видно, что двигатель вообще работает (§9.5).
+        /// Струя длиннее «пшика» РСУ и не мигает — так манёвр отличается от ориентации. Длина, м, и яркость — доля JetScreen.
+        /// Ширина — доля длины (у струй РСУ 1): с полной шириной струя 0,7 м выходила конусом ≈ 0,9 м поперёк, а при яркости
+        /// 1,3 (≈ 2,3 на экране) — четыре сплошных белых конуса (15.10.2026). Пара: ProcMesh.Plume в Init (раскрытие конуса).
+        /// </summary>
+        const float MainJetLength = 0.7f, MainJetBright = 0.45f, MainJetWidth = 0.35f;
+        /// <summary>Раструб микро-ЖРД, м: срез, горло, высота — вдвое крупнее настоящего (Ø ~2 см), иначе с 10 м не виден.</summary>
+        const float MainBellExit = 0.035f, MainBellThroat = 0.012f, MainBellHeight = 0.08f;
+        /// <summary>«Вояджер»: сопла коррекции у днища шины (b_voyager: шина z 0,42, r 0,89; конус адаптера r 0,84 у низа —
+        /// радиус 0,87 струю вниз мимо него пропускает), азимуты 45 + 90k — между штангами РИТЭГов (+X) и науки (−X).</summary>
+        const float VoyagerMainY = 0.42f, VoyagerMainR = 0.87f, VoyagerMainAz = 45f;
+        /// <summary>Прочие маломощные ЖРД: кольцо у днища секции на этой доле радиуса (одиночный — по оси).</summary>
+        const float MainRingShare = 0.35f;
 
         sealed class Nozzle
         {
@@ -58,7 +137,19 @@ namespace Kare.Space.Game
             /// <summary>Место и направление выхлопа в осях секции.</summary>
             public Vector3 Pos, Exhaust;
             public float Length, Level, Seed;
+            /// <summary>Основной двигатель секции (горит по Running), а не сопло ориентации.</summary>
+            public bool Main;
+            /// <summary>Остаток удержания «пшика», с, и его уровень.</summary>
+            public float Hold, Peak;
+            public JetStyle Style;
+            /// <summary>Время последнего зажигания (фронт команды) — от него гаснет вспышка; горит ли по команде сейчас;
+            /// идёт ли отпускание (в воздухе облачко раздувается).</summary>
+            public float Ignite = -10;
+            public bool Firing, Releasing;
         }
+
+        static readonly int IdEmissive = Shader.PropertyToID("_EmissiveColor"), IdAspect = Shader.PropertyToID("_Aspect"),
+            IdSeed = Shader.PropertyToID("_Seed");
 
         VesselView view;
         Transform root;
@@ -69,14 +160,30 @@ namespace Kare.Space.Game
         /// <summary>Смещение якоря секции от оси вида (орбитер сбоку бака).</summary>
         readonly Dictionary<int, Vector3> offsets = new Dictionary<int, Vector3>();
 
-        static Material jetMat;
-        static Mesh jetMesh;
+        static Material jetMat, housingMat;
+        static Mesh jetMesh, boxMesh, bellMesh, rcsBellMesh;
         static MaterialPropertyBlock mpb;
 
         public void Init(VesselView v, Material plume)
         {
             view = v;
-            if (jetMat == null && plume != null)
+            var sh = jetMat == null ? Shader.Find(VesselView.PlumeShaderName) : null;
+            if (sh != null)
+            {
+                // Тот же объёмный шейдер, что у факела: мягкий край вместо жёсткой кромки конуса. Вес экспозиции 0 —
+                // яркость в долях экрана: струя должна читаться и при EV 14 днём, и при EV −5 ночью.
+                jetMat = new Material(sh) { name = "RCS Jet (runtime)", renderQueue = 3000 };
+                jetMat.SetTexture("_EmissiveColorMap", JetGradient());
+                jetMat.SetFloat("_ExposureWeight", 0);
+                jetMat.SetFloat("_Limb", 1f);
+                jetMat.SetFloat("_Turb", JetTurb);
+                jetMat.SetFloat("_Scroll", JetScroll);
+                jetMat.SetFloat("_Expand", 0);
+                jetMat.SetVector("_Shock", Vector4.zero);
+                jetMat.SetFloat("_SoftDist", 0.05f);
+                jetMat.SetFloat("_NearFade", 0.05f);
+            }
+            else if (jetMat == null && plume != null)
             {
                 // Копия факела (HDRP/Unlit, аддитив, двусторонний, без тумана) со своим градиентом. Ключ ставим руками:
                 // рантайм-материалы не валидируются (pitfalls-render, «Конвейер и материалы»).
@@ -88,7 +195,20 @@ namespace Kare.Space.Game
                 jetMat.SetFloat("_EmissiveExposureWeight", 0);
                 jetMat.SetFloat("_EnableFogOnTransparent", 0);
             }
-            if (jetMesh == null) jetMesh = ProcMesh.Plume(0.1f, 4f, 0.7f, 10, 6);
+            if (jetMesh == null) jetMesh = ProcMesh.Plume(JetR0, JetGrow, JetPower, 12, 8);
+            if (boxMesh == null) boxMesh = ProcMesh.Box();
+            if (bellMesh == null) bellMesh = ProcMesh.Bell(MainBellExit, MainBellThroat, MainBellHeight, 12);
+            if (rcsBellMesh == null) rcsBellMesh = ProcMesh.Bell(RcsBellExit, RcsBellThroat, RcsBellHeight, 10);
+            var boot = GameBootstrap.Instance;
+            if (housingMat == null && boot != null && boot.VesselMaterial != null)
+            {
+                // Своя копия обшивки без текстуры: атлас окраски на кубике дал бы случайные полосы.
+                housingMat = new Material(boot.VesselMaterial) { name = "RCS Housing (runtime)" };
+                housingMat.SetTexture("_BaseColorMap", null);
+                housingMat.SetColor("_BaseColor", HousingColor);
+                housingMat.SetFloat("_Metallic", 0.6f);
+                housingMat.SetFloat("_Smoothness", 0.45f);
+            }
             if (mpb == null) mpb = new MaterialPropertyBlock();
         }
 
@@ -121,34 +241,108 @@ namespace Kare.Space.Game
                 if (Shown(v, i)) max = System.Math.Max(max, secs[i].RcsTorque);
             for (int i = 0; i < secs.Count; i++)
             {
+                if (MainShown(v, i)) AddMain(v, i);
                 if (!Shown(v, i) || secs[i].RcsTorque < max * ShownShare) continue;
                 var s = secs[i];
-                var anchor = new GameObject(s.Name).transform;
-                anchor.SetParent(root, false);
-                anchors[i] = anchor;
-                // Орбитер на баке стоит сбоку от оси — там же, где его ставит вид (VesselView: Part.Radial).
-                offsets[i] = s.Beside && i > 0 && v.Attached[0] && !secs[0].IsRadial
-                    ? new Vector3(-(float)s.BesideOffset, 0, 0) : Vector3.zero;
+                var anchor = Anchor(v, i);
                 float jet = s.Model == SectionModel.Voyager || s.Model == SectionModel.VoyagerPM || s.Model == SectionModel.Cassini
                     ? MicroThrusterLength : Mathf.Clamp((float)s.Radius * LengthPerRadius, LengthMin, LengthMax);
+                float hs = Mathf.Clamp(jet * HousingPerJet, HousingMin, HousingMax);
+                var style = StyleOf(s.Model);
                 foreach (var c in Clusters(s))
+                {
+                    if (c.Housing) AddHousing(anchor, c, hs);
                     foreach (var ex in c.Ex)
                     {
-                        var go = new GameObject("Jet");
-                        go.transform.SetParent(anchor, false);
-                        // Срез чуть над обшивкой (Out), соседние сопла блока разнесены по направлению выхлопа.
-                        var pos = c.Pos + c.Out * (jet * NozzleStandoff) + ex * (jet * NozzleStandoff);
-                        go.transform.localPosition = pos;
-                        // Меш струи — вниз от нуля: −Y поворачиваем в направление выхлопа.
-                        go.transform.localRotation = Quaternion.FromToRotation(Vector3.down, ex);
-                        go.AddComponent<MeshFilter>().sharedMesh = jetMesh;
-                        var mr = go.AddComponent<MeshRenderer>();
-                        mr.sharedMaterial = jetMat;
-                        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                        mr.receiveShadows = false;
-                        mr.enabled = false;
-                        nozzles.Add(new Nozzle { T = go.transform, R = mr, Section = i, Pos = pos, Exhaust = ex, Length = jet, Seed = nozzles.Count * 1.37f });
+                        // Срез на грани корпуса (вверх/вниз — торцы высотой HousingTall, вбок — половина ребра);
+                        // без корпуса — чуть над обшивкой (Out), соседние сопла блока разнесены по направлению выхлопа.
+                        Vector3 pos;
+                        if (c.Housing)
+                        {
+                            // На грани — раструб горлом в блок (как квад «Аполлона»: брусок с четырьмя соплами), струя — из его среза.
+                            var face = c.Pos + c.Out * (0.5f * HousingDeep * hs) + ex * (0.5f * hs * (Mathf.Abs(ex.y) > 0.5f ? HousingTall : 1));
+                            pos = face + ex * (RcsBellHeight * hs);
+                            AddSolid(anchor, "RCS Nozzle", rcsBellMesh, pos, Quaternion.FromToRotation(Vector3.down, ex), Vector3.one * hs);
+                        }
+                        else pos = c.Pos + c.Out * (jet * NozzleStandoff) + ex * (jet * NozzleStandoff);
+                        AddJet(anchor, i, pos, ex, jet, false, style);
                     }
+                }
+            }
+        }
+
+        Transform Anchor(Vessel v, int i)
+        {
+            if (anchors.TryGetValue(i, out var a)) return a;
+            var secs = v.Design.Sections;
+            var s = secs[i];
+            a = new GameObject(s.Name).transform;
+            a.SetParent(root, false);
+            anchors[i] = a;
+            // Орбитер на баке стоит сбоку от оси — там же, где его ставит вид (VesselView: Part.Radial).
+            offsets[i] = s.Beside && i > 0 && v.Attached[0] && !secs[0].IsRadial
+                ? new Vector3(-(float)s.BesideOffset, 0, 0) : Vector3.zero;
+            return a;
+        }
+
+        void AddJet(Transform anchor, int section, Vector3 pos, Vector3 ex, float length, bool main, JetStyle style)
+        {
+            var go = new GameObject(main ? "Main Jet" : "Jet");
+            go.transform.SetParent(anchor, false);
+            go.transform.localPosition = pos;
+            // Меш струи — вниз от нуля: −Y поворачиваем в направление выхлопа.
+            go.transform.localRotation = Quaternion.FromToRotation(Vector3.down, ex);
+            go.AddComponent<MeshFilter>().sharedMesh = jetMesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = jetMat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            mr.enabled = false;
+            nozzles.Add(new Nozzle { T = go.transform, R = mr, Section = section, Pos = pos, Exhaust = ex, Length = length, Seed = nozzles.Count * 1.37f, Main = main, Style = style });
+        }
+
+        static void AddSolid(Transform parent, string name, Mesh mesh, Vector3 pos, Quaternion rot, Vector3 scale)
+        {
+            if (housingMat == null) return;
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localRotation = rot;
+            go.transform.localScale = scale;
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = housingMat;
+        }
+
+        /// <summary>Корпус блока сопел — тёмный брусок на обшивке, глубиной от неё наружу (§9.5): раньше струи били
+        /// из гладкого бака, и «пшик» не к чему было привязать глазом.</summary>
+        static void AddHousing(Transform anchor, Cluster c, float hs) =>
+            AddSolid(anchor, "RCS Block", boxMesh, c.Pos + c.Out * (0.5f * HousingDeep * hs),
+                Quaternion.LookRotation(c.Out, Vector3.up), new Vector3(hs, hs * HousingTall, hs * HousingDeep));
+
+        /// <summary>Основной ЖРД без собственного факела (KindOf = None) у видимой секции.</summary>
+        static bool MainShown(Vessel v, int i)
+        {
+            var s = v.Design.Sections[i];
+            return v.Attached[i] && s.HasEngine && !v.IsEnclosed(i) && !s.IsRadial && s.Kind != SectionKind.Fairing
+                && VesselView.KindOf(s.Engine, s.EngineCount) == VesselView.PlumeKind.None;
+        }
+
+        /// <summary>Раструбы и струи основных микро-ЖРД (§9.5): у «Вояджера» — по чертежу шины, у прочих — кольцом у днища.</summary>
+        void AddMain(Vessel v, int i)
+        {
+            var s = v.Design.Sections[i];
+            var anchor = Anchor(v, i);
+            int n = Mathf.Max(1, s.EngineCount);
+            bool voyager = s.Model == SectionModel.Voyager;
+            float y = voyager ? VoyagerMainY : 0, r = voyager ? VoyagerMainR : n > 1 ? (float)s.Radius * MainRingShare : 0;
+            for (int k = 0; k < n; k++)
+            {
+                float a = ((voyager ? VoyagerMainAz : QuadPhaseDeg) + k * 360f / n) * Mathf.Deg2Rad;
+                var top = new Vector3(Mathf.Cos(a) * r, y, Mathf.Sin(a) * r);
+                // Раструб горлом вверх, к обшивке: срез на MainBellHeight ниже точки крепления — оттуда и струя.
+                var exit = top + Vector3.down * MainBellHeight;
+                AddSolid(anchor, "Main Nozzle", bellMesh, exit, Quaternion.identity, Vector3.one);
+                AddJet(anchor, i, exit, Vector3.down, MainJetLength, true, Micro);
             }
         }
 
@@ -157,6 +351,8 @@ namespace Kare.Space.Game
         {
             public Vector3 Pos, Out;
             public Vector3[] Ex;
+            /// <summary>Рисовать корпус блока: на моделях без своих блоков (запасное правило, шина «Вояджера»).</summary>
+            public bool Housing;
         }
 
         /// <summary>Высота кольца РСУ Super Heavy над срезом нижнего сопла, м (верх бака, под решётчатыми рулями).
@@ -168,14 +364,14 @@ namespace Kare.Space.Game
 
         /// <summary>Четыре «квада» по окружности (СМ «Аполлона», ДПО «Союза», Draco): у каждого вверх, вниз и по
         /// касательной в обе стороны. Радиальную тягу дают касательные соседних квадов.</summary>
-        static IEnumerable<Cluster> Quads(float y, float r, float az0)
+        static IEnumerable<Cluster> Quads(float y, float r, float az0, bool housing = false)
         {
             for (int q = 0; q < QuadCount; q++)
             {
                 float a = (az0 + q * 360f / QuadCount) * Mathf.Deg2Rad;
                 var n = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
                 var t = new Vector3(-Mathf.Sin(a), 0, Mathf.Cos(a));
-                yield return new Cluster { Pos = n * r + Vector3.up * y, Out = n, Ex = new[] { Vector3.up, Vector3.down, t, -t } };
+                yield return new Cluster { Pos = n * r + Vector3.up * y, Out = n, Ex = new[] { Vector3.up, Vector3.down, t, -t }, Housing = housing };
             }
         }
 
@@ -214,7 +410,7 @@ namespace Kare.Space.Game
                 case SectionModel.Voyager:
                     // Сопла у низа десятигранной шины (b_voyager: r 0,89, z 0,42–0,89). Диаметр секции — тарелка HGA 3,66 м:
                     // по запасному правилу струи били из пустоты над кромкой тарелки, на высоте 2,9 м.
-                    return Quads(0.5f, 0.92f, 18);
+                    return Quads(0.5f, 0.89f, 18, true);
                 case SectionModel.Cassini:
                     // Четыре блока по четыре ЖРД 0,9 Н на штангах у низа двигательного модуля (b_cassini: RCS_Z 1,6,
                     // RCS_R 1,0, азимуты Blender 30 + 90k → в осях вида те же 30 + 90k: x → −x, y → −z — поворот на 180°).
@@ -263,7 +459,7 @@ namespace Kare.Space.Game
             if (s.Kind == SectionKind.Capsule) y = len * (s.Sphere ? 0.5f : 0.55f);
             else y = Mathf.Max(len * 0.5f, len - Mathf.Min(0.15f * len, 0.7f));
             float fallback = s.Kind == SectionKind.Capsule && !s.Sphere ? r * (1 - 0.65f * 0.55f) : r;
-            return Quads(y, SurfaceRadius(s, y, fallback), QuadPhaseDeg);
+            return Quads(y, SurfaceRadius(s, y, fallback), QuadPhaseDeg, true);
         }
 
         /// <summary>
@@ -384,17 +580,27 @@ namespace Kare.Space.Game
             }
 
             bool on = Command(v, out var rot, out var trans);
+            bool live = v.Alive && !v.OnRails;
             float rotMag = rot.magnitude, trMag = trans.magnitude;
             var rotDir = rotMag > 1e-4f ? rot / rotMag : Vector3.zero;
             var trDir = trMag > 1e-4f ? trans / trMag : Vector3.zero;
             float pressure = Mathf.Clamp01((float)(v.StaticPressure / 101325));
             float atmo = Mathf.Lerp(1, SeaLevelLength, pressure);
-            float lit = Mathf.Lerp(ShadowShare, 1, (float)SunLight.Visible);
+            float sun = (float)SunLight.Visible;
+            float lit = Mathf.Lerp(ShadowShare, 1, sun), puffLit = Mathf.Lerp(PuffShadow, 1, sun);
+            // Доля «воздушного» вида: облачко конденсата вместо прозрачного веера.
+            float pf = Mathf.SmoothStep(0, 1, pressure / PuffPressure);
+            float release = Mathf.Lerp(FadeTime, AtmoRelease, pf);
             float dt = Time.deltaTime, time = Time.time;
             foreach (var n in nozzles)
             {
                 float target = 0;
-                if (on)
+                if (n.Main)
+                {
+                    // Основной ЖРД горит ровно, без ШИМ: так коррекция отличается от ориентации.
+                    target = live ? (float)v.EffectiveThrottle(n.Section) : 0;
+                }
+                else if (on)
                 {
                     var a = anchors[n.Section];
                     var p = a.localPosition + a.localRotation * n.Pos;
@@ -411,18 +617,40 @@ namespace Kare.Space.Game
                     else if (target < SolidAbove)
                         target = Mathf.Repeat(time * PulseHz + n.Seed, 1) < target / SolidAbove ? 1 : 0;
                 }
-                n.Level = Mathf.MoveTowards(n.Level, target, dt / FadeTime);
+                // Фронт команды (до удержания) — зажигание: каждый импульс ШИМ начинается своей вспышкой.
+                bool firing = target > 0;
+                if (firing && !n.Firing) n.Ignite = time;
+                n.Firing = firing;
+                if (!n.Main)
+                {
+                    if (target > 0) { n.Hold = PuffHold; n.Peak = target; }
+                    else if (n.Hold > 0) { n.Hold -= dt; target = live ? n.Peak : 0; }
+                }
+                // Нарастание — за время клапана; спад в пустоте такой же, в воздухе облачко тает дольше.
+                n.Releasing = target < n.Level;
+                n.Level = Mathf.MoveTowards(n.Level, target, dt / (n.Releasing ? release : FadeTime));
                 bool show = n.Level > 0.003f;
                 if (n.R.enabled != show) n.R.enabled = show;
                 if (!show) continue;
+                var st = n.Style;
                 float f = 1 + Flicker * (2 * Mathf.PerlinNoise(time * FlickerHz, n.Seed * 3.1f) - 1);
-                // Струя «вытекает»: длина растёт с уровнем быстрее яркости.
+                float flash = st.Flash * Mathf.Exp(-Mathf.Max(0, time - n.Ignite) / FlashTau);
+                float steady = n.Main ? MainJetScreen : st.Steady;
+                // Струя «вытекает»: длина растёт с уровнем быстрее яркости. В воздухе — уже (противодавление), а при
+                // отпускании облачко раздувается и тает.
                 float len = n.Length * atmo * f * Mathf.Sqrt(n.Level);
-                n.T.localScale = new Vector3(n.Length * atmo, len, n.Length * atmo);
+                float billow = n.Releasing ? 1 + AtmoBillow * pf * (1 - n.Level) : 1;
+                float wide = n.Length * atmo * (n.Main ? MainJetWidth : 1) * Mathf.Lerp(1, AtmoNarrow, pf) * billow;
+                n.T.localScale = new Vector3(wide, len, wide);
+                float glow = (steady + flash) * lit, puff = st.AtmoPuff * puffLit + flash * lit;
+                float b = Mathf.Lerp(glow, puff, pf) * n.Level * f;
+                var tint = Color.Lerp(Color.Lerp(st.Tint, PuffTint, pf), st.FlashTint, flash / (flash + steady + 1e-4f));
+                var c = tint * b;
+                c.a = 1; // аддитив умножает цвет на альфу
                 mpb.Clear();
-                var c = JetTint * (JetScreen * lit * n.Level * f);
-                c.a = 1; // аддитив HDRP умножает цвет на альфу
-                mpb.SetColor("_EmissiveColor", c);
+                mpb.SetColor(IdEmissive, c);
+                mpb.SetFloat(IdAspect, len / Mathf.Max(wide * JetR0 * 4, 1e-4f));
+                mpb.SetFloat(IdSeed, n.Seed * 7.3f);
                 n.R.SetPropertyBlock(mpb);
             }
         }
@@ -432,8 +660,9 @@ namespace Kare.Space.Game
             if (root != null) Destroy(root.gameObject);
         }
 
-        /// <summary>Градиент по длине струи (V = 0 у среза): бело-жёлтое ядро, быстрый спад — газ в пустоте
-        /// разлетается и прозрачнеет. Альфа 1, затухание только в RGB (аддитив).</summary>
+        /// <summary>Градиент по длине струи (V = 0 у среза): яркое ядро у самого сопла и быстрый спад — газ в пустоте
+        /// разлетается веером и прозрачнеет (плотность ∝ 1/r²). Альфа 1, затухание только в RGB (аддитив).
+        /// Цвет задаёт код (JetStyle) — здесь только почти белый с лёгкой голубизной к хвосту.</summary>
         static Texture2D gradient;
         static Texture2D JetGradient()
         {
@@ -443,7 +672,7 @@ namespace Kare.Space.Game
             for (int i = 0; i < n; i++)
             {
                 float t = i / (n - 1f);
-                float fade = Mathf.Clamp01(t * 15) * Mathf.Exp(-2f * t) * (1 - t);
+                float fade = Mathf.Clamp01(t * 30) * (0.25f + 0.75f * Mathf.Exp(-7f * t)) * (1 - t) * (1 - t);
                 var c = Color.Lerp(Color.white, new Color(0.85f, 0.88f, 0.95f), t);
                 gradient.SetPixel(0, i, new Color(c.r * fade, c.g * fade, c.b * fade, 1));
             }

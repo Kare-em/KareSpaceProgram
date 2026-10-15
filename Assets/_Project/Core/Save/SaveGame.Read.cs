@@ -111,6 +111,10 @@ namespace Kare.Space.Core
                 foreach (var f in Fields(o.GetType()))
                     if (d.TryGetValue(f.Name, out var node))
                         f.SetValue(o, Decode(node, f.FieldType));
+                // Старое сохранение (до очереди манёвров, 15.10.2026): у борта было одно поле Node, теперь — список Nodes.
+                if (o is Vessel v && !d.ContainsKey(nameof(Vessel.Nodes)) && d.TryGetValue("Node", out var old) &&
+                    Decode(old, typeof(ManeuverNode)) is ManeuverNode n)
+                    v.Node = n;
             }
 
             object Materialize(int id)

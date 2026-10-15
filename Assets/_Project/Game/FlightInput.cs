@@ -25,12 +25,16 @@ namespace Kare.Space.Game
 
         NodeAnchor anchor;
         float nodeHeld;
+        /// <summary>Орбита выбранного узла и шаг сдвига [ ] — на время удержания клавиш (см. Maneuver).</summary>
+        NodeFrame nodeFrame;
+        double shiftSpan;
 
         void Update()
         {
             var u = GameBootstrap.U;
             var v = u?.Active;
-            if (v == null || PauseMenu.IsOpen) return;
+            // Печать в поле окна манёвров: цифры и буквы — текст, а не клавиши полёта (§6.11).
+            if (v == null || PauseMenu.IsOpen || MapView.Typing) return;
 
             if (KeyBinds.Down(Bind.Map)) MapView.Toggle();
             if (KeyBinds.Down(Bind.WarpUp)) u.WarpUp();
@@ -205,28 +209,43 @@ namespace Kare.Space.Game
         }
 
         /// <summary>
-        /// Узел манёвра (§6.11): N — поставить / перенести (Ap → Pe → +10 мин), I/K — по скорости, L/J — нормаль,
-        /// O/U — радиально, [ ] — время, C — скруглить, B — выполнить / прервать, Backspace — удалить.
-        /// Пока узел исполняет автопилот, правки закрыты: остаток уже тает, а B прерывает исполнение.
+        /// Узлы манёвра (§6.11): N — поставить / перенести (Ap → Pe → +10 мин), Ins — добавить в очередь после последнего,
+        /// ' — выбрать следующий узел очереди, 4 — окно манёвров, I/K — по скорости, L/J — нормаль, O/U — радиально,
+        /// [ ] — время, C — скруглить, B — выполнить / прервать (всегда первый узел), Backspace — удалить выбранный.
+        /// Правки идут к выбранному узлу (на карте — щелчком по метке, иначе — первый). Исполняемый автопилотом
+        /// узел закрыт: остаток уже тает, а B прерывает исполнение; узлы очереди править можно.
         /// </summary>
         void Maneuver(Universe u, Vessel v)
         {
             double now = u.Time;
+            if (KeyBinds.Down(Bind.NodeWindow)) MapView.ToggleNodeWindow();
+            if (KeyBinds.Down(Bind.NodeSelectNext)) MapView.SelectNextNode(v);
+            var sel = MapView.SelectedNode(v);
             if (KeyBinds.Down(Bind.NodeDelete))
             {
-                v.Node = null;
-                u.NodePilot = null;
+                if (sel == null || sel == v.Node) u.NodePilot = null;
+                NodePlanner.Delete(v, now, sel);
                 return;
             }
-            if (KeyBinds.Down(Bind.NodeNew) && u.NodePilot == null)
+            if (KeyBinds.Down(Bind.NodeAdd))
+            {
+                ManeuverNode added = null;
+                for (int k = 0; k < 3 && added == null; k++) added = NodePlanner.Add(v, now, (NodeAnchor)k);
+                if (added != null) MapView.SelectNode(added);
+                else u.Post(NodePlanner.CanPlan(v) ? "Некуда добавить манёвр: прогноз после последнего узла обрывается" : "Манёвр можно планировать только в полёте");
+                return;
+            }
+            bool locked = u.NodePilot != null && sel == v.Node;
+            if (KeyBinds.Down(Bind.NodeNew) && !locked)
             {
                 if (v.Node == null)
                 {
                     anchor = NodeAnchor.Apoapsis;
                     for (int k = 0; k < 3 && !NodePlanner.Create(v, now, anchor); k++) anchor = (NodeAnchor)(((int)anchor + 1) % 3);
                     if (v.Node == null) u.Post("Манёвр можно планировать только в полёте");
+                    sel = v.Node;
                 }
-                else anchor = NodePlanner.Cycle(v, now, anchor);
+                else anchor = NodePlanner.Cycle(v, now, sel, anchor);
             }
             if (v.Node == null) return;
             if (KeyBinds.Down(Bind.NodeExecute))
@@ -245,9 +264,10 @@ namespace Kare.Space.Game
                     u.Landing = null;
                     u.NodePilot = new NodeAutopilot();
                 }
+                locked = u.NodePilot != null && sel == v.Node;
             }
-            if (u.NodePilot != null) return;
-            if (KeyBinds.Down(Bind.Circularize)) NodePlanner.Circularize(v, now);
+            if (sel == null || locked) { nodeHeld = 0; return; }
+            if (KeyBinds.Down(Bind.Circularize)) NodePlanner.Circularize(v, now, sel);
 
             var dv = new Vector3d(
                 KeyBinds.Axis(Bind.NodePrograde, Bind.NodeRetrograde),
@@ -255,18 +275,21 @@ namespace Kare.Space.Game
                 KeyBinds.Axis(Bind.NodeRadialOut, Bind.NodeRadialIn));
             double shift = KeyBinds.Axis(Bind.NodeLater, Bind.NodeEarlier);
             if (dv.sqrMagnitude == 0 && shift == 0) { nodeHeld = 0; return; }
+            if (nodeHeld == 0)
+            {
+                // Орбита узла — на всё удержание: у узла очереди это прогноз через предыдущие узлы (поиск встреч),
+                // каждый кадр его не пересчитываем. Импульс выбранного узла на его же орбиту не влияет.
+                nodeFrame = NodePlanner.FrameOf(v, now, sel);
+                shiftSpan = nodeFrame.Orbit.IsElliptic ? nodeFrame.Orbit.Period : NodePlanner.AheadTime;
+            }
             nodeHeld += Time.unscaledDeltaTime;
             double accel = 1 + (nodeHeld * NodeAccel) * (nodeHeld * NodeAccel);
             if (Alt) accel *= NodeFine;
             double step = accel * Time.unscaledDeltaTime;
             if (dv.sqrMagnitude > 0)
-                NodePlanner.Adjust(v, now, dv.x * NodeDvRate * step, dv.y * NodeDvRate * step, dv.z * NodeDvRate * step);
-            if (shift != 0)
-            {
-                var o = NodePlanner.CurrentOrbit(v, now);
-                double span = o.IsElliptic ? o.Period : NodePlanner.AheadTime;
-                NodePlanner.Shift(v, now, shift * span * NodeTimeRate * step);
-            }
+                NodePlanner.Adjust(v, now, sel, dv.x * NodeDvRate * step, dv.y * NodeDvRate * step, dv.z * NodeDvRate * step,
+                    shift == 0 ? nodeFrame : default);
+            if (shift != 0) NodePlanner.Shift(v, now, sel, shift * shiftSpan * NodeTimeRate * step);
         }
 
         /// <summary>Управление, закрытое при автопилоте миссии: нажатие — подсказка «снять: Y».</summary>
