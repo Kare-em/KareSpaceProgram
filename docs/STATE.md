@@ -378,3 +378,20 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
 - Material — lit `GameBootstrap.SmokeMaterial` (`VesselView.VaporMaterial`), not emissive: white in sun, dark at night.
 - Test by hand: Play, `Time.timeScale = 0`, set `Vessel.Mach/DynamicPressure/Density/AngleOfAttack/SurfaceSpeed` by reflection —
   physics does not overwrite them while time is frozen, LateUpdate still draws.
+
+## Transfer menu, camera modes, solar-system map (15.10.2026)
+- **F6 / map button "Перелёты"** (`Game/MapView.Transfers.cs`): table of every target ManeuverAutoPlan can plan for — moons,
+  parent, sibling planets — Hohmann estimate of departure / capture (ellipse to ½ SOI, "аэро" for atmospheres) / Σ Δv,
+  wait for the window, time of flight; rows green/yellow/red vs the vessel's vacuum Δv. "Построить" calls
+  `ManeuverAutoPlan.Plan` (Lambert for planets), posts the exact node Δv and focuses the map on the target. B executes.
+- **F5 / Shift+F5 — camera mode** (`FlightCamera.CameraMode`, shared by both split-screen cameras): Auto (local horizon),
+  Free (inertial axes), Orbital (orbit plane horizontal, body below), Chase (velocity; air-relative in the atmosphere,
+  slerp 4 1/s), Locked (vessel axes). On a switch Yaw/Pitch are recomputed so the view does not jump.
+- Map zoom out to 1e13 m (≈ 67 AU); orbit lines are camera-facing ribbon meshes; map origin = focus body.
+- Heliocentric prediction horizon 40 years (Saturn and beyond get their encounter patch).
+- Saturn flight check (15.10.2026): Lambert departure → heliocentric correction (P to Saturn) → encounter with warp cap →
+  flyby Pe ≈ 52 thousand km; rings render from orbit on the day side (camera and Sun on the same side of the ring plane).
+- Capsule return (15.10.2026): `MissionAutopilot.Descend` turns the stack to the orbit normal before vacuum staging
+  (`TurnSideways`), so the separation push no longer shifts the entry perigee; `TransferPlanner` polish now predicts with
+  the burn (`node.Remaining`). vympel / luna17 / auto_luna17 / auto_apollo8 pass again.
+- Tests (15.10.2026): full run 199 OK / 0 FAIL. auto_apollo11 fixed (rails epoch of vessels staged mid-frame — `Universe.AdvancePhysics` stamp; transposition passes); autoplan earth→moon aims at the periapsis (`PlanIntercept(..., periapsis:)`), perilune 100 km — `docs/pitfalls-core.md`.

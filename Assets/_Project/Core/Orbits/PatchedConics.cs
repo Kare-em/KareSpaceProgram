@@ -187,12 +187,21 @@ namespace Kare.Space.Core
             v += vf - vt;
         }
 
-        /// <summary>Горизонт поиска для орбиты: период у эллипса (не больше года), полгода у гиперболы.</summary>
-        public static double DefaultHorizon(KeplerOrbit orbit)
+        /// <summary>
+        /// Горизонт поиска для орбиты: период у эллипса (не больше двух лет), полгода у гиперболы.
+        /// Вокруг Солнца — до HelioHorizonYears: гомановский перелёт к Сатурну идёт 6 лет, к Нептуну — 30,
+        /// и с потолком в два года встреча не находилась — прогноз обрывался посреди перелёта (§2.5, §6.11).
+        /// </summary>
+        public static double DefaultHorizon(KeplerOrbit orbit, CelestialBody body = null)
         {
             const double year = 365.25 * 86400;
+            if (body != null && body.Parent == null)
+                return orbit.IsElliptic ? Math.Min(orbit.Period * 1.05, HelioHorizonYears * year) : HelioHorizonYears * year;
             return orbit.IsElliptic ? Math.Min(orbit.Period * 1.05, 2 * year) : year / 2;
         }
+
+        /// <summary>Потолок горизонта у Солнца, лет: перелёт к Нептуну (≈ 31 год) с запасом.</summary>
+        const double HelioHorizonYears = 40;
 
         /// <summary>
         /// Прогноз траектории на несколько участков с учётом манёвра (импульсно, в момент узла).
@@ -207,7 +216,7 @@ namespace Kare.Space.Core
             for (int k = 0; k < maxPatches; k++)
             {
                 var orbit = KeplerOrbit.FromState(r, v, body.Mu, t);
-                var next = FindNext(orbit, body, t, DefaultHorizon(orbit));
+                var next = FindNext(orbit, body, t, DefaultHorizon(orbit, body));
                 var patch = new OrbitPatch
                 {
                     Body = body, Orbit = orbit, StartTime = t, AfterNode = afterNode,

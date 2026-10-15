@@ -195,7 +195,8 @@ namespace Kare.Space.Game
                 case SectionModel.AtlasSustainer:
                 case SectionModel.AtlasSustainerAgena:
                 case SectionModel.AtlasSustainerCentaur: return Kind.Atlas;
-                case SectionModel.TitanStage1: return Kind.Titan;
+                case SectionModel.TitanStage1:
+                case SectionModel.Titan3Core: return Kind.Titan;   // LC-41: тот же стол, что у Titan II (§3.4)
                 case SectionModel.SaturnSIC: return Kind.Saturn;
                 case SectionModel.SuperHeavy: return Kind.Starbase;
                 default: return Kind.R7;   // Спутник, Восток, «Луна»

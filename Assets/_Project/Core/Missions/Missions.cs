@@ -42,6 +42,11 @@ namespace Kare.Space.Core
         /// <summary>Id полосы для ObjectiveType.Runway (Runways.Get); у Landing — TowerSite: только ловля башней.</summary>
         public string Site;
         public const string TowerSite = "tower";
+        /// <summary>
+        /// Плановая дата пролёта (игровое время), NaN — нет (0 — это J2000, а 1977 — отрицательное время). По ним TourPlanner ищет тур с гравманёврами возле
+        /// исторического («Вояджеры», PlanetaryMissions.cs); у Flyby Min — нижняя граница высоты пролёта (кольца, радиация).
+        /// </summary>
+        public double Date = double.NaN;
 
         public string Describe(SolarSystem sys)
         {
@@ -494,6 +499,7 @@ namespace Kare.Space.Core
             AddModern(list); // после «Аполлона» — StationMissions.cs
             AddWinged(list); // крылатые: STS-1, «Буран» — WingedMissions.cs
             AddSpaceX(list); // Starship IFT-5 — SpaceXMissions.cs
+            AddPlanetary(list); // «Вояджеры» — PlanetaryMissions.cs
             return list;
         }
     }

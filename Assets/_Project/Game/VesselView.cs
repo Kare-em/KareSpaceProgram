@@ -299,6 +299,13 @@ namespace Kare.Space.Game
                 case SectionModel.GeminiAdapter: return new[] { WhiteColor, MetalColor };
                 case SectionModel.Surveyor: return new[] { MetalColor, PanelColor, WhiteColor, FoilColor };
                 case SectionModel.Ranger: return new[] { FoilColor, MetalColor, PanelColor };
+                // «Вояджер» (§3.4): антенна белая, корпус в чёрной ЭВТИ, штанги и РИТЭГи металлом,
+                // золотая фольга — переходник и платформа приборов. Порядок — слоты b_voyager.
+                case SectionModel.Voyager: return new[] { WhiteColor, BlackColor, MetalColor, FoilColor };
+                // Двигательный модуль: шар TE-M-364-4 в фольге, ферма металлом.
+                case SectionModel.VoyagerPM: return new[] { FoilColor, BlackColor, MetalColor, NozzleColor };
+                // UA1205 — белые сегменты, чёрные юбка и обтекатель носа, металл — бак ВПУ и крепления.
+                case SectionModel.TitanSRB: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
                 // Корпуса ступеней: слоты Hull/Black/Metal/Nozzle (hulls_lib.py). Окраска — по фото: Сатурн, Редстоун,
                 // Протон белые; Атлас, Центавр, Аджена — полированная нержавейка; Титан и Блок Д — металл.
                 case SectionModel.AtlasBooster:
@@ -308,6 +315,7 @@ namespace Kare.Space.Game
                 case SectionModel.Agena:
                 case SectionModel.Centaur: return new[] { PolishedColor, BlackColor, MetalColor, NozzleColor };
                 case SectionModel.TitanStage1:
+                case SectionModel.Titan3Core:   // ядро Titan IIIE — та же ступень Titan II, окраска общая
                 case SectionModel.TitanStage2:
                 case SectionModel.BlokD: return new[] { MetalColor, BlackColor, PolishedColor, NozzleColor };
                 case SectionModel.Redstone:

@@ -30,6 +30,16 @@ namespace Kare.Space.Core
         public double Period => E < 1 ? Constants.TwoPi / MeanMotion : double.PositiveInfinity;
         public bool IsElliptic => E < 1;
         public double Energy => -Mu / (2 * A);
+        /// <summary>Гиперболический избыток — скорость на асимптоте ухода (истинная аномалия acos(−1/e)), м/с; у эллипса ноль.</summary>
+        public Vector3d Excess
+        {
+            get
+            {
+                if (E <= 1) return Vector3d.zero;
+                double nu = Math.Acos(-1 / E);
+                return (P * Math.Cos(nu) + Q * Math.Sin(nu)) * Math.Sqrt(Mu / -A);
+            }
+        }
 
         public KeplerOrbit Clone() => (KeplerOrbit)MemberwiseClone();
 

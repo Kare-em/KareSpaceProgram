@@ -42,6 +42,9 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.F2)) FlightView.ToggleFocus(u);
             if (Input.GetKeyDown(KeyCode.F3)) FlightView.ToggleSplit(u);
             if (Input.GetKeyDown(KeyCode.F4)) FlightView.ToggleDefer(u);
+            // F5 — режим камеры (§10.3), F6 — меню перелётов на карте (§6.11).
+            if (Input.GetKeyDown(KeyCode.F5)) u.Post("Камера: " + FlightCamera.CycleMode(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1));
+            if (Input.GetKeyDown(KeyCode.F6)) MapView.ToggleTransfers();
             // PageUp / PageDown — переключение между бортами (§6.13, как [ ] в KSP: скобки здесь двигают время узла,
             // Shift/Ctrl — газ). Home — назад к борту миссии. Работает и после гибели активного — увести управление на живой.
             if (Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.PageDown))

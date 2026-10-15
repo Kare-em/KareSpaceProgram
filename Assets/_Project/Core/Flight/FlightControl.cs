@@ -193,16 +193,65 @@ namespace Kare.Space.Core
             return (m0 - m1) / mdot;
         }
 
-        /// <summary>Следующий шаг программы поджигает РДТТ (взведение или отделение с запуском следующей).</summary>
-        public static bool NextIsSolidKick(Vessel v)
+        /// <summary>
+        /// Время набора dv с учётом сброса ступеней (вакуум, пауза на разделение) — для «полпрожига» перед узлом.
+        /// BurnTime считает весь импульс на тяге текущей ступени: у полного Р-7 разгон к Сатурну 8,5 км/с выходил
+        /// ≈ 4 мин вместо ≈ 9, запуск — на 4–5 мин позже середины прожига (замер 15.10.2026).
+        /// </summary>
+        public static double StagedBurnTime(Vessel v, double dv)
         {
-            if (!v.HasNextStage) return false;
+            // Текущая ступень может молчать (после телепорта на орбиту — ускорители не запущены): тогда BurnTime = ∞,
+            // а варп по нему не оставлял места на полпрожига. Время по ступеням есть, пока у пакета остаётся Δv.
+            double total = 0;
+            foreach (var s in v.RemainingStats()) total += Math.Max(0, s.DeltaVVac);
+            if (total <= 0) return double.PositiveInfinity;
+            double one = BurnTime(v, dv), staged = AscentAutopilot.TimeToGo(v, dv);
+            return double.IsInfinity(one) ? staged : Math.Max(one, staged);
+        }
+
+        /// <summary>Следующий шаг программы поджигает РДТТ (взведение или отделение с запуском следующей).</summary>
+        public static bool NextIsSolidKick(Vessel v) => NextKickSection(v) >= 0;
+
+        /// <summary>Секция РДТТ, которую поджигает следующий шаг программы, или −1.</summary>
+        static int NextKickSection(Vessel v)
+        {
+            if (!v.HasNextStage) return -1;
             var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
             int s = a.Type == StageActionType.Ignite ? a.Section
                   : a.Type == StageActionType.Separate && a.IgniteNext ? v.Design.NextCore(a.Section) : -1;
             var secs = v.Design.Sections;
             return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && secs[s].Engine.Solid &&
-                   v.Propellant[s] > 0;
+                   v.Propellant[s] > 0 ? s : -1;
+        }
+
+        /// <summary>
+        /// Δv следующего РДТТ-«пинка» в вакууме, м/с (0 — следующий шаг не РДТТ): разгонный модуль «Вояджера»
+        /// не отсекается, поэтому жидкостная ступень оставляет ему ровно его долю импульса (NodeAutopilot).
+        /// </summary>
+        public static double SolidKickDeltaV(Vessel v)
+        {
+            int s = NextKickSection(v);
+            if (s < 0) return 0;
+            var secs = v.Design.Sections;
+            // Масса после шага: всё, что выше РДТТ по стопке (он и полезная нагрузка над ним).
+            double m0 = 0;
+            for (int i = s; i < secs.Count; i++)
+                if (v.Attached[i] && secs[i].Kind != SectionKind.Fairing) m0 += secs[i].DryMass + v.Propellant[i];
+            double m1 = m0 - v.Propellant[s];
+            return m1 > 0 ? secs[s].Engine.IspVac * Constants.G0 * Math.Log(m0 / m1) : 0;
+        }
+
+        /// <summary>Δv, которое ещё даст работающий РДТТ, м/с (вакуум, при текущей массе всего борта).</summary>
+        public static double SolidLeftDeltaV(Vessel v)
+        {
+            var secs = v.Design.Sections;
+            for (int i = 0; i < secs.Count; i++)
+                if (v.Attached[i] && v.Running[i] && secs[i].Engine.Solid && v.Propellant[i] > 0)
+                {
+                    double m0 = v.Mass, m1 = m0 - v.Propellant[i];
+                    return m1 > 0 ? secs[i].Engine.IspVac * Constants.G0 * Math.Log(m0 / m1) : 0;
+                }
+            return 0;
         }
 
         public static bool SolidBurning(Vessel v)
@@ -240,6 +289,22 @@ namespace Kare.Space.Core
             var secs = v.Design.Sections;
             return s >= 0 && s < secs.Count && v.Attached[s] && secs[s].HasEngine && v.Propellant[s] > 0 &&
                    v.CanIgnite(s);
+        }
+
+        /// <summary>
+        /// Следующий шаг — сброс выработанной двигательной секции (боковушки, ядро), а Δv у пакета ещё есть.
+        /// Узловой автопилот без этого вставал «Нечем выполнять манёвр»: Р-7 к Сатурну выработал блоки Б–Д и А,
+        /// не отстрелив их, и 2 км/с блока Е остались несожжёнными (замер 15.10.2026).
+        /// </summary>
+        public static bool NextDropsSpentEngine(Vessel v)
+        {
+            if (!v.HasNextStage) return false;
+            var a = v.Design.Sequence[v.NextApplicable(v.NextStage)];
+            if (a.Type != StageActionType.Separate) return false;
+            var s = v.Design.Sections[a.Section];
+            if (!s.HasEngine || !v.Attached[a.Section] || v.Propellant[a.Section] > 0) return false;
+            foreach (var st in v.RemainingStats()) if (st.DeltaVVac > 0) return true;
+            return false;
         }
 
         /// <summary>
@@ -621,7 +686,7 @@ namespace Kare.Space.Core
         }
 
         /// <summary>Время набора dv по оставшимся ступеням (вакуумные характеристики, с паузой на разделение).</summary>
-        static double TimeToGo(Vessel v, double dv)
+        internal static double TimeToGo(Vessel v, double dv)
         {
             const double stagingPause = 2;
             double t = 0;
@@ -698,12 +763,27 @@ namespace Kare.Space.Core
         ManeuverNode planned;
         bool energyMode;
         double targetEnergy, sign, cPro, cNrm, cRad;
+        /// <summary>
+        /// Доля импульса, которую доберёт неотсекаемый РДТТ следующей ступени (TE-M-364-4 «Вояджера», §5.3):
+        /// жидкостная ступень выключается, когда остаток сравнялся с ней, РДТТ доводит прожиг по тому же
+        /// направлению. 0 — обычный прожиг.
+        /// </summary>
+        double kickDv;
+        bool kickFired;
+        /// <summary>Наведение пинка по асимптоте начинается, когда остаток меньше kickDv·KickGuidanceShare.</summary>
+        const double KickGuidanceShare = 1.5;
+        /// <summary>Остаток РДТТ, м/с, ниже которого направление больше не пересчитываем: рычаг мал, решение шумит.</summary>
+        const double KickHoldDv = 30;
+        Vector3d kickDir;
 
         /// <summary>Запомнить цель длинного прожига: энергию орбиты после импульса и его компоненты в осях орбиты.</summary>
         void Plan(Vessel v, ManeuverNode node, double t)
         {
             planned = node;
             energyMode = false;
+            kickFired = false;
+            kickDv = FlightControl.SolidKickDeltaV(v);
+            if (kickDv >= node.Total) kickDv = 0;
             var orbit = NodePlanner.CurrentOrbit(v, t);
             orbit.GetState(node.Time, out var r, out var vel);
             var dv = node.Remaining;
@@ -728,6 +808,55 @@ namespace Kare.Space.Core
             energyMode = true;
         }
 
+        /// <summary>
+        /// Остаток длинного прожига — Δv по направлению dir, которое добирает недостающую энергию: dE = (v·u)·dv + dv²/2.
+        /// Линейное dE/|v| завышало остаток на dv²/2v: у разгона «Вояджера» 7,3 км/с — на 3,4 км/с, прожиг начинался
+        /// раньше середины на минуты (асимптота повёрнута на 4°), а «Центавр» отсекался при 2143 «линейных» м/с вместо
+        /// 2000 настоящих долей РДТТ (v∞ +147 м/с; замер 15.10.2026). Пара: kickDv — в тех же настоящих м/с.
+        /// </summary>
+        double EnergyLeft(Vessel v, Vector3d dir)
+        {
+            double e = v.Velocity.sqrMagnitude / 2 - v.Body.Mu / v.Position.magnitude;
+            double need = targetEnergy - e;
+            if (sign * need <= 0) return 0;
+            double va = Vector3d.Dot(v.Velocity, dir), disc = va * va + 2 * need;
+            // Меньший положительный корень dv²/2 + va·dv − need = 0; без корня (тормозим поперёк) — линейная оценка.
+            if (need > 0) return -va + Math.Sqrt(disc);
+            if (va < 0 && disc >= 0) return -va - Math.Sqrt(disc);
+            return Math.Abs(need) / Math.Max(v.Velocity.magnitude, 1);
+        }
+
+        /// <summary>
+        /// Направление импульса модуля dv из (r, vel), при котором асимптота ухода ближе всего к target: Гаусс — Ньютон
+        /// по двум углам вокруг guess (невязка — вектор избытка, 3 компоненты). x — избыток при этом направлении.
+        /// </summary>
+        static Vector3d KickAim(Vector3d r, Vector3d vel, double mu, double dv, Vector3d target, Vector3d guess, out Vector3d x)
+        {
+            var u = guess.normalized;
+            Func<Vector3d, Vector3d> f = d => KeplerOrbit.FromState(r, vel + d * dv, mu, 0).Excess;
+            const double h = 1e-4;
+            for (int it = 0; it < 6; it++)
+            {
+                var e1 = Vector3d.AnyPerpendicular(u).normalized;
+                var e2 = Vector3d.Cross(u, e1);
+                var f0 = f(u) - target;
+                var j1 = (f((u + e1 * h).normalized) - target - f0) / h;
+                var j2 = (f((u + e2 * h).normalized) - target - f0) / h;
+                double a11 = Vector3d.Dot(j1, j1), a12 = Vector3d.Dot(j1, j2), a22 = Vector3d.Dot(j2, j2);
+                double b1 = -Vector3d.Dot(j1, f0), b2 = -Vector3d.Dot(j2, f0);
+                double det = a11 * a22 - a12 * a12;
+                if (Math.Abs(det) < 1e-12) break;
+                double da = (b1 * a22 - b2 * a12) / det, db = (a11 * b2 - a12 * b1) / det;
+                // Шаг не больше 0,2 рад: вдали от решения линеаризация врёт.
+                double len = Math.Sqrt(da * da + db * db);
+                if (len > 0.2) { da *= 0.2 / len; db *= 0.2 / len; }
+                u = (u + e1 * da + e2 * db).normalized;
+                if (len < 1e-7) break;
+            }
+            x = f(u);
+            return u;
+        }
+
         public AutopilotRequest Update(Vessel v, double t, double dt)
         {
             var node = v.Node;
@@ -741,15 +870,53 @@ namespace Kare.Space.Core
             Vector3d dir;
             if (energyMode)
             {
-                // Остаток — недобор энергии, пересчитанный в м/с по текущей скорости: dE = v·dv.
-                double e = v.Velocity.sqrMagnitude / 2 - v.Body.Mu / v.Position.magnitude;
-                left = Math.Max(0, sign * (targetEnergy - e) / Math.Max(v.Velocity.magnitude, 1));
                 var pro = v.Velocity.normalized;
                 var nrm = Vector3d.Cross(v.Position, v.Velocity).normalized;
                 var rad = Vector3d.Cross(pro, nrm);
                 dir = (pro * cPro + nrm * cNrm + rad * cRad).normalized;
+                left = EnergyLeft(v, dir);
             }
             else dir = node.Remaining.normalized;
+            bool guided = kickDv > 0 && node.TargetExcess.sqrMagnitude > 0;
+            if (kickFired)
+            {
+                // РДТТ не управляется по тяге: держим направление до выгорания, остаток покажет недобор/перебор.
+                // С наведением — направление по остатку РДТТ к нужной асимптоте (замкнутый контур на 43 с работы).
+                if (guided)
+                {
+                    double solid = FlightControl.SolidLeftDeltaV(v);
+                    if (solid > KickHoldDv)
+                        kickDir = KickAim(v.Position, v.Velocity, v.Body.Mu, solid, node.TargetExcess, kickDir, out _);
+                    dir = kickDir;
+                }
+                FlightControl.PointAt(v, dir);
+                if (FlightControl.SolidBurning(v))
+                {
+                    Status = $"Доразгон РДТТ: осталось {left:F1} м/с";
+                    return AutopilotRequest.None;
+                }
+                left = 0;
+            }
+            else if (guided && started && left <= kickDv * KickGuidanceShare)
+            {
+                // Отсечка, когда пинок по лучшему направлению даст нужный модуль избытка (направление — им же).
+                var aim = KickAim(v.Position, v.Velocity, v.Body.Mu, kickDv, node.TargetExcess, dir, out var x);
+                if (x.magnitude >= node.TargetExcess.magnitude)
+                {
+                    kickDir = aim;
+                    FlightControl.Cutoff(v);
+                    kickFired = true;
+                    Status = "Разделение, запуск РДТТ";
+                    return AutopilotRequest.Stage;
+                }
+            }
+            else if (kickDv > 0 && !guided && started && left <= kickDv)
+            {
+                FlightControl.Cutoff(v);
+                kickFired = true;
+                Status = "Разделение, запуск РДТТ";
+                return AutopilotRequest.Stage;
+            }
             if (left < 0.1 || !energyMode && started && Vector3d.Dot(node.Remaining, v.NoseP) < 0)
             {
                 FlightControl.Cutoff(v);
@@ -761,9 +928,10 @@ namespace Kare.Space.Core
             }
             FlightControl.PointAt(v, dir);
             double burn = FlightControl.BurnTime(v, left);
-            if (double.IsInfinity(burn) && !v.AnyEngineRunning && FlightControl.NextStageBringsEngine(v))
+            if (double.IsInfinity(burn) && !v.AnyEngineRunning &&
+                (FlightControl.NextStageBringsEngine(v) || FlightControl.NextDropsSpentEngine(v)))
             {
-                // Ступень без запусков (S-IVB после разгона к Луне) — сбросить, дальше работает следующая.
+                // Ступень без запусков (S-IVB после разгона к Луне) или выработанная — сбросить, дальше работает следующая.
                 FlightControl.Cutoff(v);
                 Status = "Сброс ступени без запусков";
                 return AutopilotRequest.Stage;
@@ -774,6 +942,8 @@ namespace Kare.Space.Core
                 FlightControl.Cutoff(v);
                 return AutopilotRequest.None;
             }
+            // Середина прожига — на узле; длительность по всем ступеням, которые он съест (StagedBurnTime).
+            if (!started) burn = FlightControl.StagedBurnTime(v, left);
             double startAt = node.Time - burn / 2;
             bool aligned = Vector3d.Angle(v.NoseP, dir) < 3 * Constants.Deg2Rad;
             if (t < startAt - (FlightControl.NeedsUllageForStart(v) ? 4 : 0) && !started)
@@ -789,7 +959,7 @@ namespace Kare.Space.Core
             }
             // Под конец — дросселируем, чтобы не перелететь остаток.
             double thrust = FlightControl.AvailableThrust(v, out _);
-            double throttle = thrust > 0 ? MathD.Clamp(left * v.Mass / (thrust * 1.5), 0.05, 1) : 1;
+            double throttle = thrust > 0 ? MathD.Clamp((left - kickDv) * v.Mass / (thrust * 1.5), 0.05, 1) : 1;
             FlightControl.Ignite(v, throttle);
             Status = $"Манёвр: осталось {left:F1} м/с";
             return AutopilotRequest.None;

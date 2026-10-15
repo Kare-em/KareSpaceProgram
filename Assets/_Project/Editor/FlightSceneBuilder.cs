@@ -371,6 +371,9 @@ namespace Kare.Space.EditorTools
             (SectionModel.ShuttleOrbiter, "Shuttle_Orbiter"), (SectionModel.ShuttleET, "Shuttle_ET"),
             (SectionModel.ShuttleSRB, "Shuttle_SRB"), (SectionModel.Buran, "Buran"),
             (SectionModel.EnergiaCore, "Energia_BlockTs"), (SectionModel.EnergiaBlockA, "Energia_BlockA"),
+            // Tools/blender/voyager_parts.py
+            (SectionModel.Titan3Core, "Titan3_Core"), (SectionModel.TitanSRB, "Titan_SRB"),
+            (SectionModel.VoyagerPM, "Voyager_PM"), (SectionModel.Voyager, "Voyager"),
         };
 
         /// <summary>Раскладное (§6.12): опоры и трапы — отдельные FBX, по объекту на опору (Tools/blender, split_deploy).</summary>

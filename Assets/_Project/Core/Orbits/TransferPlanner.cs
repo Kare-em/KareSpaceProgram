@@ -37,12 +37,16 @@ namespace Kare.Space.Core
         /// <param name="targetMiss">Желаемый промах от центра цели, м. Для попадания — меньше радиуса с учётом фокусировки.</param>
         /// <param name="window">Сколько секунд вперёд искать момент разгона.</param>
         /// <param name="maxTransfer">Предельное время перелёта, с: быстрый перелёт дороже по Δv (Луна-3 — 2,5 сут).</param>
+        /// <param name="periapsis">Желаемый перицентр у цели от центра, м (NaN — нет): доводка пересчитывает b по v∞ из
+        /// прогноза. targetMiss по прикидке v∞ 1000 м/с при настоящих ≈ 800 м/с — это перицентр под поверхностью, доводка
+        /// вела в удар, и перелёт к Луне на 100 км приходил на 499 км (autoplan, 15.10.2026).</param>
         public static TransferPlan PlanIntercept(CelestialBody body, Vector3d r, Vector3d v, double t0,
-            CelestialBody target, double targetMiss, double window, double maxTransfer = double.PositiveInfinity)
+            CelestialBody target, double targetMiss, double window, double maxTransfer = double.PositiveInfinity,
+            double periapsis = double.NaN)
         {
             var orbit = KeplerOrbit.FromState(r, v, body.Mu, t0);
             if (!orbit.IsElliptic || target.Parent != body) return null;
-            var ctx = new Context { Orbit = orbit, Target = target, TargetMiss = targetMiss, T0 = t0, MaxTransfer = maxTransfer };
+            var ctx = new Context { Orbit = orbit, Target = target, TargetMiss = targetMiss, T0 = t0, MaxTransfer = maxTransfer, Periapsis = periapsis };
 
             double dt = orbit.Period / 90;
             var scan = new List<(TransferPlan plan, double cost)>();
@@ -68,21 +72,87 @@ namespace Kare.Space.Core
             for (int s = 0; s < Math.Min(Starts, starts.Count); s++)
             {
                 var p = Descend(ctx, starts[s].plan, starts[s].cost, dt, out double c);
+                Cost(ctx, p);
+                // Окончательный выбор — по склейке коник: прямая без притяжения цели у апогея (Луна догоняет
+                // медленный аппарат) путает кандидатов. «Луна-9»: план «промах 1000 км», прогноз — Pe 13 400 км,
+                // посадка мимо; соседний кандидат 60 м/с давал попадание (замер 15.10.2026).
+                c += PredictedMissError(ctx, body, r, v, t0, p);
                 if (c < bestCost)
                 {
                     bestCost = c;
                     best = p;
                 }
             }
-            Cost(ctx, best);
+            if (best != null) best = Polish(ctx, body, r, v, t0, best, dt);
+            if (best != null) Cost(ctx, best);
             return best;
         }
+
+        /// <summary>
+        /// Расхождение прогноза склейки коник с желаемым промахом, м: перицентр у цели переводится в прицельную
+        /// дальность b = rp·√(1 + 2μ/(rp·v∞²)) — в тех же единицах, что TargetMiss (без притяжения цели). Нет
+        /// входа в сферу — штраф NoEncounterPenalty.
+        /// </summary>
+        static double PredictedMissError(Context ctx, CelestialBody body, Vector3d r, Vector3d v, double t0, TransferPlan p)
+        {
+            var node = new ManeuverNode { Time = p.Time, Prograde = p.Prograde, Normal = p.Normal, Radial = p.Radial };
+            // Predict прибавляет Remaining (вектор в P), а не компоненты: без него прогноз шёл БЕЗ импульса, и доводка
+            // крутила только штрафы ожидания и бокового импульса — «Луна-17» пришла с перицентром 13 562 км (15.10.2026).
+            node.Remaining = node.WorldDeltaV(ctx.Orbit);
+            var patch = PatchedConics.Predict(body, r, v, t0, node, 3).Find(x => x.Body == ctx.Target);
+            if (patch == null) return NoEncounterPenalty;
+            double rp = patch.Orbit.PeriapsisRadius, mu = ctx.Target.Mu;
+            double vinf2 = patch.Orbit.IsElliptic ? 0 : -mu / patch.Orbit.A;
+            double b = vinf2 > 0 ? rp * Math.Sqrt(1 + 2 * mu / (rp * vinf2)) : rp;
+            double want = ctx.TargetMiss;
+            if (!double.IsNaN(ctx.Periapsis))
+                want = vinf2 > 0 ? ctx.Periapsis * Math.Sqrt(1 + 2 * mu / (ctx.Periapsis * vinf2)) : ctx.Periapsis;
+            return Math.Abs(b - want) - Math.Abs(p.Miss - ctx.TargetMiss);
+        }
+
+        /// <summary>
+        /// Доводка лучшего кандидата по прогнозу склейки коник (цена — та же, но промах — из прогноза):
+        /// короткий покоординатный спуск с малыми шагами, PolishIters вызовов Predict на координату.
+        /// </summary>
+        static TransferPlan Polish(Context ctx, CelestialBody body, Vector3d r, Vector3d v, double t0, TransferPlan start, double dt)
+        {
+            double Score(TransferPlan p) => Cost(ctx, p) + PredictedMissError(ctx, body, r, v, t0, p);
+            var best = start;
+            double bestCost = Score(best);
+            double[] step = { dt / 8, 2, 2 };
+            for (int iter = 0; iter < PolishIters && (step[0] > 0.5 || step[1] > 0.02 || step[2] > 0.02); iter++)
+            {
+                bool improved = false;
+                for (int k = 0; k < 3; k++)
+                    for (int sgn = -1; sgn <= 1; sgn += 2)
+                    {
+                        var p = Shift(best, k, sgn * step[k]);
+                        if (p.Time < ctx.T0 + 60) continue;
+                        double c = Score(p);
+                        if (c < bestCost)
+                        {
+                            bestCost = c;
+                            best = p;
+                            improved = true;
+                        }
+                    }
+                if (!improved)
+                    for (int k = 0; k < 3; k++) step[k] *= 0.5;
+            }
+            return best;
+        }
+
+        /// <summary>Итераций доводки по прогнозу: по 6 прогнозов на итерацию.</summary>
+        const int PolishIters = 60;
+
+        /// <summary>Штраф кандидату, у которого прогноз не входит в сферу цели, м промаха.</summary>
+        const double NoEncounterPenalty = 1e8;
 
         sealed class Context
         {
             public KeplerOrbit Orbit;
             public CelestialBody Target;
-            public double TargetMiss, T0, MaxTransfer;
+            public double TargetMiss, T0, MaxTransfer, Periapsis;
         }
 
         static TransferPlan Descend(Context ctx, TransferPlan start, double startCost, double dt, out double bestCost)

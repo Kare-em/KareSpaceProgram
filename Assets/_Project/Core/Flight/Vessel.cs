@@ -40,6 +40,11 @@ namespace Kare.Space.Core
         /// <summary>Остаток импульса в системе P. Задаётся при планировании, тает по мере работы двигателя.</summary>
         public Vector3d Remaining;
         public double Total => Remaining.magnitude;
+        /// <summary>
+        /// Нужный вектор избытка после разгона с РДТТ-«пинком» (§5.3, «Вояджер»); ноль — обычный манёвр. С ним
+        /// NodeAutopilot наводится по асимптоте, как настоящий «Центавр»: момент отсечки — модуль, направление пинка — асимптота.
+        /// </summary>
+        public Vector3d TargetExcess;
 
         /// <summary>Импульс в P по орбите корабля в момент узла.</summary>
         public Vector3d WorldDeltaV(KeplerOrbit orbit)

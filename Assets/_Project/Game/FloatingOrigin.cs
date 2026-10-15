@@ -22,7 +22,9 @@ namespace Kare.Space.Game
             // Ноль — у главного вида (FlightView): при «сначала посадка» это ступень, а не активный корабль.
             var main = FlightView.Main;
             if (main == null) return;
-            OriginP = WorldP(main);
+            // На карте ноль — у тела в фокусе: камера карты висит у Сатурна в 1,4e12 м от борта, и float с шагом
+            // ≈ 131 км дрожал линиями и диском (§9.6). Компрессия на карте выключена — сдвиг нуля ничего не ломает.
+            OriginP = MapView.OriginOverride ?? WorldP(main);
         }
 
         /// <summary>Гелиоцентрическое положение борта в P.</summary>
@@ -30,6 +32,9 @@ namespace Kare.Space.Game
 
         /// <summary>Точка P (гелиоцентр, double) → позиция Unity (float) относительно нуля.</summary>
         public static Vector3 ToUnity(Vector3d worldP) => ToVector3((worldP - OriginP).SwapYZ);
+
+        /// <summary>То же в double — для геометрии, которую дальше переносят к камере (линии карты).</summary>
+        public static Vector3d ToUnityD(Vector3d worldP) => (worldP - OriginP).SwapYZ;
 
         /// <summary>Направление/вектор в P → оси Unity без сдвига нуля.</summary>
         public static Vector3 DirToUnity(Vector3d dirP) => ToVector3(dirP.SwapYZ);

@@ -243,7 +243,10 @@ namespace Kare.Space.Core
                 foreach (var x in universe.Vessels)
                 {
                     if (!Universe.CanDock(v, x)) continue;
-                    double d = Vector3d.Distance(x.Position, v.Position);
+                    // Ступень с ЛМ на рельсах: внутри шага физики её Position ещё не сдвинут — сравниваем на момент t.
+                    Universe.StateOf(x, t, out var rx, out _);
+                    Universe.StateOf(v, t, out var rv, out _);
+                    double d = Vector3d.Distance(rx, rv);
                     if (d < bd) { bd = d; best = x; }
                 }
                 if (best != null)

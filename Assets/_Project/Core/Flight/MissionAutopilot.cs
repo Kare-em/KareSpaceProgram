@@ -79,7 +79,7 @@ namespace Kare.Space.Core
         /// <summary>Прожиги короче этого — на ×1 (точность отсечки и смотреть есть на что). Пара: Universe.AutoBurnWarpMin.</summary>
         const double ShortBurn = 15;
 
-        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station, Winged, Starship }
+        public enum ProfileType { Suborbital, Orbital, LunarProbe, Apollo, Station, Winged, Starship, Planetary }
 
         public readonly MissionTracker Tracker;
         public readonly ProfileType Profile;
@@ -116,6 +116,7 @@ namespace Kare.Space.Core
         public static ProfileType Classify(MissionDef def)
         {
             if (MissionCatalog.IsStarship(def)) return ProfileType.Starship; // MissionAutopilot.Starship.cs
+            if (MissionCatalog.IsTour(def)) return ProfileType.Planetary; // гравманёвры «Вояджеров» — MissionAutopilot.Planetary.cs
             if (def.StationSection >= 0) return ProfileType.Station; // сближение со станцией — MissionAutopilot.Station.cs
             if (def.Objectives.Exists(o => o.Type == ObjectiveType.Runway)) return ProfileType.Winged; // посадка на полосу — MissionAutopilot.Winged.cs
             bool moonOrbit = false, moonGoal = false, earthOrbit = false;
@@ -192,6 +193,7 @@ namespace Kare.Space.Core
                 case ProfileType.Station: s = Station(); break;
                 case ProfileType.Winged: s = Winged(); break;
                 case ProfileType.Starship: s = Starship(); break;
+                case ProfileType.Planetary: s = Planetary(); break;
                 default: s = Apollo(); break;
             }
             foreach (var x in s) yield return x;
@@ -290,12 +292,39 @@ namespace Kare.Space.Core
         /// <summary>Сброс всего лишнего до парашюта, SAS выкл., парашют взводится — раскрывает автоматика по высоте.</summary>
         IEnumerable<object> Descend()
         {
+            foreach (var x in TurnSideways()) yield return x;
             PrepareEntry();
             Phase = "Спуск";
             foreach (var x in Await(() => false, () => V.Situation == Situation.Flying
                 ? $"Спуск: {V.Altitude / 1000:F1} км, {V.SurfaceSpeed:F0} м/с"
                 : "Посадка")) yield return x;
         }
+
+        /// <summary>
+        /// Перед сбросом отсеков в вакууме — нос по нормали к орбите: толчок разделения (Vessel.StagePush 1,5 м/с, КМ
+        /// получает ≈ 0,8 м/с отдачи) вдоль трассы за 30 мин до перигея сдвигал коридор входа на 6 км — 44,6 → 38,9 км,
+        /// −7,1°, 10,6 g, экипаж погиб (auto_apollo8, 15.10.2026). Боковой толчок меняет наклонение, перигей — лишь во
+        /// втором порядке. Пара: EntryPrep — разворот должен уложиться до входа.
+        /// </summary>
+        IEnumerable<object> TurnSideways()
+        {
+            var v = V;
+            if (!v.HasNextStage || v.IsLanded || v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop) yield break;
+            v.Sas = SasMode.Normal;
+            NeedsPhysics = true;
+            double end = T + SidewaysTurn;
+            foreach (var x in Await(() => T >= end || SidewaysAligned(v), () => $"Разворот перед разделением: {end - T:F0} с")) yield return x;
+            NeedsPhysics = false;
+        }
+
+        bool SidewaysAligned(Vessel v)
+        {
+            var h = Vector3d.Cross(v.Position, v.Velocity).normalized;
+            return Math.Abs(Vector3d.Dot(v.NoseP, h)) > Math.Cos(SidewaysTolerance * Constants.Deg2Rad);
+        }
+
+        /// <summary>Сколько ждать разворота по нормали, с, и допуск, °: 5° оставляют ≈ 0,07 м/с вдоль трассы.</summary>
+        const double SidewaysTurn = 120, SidewaysTolerance = 5;
 
         void PrepareEntry()
         {
@@ -456,7 +485,9 @@ namespace Kare.Space.Core
             var u = universe;
             var csm = V;
             Phase = "Расстыковка";
-            while (u.Active == csm && csm.NextStageLabel != null) u.Stage();
+            // Не while: без ЛМ (не перестроились) Stage() доходил до парашюта и дальше не менял ничего — тест висел
+            // без вывода вместо Abort (auto_apollo11, 15.10.2026). 8 шагов с запасом: до ЛМ в программе их 2.
+            for (int n = 0; n < 8 && u.Active == csm && csm.NextStageLabel != null; n++) u.Stage();
             if (u.Active == csm) throw new Abort("ЛМ не отделился");
             double end = T + UndockCoast;
             // WaitUntil, а не Await: без события впереди (круговая орбита, грунт) автоускорение уходило на ×1e7

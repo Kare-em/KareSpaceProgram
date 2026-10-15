@@ -245,3 +245,18 @@ Read before working through MCP, debugging in Play, and bulk file edits.
 - The IMGUI default font has no ↶/↷ — they render as boxes; use words ("Отменить"/"Вернуть").
 - `SceneManager.LoadScene` in Play can drop the MCP bridge for ~10 s and move it to another port (6400 → 6401); wait and retry.
 - `GameBootstrap.NextMissionId` set before entering Play is wiped by the domain reload — set it in Play and reload the scene.
+
+## Voyager parts and payload screenshots (15.10.2026, `Tools/blender/voyager_parts.py`)
+- **Radial FBX orientation**: Blender (x,y,z) → Unity (−x, z, −y). A radial section at `RadialPhase` π/2 stands at Unity ±Z, and
+  its local +X Unity (outward) is **−X Blender** — so the SRB's outboard parts (TVC tank) are modelled on −X, and the core's
+  attach fittings at Blender az 90°/270°. Checked in Play: SRB roots at z ±3.35, mesh centre x +0.29 (tank outward), SRB
+  bottoms level with the core (centres differ by (25.9−22.2)/2).
+- Parts placed at an offset (RTG cylinders, cameras) — `placed(bm, mtx, make)`: build at the origin, transform only the new
+  `bm.verts` (set difference). Scanning vertices by coordinates to "find" the new part picked up neighbours.
+- **Sections under the fairing are not built at all** (`Vessel.IsEnclosed` → `continue` in VesselView): the stack shows only the
+  fairing. To look at the payload in Play — `v.Vessel.Attached[<fairing index>] = false`, the view rebuilds itself.
+- A preset that has no mission yet: `GameBootstrap.NextDesign = VesselPresets.ById("voyager1")` + `PauseMenu.Reload` (private
+  static) via `EditorApplication.delayCall`. Calling `SelectMission` directly from `execute_code` timed out the MCP call.
+- **`FlightCamera.pan` cannot frame the top of a tall stack**: pan beyond the fit limit or a change of vessel length re-fits
+  `Distance` (3 tries — the frame jumped far away). Payload close-up — the RT clone-camera recipe above, `LookRotation(target − pos,
+  vessel.up)`, FOV 40, 12 renders: worked first time.

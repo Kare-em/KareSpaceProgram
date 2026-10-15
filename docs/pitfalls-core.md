@@ -293,3 +293,66 @@ Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`
   side first. `auto_ift5` / `starship_catch` unchanged after the fix.
 - **Belly-fall spawn range ≈ 1 km:** a belly-flopping Starship barely glides horizontally; at 10+ km out it never reached the
   tower (`starship_landing` Range 1000 m from 15 km works).
+
+## Interplanetary planning (15.10.2026, `TransferPlanner.PlanInterplanetary`, `PatchedConics.DefaultHorizon`)
+- **Porkchop must price the real departure, not Σ|v∞|.** Earth→Saturn from an equatorial 300 km orbit: the Σ|v∞| minimum was a
+  160° transfer whose asymptote is 24° off the ecliptic and 48.6° off the parking plane → node 13.9 km/s (normal 10.8 km/s).
+  Cost now = Oberth burn at periapsis with the out-of-plane angle β (`√(vq² + vp² − 2·vq·vp·cos β)`) + capture into an ellipse
+  to ½ SOI: β 0.8°, node 8.46 km/s, 2590 d (> 180° transfer). Pair: `PorkCaptureApoSoi` ↔ `MapView.CaptureApoSoi`.
+- **Prediction horizon around the Sun:** the old 2-year cap cut the Saturn transfer (6–9 years) before the encounter → no
+  Saturn patch. Heliocentric orbits now predict `min(1.05·P, 40 y)`, hyperbolas 40 y (`HelioHorizonYears`).
+- **Half-burn lead must count every stage.** `BurnTime` puts the whole Δv on the current stage's thrust: a full R-7 burning
+  8.46 km/s to Saturn gave ≈ 4 min instead of ≈ 8, so the node pilot and the rails stop started 4 min late; right after
+  `Teleport` the current stage is silent → `BurnTime` = ∞ → no lead at all ("Ждём ориентацию" at node −16 s).
+  `FlightControl.StagedBurnTime` (stage list, 2 s per separation) is now used by `NodeAutopilot` and the warp stop in `Universe`.
+
+- **Correction to a planet must aim through the predicted patch, not a no-gravity miss.** `PlanIntercept` scored candidates
+  by the straight-line miss; with the target's gravity the real periapsis differed by hundreds of km — Luna-9 got a correction
+  174 m/s off and hit the Moon at 639 m/s. Fix: every candidate is also scored by `PredictedMissError` (PatchedConics patch at
+  the target → `b = rp·√(1+2μ/(rp·v∞²))`, no encounter = 1e8), the winner is polished by coordinate descent (`Polish`, 60 iters).
+  `auto_luna9` Success again. Heliocentric branch `PlanCorrection` (ManeuverAutoPlan, body = Sun): Saturn Pe 52–56 thousand km.
+- **NodeWarpMargin 90 s stays.** Suspected for luna9 (tried 30) — not the cause; 90 restored.
+- **Warp passed through a whole SOI.** At ×1e7 the rails crossed Saturn's sphere (period of the flyby ≈ days) in one step and
+  the flyby was never seen. `Universe.HandleTransition` on Encounter (not autopilot) caps warp by `Ladder(TimeToPeriapsis)` and
+  `AdvanceRails` breaks the step when the warp dropped. Message "Ускорение снижено до ×1000000: подход к телу Сатурн".
+  `TimeToPeriapsis` on a hyperbola after periapsis is NaN → cap 0 (guarded).
+- **Δv shortfall is now in the node message.** Saturn from R-7: departure 8.1 km/s cut off at ≈ 6 km/s (miss 0.6 mln km), the
+  correction 1 km/s vs 156 m/s left → "НЕ ХВАТАЕТ: в ступенях N м/с" (`ManeuverAutoPlan.Plan`). Not a bug: the rocket is too small.
+- **`PatchedConics.Predict` adds `node.Remaining` (world vector in P), not the Prograde/Normal/Radial fields.** A node built
+  from components only predicts the orbit WITHOUT the burn. `TransferPlanner.PredictedMissError` forgot it → `Polish` tuned
+  only the wait/normal penalties; Luna-17 arrived with Pe 13 562 km. Fix: `node.Remaining = node.WorldDeltaV(orbit)` before
+  `Predict`. Any new code calling `Predict` with a hand-made node must set `Remaining`.
+- **`PlanIntercept(r, v, t0, …)` treats (r, v) as the state AT t0.** Passing the current state with `t0 = now + 2 h` makes the
+  craft "lag" by 2 h: the Moon moved ≈ 7000 km and Vympel flew past instead of impacting. Propagate first:
+  `KeplerOrbit.FromState(r, v, mu, now).GetState(t0, out r0, out v0)` (MissionAutopilot already does).
+- **Separation push shifts the entry corridor.** Dropping the SM along the track 30 min before perigee (`Vessel.StagePush`
+  1.5 m/s, capsule gets ≈ 0.8 m/s recoil) moved Apollo 8 perigee 44.6 → 38.9 km: −7.1°, 10.6 g, crew dead. Fix:
+  `MissionAutopilot.TurnSideways` — before staging in vacuum, SAS Normal (≤ 120 s, 5° tolerance); a sideways push changes
+  inclination, perigee only to second order. After: Pe 44.6 km at entry, −6.89°, peak 8.4 g. LEO capsules unaffected
+  (vostok/gemini3 8.5 g, soyuz_tm31 9.7 g for 0.6 s, crew_dragon 8.3 g).
+- **A vessel that leaves physics mid-frame must go on rails with the epoch of ITS state, not the frame start.**
+  `AdvancePhysics` splits a frame into sub-steps; a piece staged on sub-step s stands where it was at that sub-step, but
+  `MovePassive(..., since: t0)` built its orbit with epoch t0 → shifted by s·h along the track. S-IVB+LM landed 852 m away
+  (0.11 s × 7.8 km/s) > `TranspositionRange` 500 → no transposition, the CSM flew to the Moon alone, and `LunarLanding`
+  "undocking" staged off the SM and armed the chute. Fix: per-vessel `stamp` in `AdvancePhysics` (birth time via `NoteBorn`,
+  last stepped time for vessels that drop out of physics, e.g. old active after transferControl). Also: distances between
+  vessels inside a step — via `Universe.StateOf(x, t)`; `LunarLanding`'s `while (… NextStageLabel != null) Stage()` spun
+  forever without the LM (test hung, no output) — now capped at 8 steps.
+- **Aim for the impact parameter at the PREDICTED v∞, not the guessed one.** `ToMoon` passed `targetMiss = Impact(rp, 1000 m/s)`;
+  real v∞ ≈ 800 m/s, so that b means rp below the surface. Once `Polish` worked (the `Remaining` fix), it aimed straight at it, and
+  `ToMoon`'s coordinate descent couldn't climb back out of the shallow valley (499 km vs 100; 40 moves spent). Fix: `PlanIntercept(...,
+  periapsis:)` — `PredictedMissError` recomputes the target b from the periapsis at the v∞ of each prediction. After: perilune 100 km
+  (target 100), autoplan earth→moon in 739 ms.
+- **Lambert silently returned a parabola for every hyperbolic transfer.** The lower bound of z was "fixed" by halving towards
+  `hi` while `Y(lo) < 0`: from −4π² it jumped straight to 0, so all z < 0 (hyperbolas) were cut off, the bisection pinned at
+  z = 0 and still returned `true`. Symptom: Voyager legs after Jupiter had e = 1.000 and missed the target point by
+  100–1150 million km; the tour planner then wandered hundreds of days off history (mismatch 2–5 km/s). Earth→Jupiter
+  (elliptic) was unaffected, which hid it. Fix: only EXTEND the lower bound downwards while the hyperbola there is still too
+  slow (`LowerBoundDoublings` 12 → z ≈ −1.6·10⁵, cosh overflow beyond); the bisection already steps over the Y < 0 region.
+  Check: propagate v1 with Kepler for tof and compare with r2 (now 0.000 km on all legs). After: V2 tour within −0.7…+7.4 days
+  of history, flyby altitudes 635/100/81 thousand km vs historical 650/101/81, C3 103.
+- **Game time before 2000 is negative** (seconds from J2000): 1977 dates are ≈ −7·10⁸. `0` or `> 0` cannot be a "no date"
+  sentinel — `Objective.Date` defaults to NaN and is tested with `double.IsNaN`. The first tour run returned null in 0 ms.
+- **A flyby tour must be anchored to the historical dates.** Zero-mismatch solutions form continuous valleys; without a pull
+  term the simplex slid along them towards cheaper departures (V1 Jupiter +235 days). `TourPlanner.HistoryScale` (2 days,
+  quadratic) keeps the solution within days of history.

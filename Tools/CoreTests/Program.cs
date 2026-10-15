@@ -77,6 +77,7 @@ static class Program
         Run("apollo8", () => TestApollo("apollo8"), only);
         Run("apollo11", () => TestApollo("apollo11"), only);
         Run("planets", TestPlanets, only);
+        Run("voyager", TestVoyager, only);
         Run("autoplan", TestAutoPlan, only);
         Run("patches", TestPatches, only);
         Run("booster", TestBooster, only);
@@ -225,7 +226,7 @@ static class Program
         "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
         "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
         "voskhod2", "soyuz_tm31", "crew_dragon", "sts1", "buran", "ift5", "starship_catch",
-        "sts1_landing", "buran_landing", "starship_landing",
+        "sts1_landing", "buran_landing", "starship_landing", "voyager1", "voyager2",
     };
 
     /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
@@ -237,7 +238,8 @@ static class Program
         Console.WriteLine($"   профиль: {u.Mission.Profile}");
         // Кадры по 0,1 с реального времени; предел — 30 суток полёта или 200 тыс. кадров (≈ 5,5 ч в игре).
         const int MaxFrames = 200000;
-        double end = u.Time + 30 * 86400, maxWarp = 1;
+        // Тур «Вояджеров» — годы: до Нептуна 12 лет (рельсы до ×10⁷, кадров хватает).
+        double end = u.Time + (MissionCatalog.IsTour(tr.Def) ? 13 * 365.25 : 30) * 86400, maxWarp = 1;
         int frames = 0;
         string phase = null;
         bool inAir = false, wasHigh = false;
@@ -282,7 +284,10 @@ static class Program
                 phase = u.Mission.Phase;
                 // Тутор ручного полёта на том же шаге: что он подсказал бы игроку без автопилота.
                 string tip = MissionGuide.Next(u, tr, out var step, out var hint) ? $"   · тутор: {step} — {hint}" : "";
-                Console.WriteLine($"   ▶ {phase}{tip}");
+                // Перицентр на смене фазы: видно, на каком шаге уплывает коридор входа.
+                string pe = av != null && av.Alive && !av.IsLanded
+                    ? $" [Pe {(KeplerOrbit.FromState(av.Position, av.Velocity, av.Body.Mu, u.Time).PeriapsisRadius - av.Body.Radius) / 1000:F1} км]" : "";
+                Console.WriteLine($"   ▶ {phase}{pe}{tip}");
             }
         }
         // Успех засчитывается раньше, чем «Аполлон-11» допристыкуется; дождаться конца сценария.
@@ -637,6 +642,42 @@ static class Program
                 $"старт через {(plan.Time - u.Time) / 86400:F0} сут, Δv {plan.DeltaV:F0} м/с (норм. {plan.Normal:F0}), перелёт {plan.TransferTime / 86400:F0} сут, " +
                 $"промах без притяжения {plan.Miss / 1000:F0} км (цель {miss / 1000:F0}); {route}; {ms} мс" +
                 (at != null ? $"; перицентр {(at.Orbit.PeriapsisRadius - planet.Radius) / 1000:F0} км" : ""));
+        }
+    }
+
+    /// <summary>«Вояджеры»: бюджет Δv «Титана IIIE — Центавра», тур с гравманёврами возле исторических дат.</summary>
+    static void TestVoyager()
+    {
+        foreach (var id in new[] { "voyager2", "voyager1" })
+        {
+            var (u, tr) = StartMission(id);
+            var v = u.Active;
+            // Только «Центавр» и модуль: в статистике ступеней корпуса РДТТ едут весь участок ядра (на деле сброс
+            // через 12 с), и сумма по пакету занижена на ≈ 1,3 км/с. «Титан» доводит до ≈ 8,2 из ≈ 9,3 км/с опорной.
+            double dv = 0;
+            foreach (var st in v.RemainingStats())
+                if (st.Name.StartsWith("Центавр") || st.Name.StartsWith("Разгонный")) dv += Math.Max(0, st.DeltaVVac);
+            foreach (var st in v.RemainingStats()) Console.WriteLine($"   {st.Name}: {st.DeltaVVac:F0} м/с, {st.BurnTime:F0} с, {st.StartMass / 1000:F1} → {st.EndMass / 1000:F1} т");
+            Check($"voyager: {id} — запас Δv пакета", dv > 1100 + 7200, $"«Центавр» + модуль {dv:F0} м/с (довыведение ≈ 1,1 + отлёт ≈ 7,2 км/с)");
+            var earth = u.System.Get("earth");
+            double park = earth.Radius + 200e3;
+            var sw = Stopwatch.StartNew();
+            var tour = MissionCatalog.PlanTour(tr.Def, u.System, u.Time + 3600, park);
+            long ms = sw.ElapsedMilliseconds;
+            Check($"voyager: {id} — тур найден", tour != null, $"{ms} мс");
+            if (tour == null) continue;
+            var legs = tr.Def.Objectives.FindAll(o => o.Type == ObjectiveType.Flyby);
+            for (int i = 0; i < tour.Bodies.Length; i++)
+            {
+                double shift = (tour.Times[i] - legs[i].Date) / 86400;
+                string pe = double.IsNaN(tour.Periapsis[i]) ? "—" : $"{(tour.Periapsis[i] - tour.Bodies[i].Radius) / 1e6:F0} тыс. км";
+                Console.WriteLine($"   {tour.Bodies[i].Name}: {GameCalendar.Format(tour.Times[i])} ({shift:+0.0;-0.0} сут к истории), " +
+                                  $"v∞ {tour.VIn[i].magnitude:F0} → {tour.VOut[i].magnitude:F0} м/с, высота пролёта {pe}");
+            }
+            double c3 = tour.VInfDepart.sqrMagnitude / 1e6;
+            Check($"voyager: {id} — отлёт по силам «Центавру» с модулем", tour.DepartDv < 7600,
+                $"C3 {c3:F0} км²/с², Δv с 200 км {tour.DepartDv:F0} м/с, рассогласование пролётов {tour.Mismatch:F1} м/с, {ms} мс");
+            Check($"voyager: {id} — пролёты без двигателя", tour.Mismatch < 20, $"{tour.Mismatch:F1} м/с");
         }
     }
 
@@ -1189,7 +1230,11 @@ static class Program
         // через несколько часов, пока Луна далеко и цена поправки — единицы-десятки м/с.
         if (lunar == null || Math.Abs(lunar.Orbit.PeriapsisRadius - miss) > MidcourseTolerance)
         {
-            var fix = TransferPlanner.PlanIntercept(earth, v.Position, v.Velocity, u.Time + 2 * 3600, moon, miss, 86400, maxTransfer);
+            // Планировщик считает (r, v) взятыми в момент t0 — переносим состояние по орбите (как MissionAutopilot):
+            // без этого аппарат «отставал» на 2 ч, Луна уходила на ≈ 7000 км, и «Вымпел» вместо удара пролетал мимо.
+            double t0 = u.Time + 2 * 3600;
+            KeplerOrbit.FromState(v.Position, v.Velocity, earth.Mu, u.Time).GetState(t0, out var r0, out var v0);
+            var fix = TransferPlanner.PlanIntercept(earth, r0, v0, t0, moon, miss, 86400, maxTransfer);
             if (fix != null)
             {
                 Console.WriteLine($"   коррекция: через {Clock(fix.Time - u.Time)}, Δv {fix.Prograde:F1}/{fix.Normal:F1}/{fix.Radial:F1} м/с, промах {fix.Miss / 1000:F0} км");

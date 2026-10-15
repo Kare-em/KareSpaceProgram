@@ -44,6 +44,30 @@ namespace Kare.Space.Game
         /// </summary>
         const float GroundClearance = 2f;
 
+        /// <summary>
+        /// Режимы камеры (§10.3, F5 / Shift+F5): от чего отсчитываются Yaw/Pitch.
+        /// Авто — местная вертикаль (горизонт ровный); Свободная — инерциальные оси (звёзды стоят, планета плывёт);
+        /// Орбитальная — плоскость орбиты горизонтальна, тело всегда в одной стороне кадра; Погоня — за вектором
+        /// скорости (в атмосфере — относительно поверхности); Связанная — оси борта, камера вращается вместе с ним.
+        /// </summary>
+        public enum CameraMode { Auto, Free, Orbital, Chase, Locked }
+        public static CameraMode Mode { get; private set; }
+        static readonly string[] ModeNames = { "авто (горизонт)", "свободная", "орбитальная", "погоня (по скорости)", "связанная с бортом" };
+        public static string ModeName => ModeNames[(int)Mode];
+        /// <summary>Скорость доворота «погони» за скоростью, 1/с: мгновенный поворот дёргал кадр на каждом рыскании.</summary>
+        const float ChaseRate = 4;
+        /// <summary>Ниже скорости, м/с, направление полёта не определено — «погоня» смотрит по носу.</summary>
+        const double ChaseMinSpeed = 1;
+
+        public static string CycleMode(int dir)
+        {
+            int n = ModeNames.Length;
+            Mode = (CameraMode)((((int)Mode + dir) % n + n) % n);
+            return ModeName;
+        }
+
+        CameraMode appliedMode;
+
         /// <summary>Камера правой половины сплит-скрина (FlightView): смотрит на FlightView.Second.</summary>
         public bool Secondary;
         /// <summary>Чья половина приняла нажатие ПКМ/СКМ: тянуть мышь можно и через границу половин.</summary>
@@ -101,15 +125,21 @@ namespace Kare.Space.Game
             // Местная вертикаль; кадр камеры доворачивается на её изменение, а не строится заново —
             // так нет закрутки по азимуту при движении по орбите.
             var up = FloatingOrigin.DirToUnity(v.Position.normalized);
-            if (!frameValid)
+            var want = ModeFrame(v, up);
+            if (!frameValid || appliedMode != Mode)
             {
-                // Лицом на север: восток справа, и D (нос на восток, см. FlightPhysics.PlaceOnSurface) уводит нос вправо (§10.1).
-                var pole = FloatingOrigin.DirToUnity(v.Body.OrientationAt(u.Time) * Vector3d.forward);
-                var north = Vector3.ProjectOnPlane(pole, up);
-                frame = north.sqrMagnitude > 1e-6f ? Quaternion.LookRotation(north, up) : Quaternion.FromToRotation(Vector3.up, up);
+                // Смена режима: новый базис, а Yaw/Pitch пересчитываются так, чтобы камера осталась на месте (кроме крена).
+                var old = frame * Quaternion.Euler(Pitch, Yaw, 0);
+                bool had = frameValid;
+                frame = want ?? (Mode == CameraMode.Free && had ? frame : AutoFrame(v, u, up));
+                if (had) KeepView(old);
                 frameValid = true;
+                appliedMode = Mode;
             }
-            else frame = Quaternion.FromToRotation(lastUp, up) * frame;
+            else if (Mode == CameraMode.Auto) frame = Quaternion.FromToRotation(lastUp, up) * frame;
+            else if (Mode == CameraMode.Chase && want.HasValue) frame = Quaternion.Slerp(frame, want.Value, 1 - Mathf.Exp(-ChaseRate * Time.unscaledDeltaTime));
+            else if (want.HasValue) frame = want.Value;
+            // Свободная — базис не трогаем: оси Unity инерциальные (эклиптика, §2.6).
             lastUp = up;
 
             // Цель — середина борта вместе с полосой под соплами, а не центр масс: ЦМ у полной ракеты низко, и при старте нос уходил
@@ -153,6 +183,50 @@ namespace Kare.Space.Game
                 rot = Quaternion.LookRotation(target - pos, up);
             }
             transform.SetPositionAndRotation(pos, rot);
+        }
+
+        /// <summary>Лицом на север: восток справа, и D (нос на восток, см. FlightPhysics.PlaceOnSurface) уводит нос вправо (§10.1).</summary>
+        static Quaternion AutoFrame(Vessel v, Universe u, Vector3 up)
+        {
+            var pole = FloatingOrigin.DirToUnity(v.Body.OrientationAt(u.Time) * Vector3d.forward);
+            var north = Vector3.ProjectOnPlane(pole, up);
+            return north.sqrMagnitude > 1e-6f ? Quaternion.LookRotation(north, up) : Quaternion.FromToRotation(Vector3.up, up);
+        }
+
+        /// <summary>Базис режима; null — режим ведёт базис сам (Авто — доворотом за вертикалью, Свободная — никак).</summary>
+        Quaternion? ModeFrame(Vessel v, Vector3 up)
+        {
+            switch (Mode)
+            {
+                case CameraMode.Orbital:
+                {
+                    var h = FloatingOrigin.DirToUnity(Vector3d.Cross(v.Position, v.Velocity).normalized);
+                    if (h.sqrMagnitude < 0.5f) return null;
+                    return Quaternion.LookRotation(-up, h); // вперёд — на тело, верх — нормаль орбиты
+                }
+                case CameraMode.Chase:
+                {
+                    // В атмосфере — скорость относительно воздуха (поверхности): на взлёте орбитальная смотрит вбок на 400 м/с.
+                    var vel = v.Velocity;
+                    if (v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop) vel -= v.Body.SurfaceVelocity(v.Position);
+                    var dir = vel.magnitude > ChaseMinSpeed ? FloatingOrigin.DirToUnity(vel.normalized) : FloatingOrigin.ToQuaternion(v.Attitude) * Vector3.up;
+                    // Вертикальный подъём: «верх» по вертикали вырожден — берём верх прошлого кадра.
+                    var top = Vector3.Cross(dir, up).sqrMagnitude > 1e-4f ? up : frame * Vector3.up;
+                    return Quaternion.LookRotation(dir, top);
+                }
+                case CameraMode.Locked:
+                    return FloatingOrigin.ToQuaternion(v.Attitude); // верх — нос борта (+Y): Yaw — облёт вокруг оси ракеты
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>Подобрать Yaw/Pitch так, чтобы frame·Euler(Pitch, Yaw) смотрел туда же, куда old.</summary>
+        void KeepView(Quaternion old)
+        {
+            var f = Quaternion.Inverse(frame) * (old * Vector3.forward);
+            Pitch = Mathf.Clamp(-Mathf.Asin(Mathf.Clamp(f.y, -1, 1)) * Mathf.Rad2Deg, -89, 89);
+            Yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
         }
     }
 }

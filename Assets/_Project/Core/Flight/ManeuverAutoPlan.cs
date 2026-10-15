@@ -47,11 +47,19 @@ namespace Kare.Space.Core
             if (target == v.Body) return $"Корабль уже у тела {target.Name}";
             var body = v.Body;
             var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, body.Mu, u.Time);
-            if (!orbit.IsElliptic) return "Манёвр к цели планируется с замкнутой орбиты";
+            if (!orbit.IsElliptic && body.Parent != null && target.Parent == body.Parent)
+                return $"{target.Name}: коррекция — после выхода из сферы тела {body.Name} (смена сферы — на карте)";
+            if (!orbit.IsElliptic && body.Parent != null) return "Манёвр к цели планируется с замкнутой орбиты";
             if (orbit.PeriapsisRadius < body.Radius + body.AtmosphereTop) return "Сначала замкните орбиту выше атмосферы";
 
             string kind;
-            if (target.Parent == body)
+            if (body.Parent == null)
+            {
+                // Вокруг Солнца — уже на перелёте: коррекция к планете, а не разгон «к спутнику» с опорной орбиты.
+                kind = "коррекция";
+                plan = TransferPlanner.PlanCorrection(body, v.Position, v.Velocity, u.Time, target);
+            }
+            else if (target.Parent == body)
             {
                 kind = "перелёт";
                 plan = ToMoon(body, v, u.Time, target);
@@ -73,7 +81,12 @@ namespace Kare.Space.Core
 
             if (plan == null) return $"{target.Name}: {kind} не найден";
             u.SetNode(plan.Time, plan.Prograde, plan.Normal, plan.Radial);
-            return $"{target.Name}: {kind}, разгон через {MissionAutopilot.Clock(plan.Time - u.Time)}, Δv {plan.DeltaV:F0} м/с, " +
+            // Запас по ступеням — в сообщение: к Сатурну с Р-7 разгон 8,1 км/с обрывался на ≈ 6 км/с, промах
+            // 0,6 млн км, а коррекция 1 км/с при остатке 156 м/с невыполнима (замер 15.10.2026).
+            double have = 0;
+            foreach (var s in v.RemainingStats()) have += Math.Max(0, s.DeltaVVac);
+            string lack = have < plan.DeltaV ? $" — НЕ ХВАТАЕТ: в ступенях {have:F0} м/с" : "";
+            return $"{target.Name}: {kind}, разгон через {MissionAutopilot.Clock(plan.Time - u.Time)}, Δv {plan.DeltaV:F0} м/с{lack}, " +
                    $"в пути {MissionAutopilot.Clock(plan.TransferTime)}. B — выполнить";
         }
 
@@ -87,7 +100,8 @@ namespace Kare.Space.Core
         static TransferPlan ToMoon(CelestialBody body, Vessel v, double t, CelestialBody target)
         {
             double want = target.Radius + MoonPeriapsis;
-            var plan = TransferPlanner.PlanIntercept(body, v.Position, v.Velocity, t, target, Impact(target, want, GuessVinf), MoonWindow);
+            var plan = TransferPlanner.PlanIntercept(body, v.Position, v.Velocity, t, target, Impact(target, want, GuessVinf), MoonWindow,
+                periapsis: want);
             if (plan == null) return null;
             var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, body.Mu, t);
             double Cost(double pro, double nor)

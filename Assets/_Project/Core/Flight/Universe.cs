@@ -30,8 +30,9 @@ namespace Kare.Space.Core
         public const double CrashSpeed = 12, Restitution = 0.2;
         /// <summary>Секунды после разделения, пока новые части не сталкиваются ни с кем; с родителем их дальше разводит Fresh.</summary>
         public const double CollisionGrace = 1.5;
-        /// <summary>За сколько секунд до запуска манёвра ускорение сбрасывается само.</summary>
-        public const double NodeWarpMargin = 30;
+        /// <summary>За сколько секунд до запуска манёвра ускорение сбрасывается само — запас на разворот:
+        /// полный Р-7 поворачивает ≈ 1°/с, 46° к узлу заняли ≈ 60 с, при 30 с запуск ждал ориентацию (15.10.2026).</summary>
+        public const double NodeWarpMargin = 90;
         /// <summary>
         /// Автоускорение (§6.11): сколько РЕАЛЬНЫХ секунд должно оставаться до ближайшего события (манёвр, смена сферы,
         /// апоцентр взлёта) на выбранной ступени. Ступень выбирается наибольшей, у которой запас не меньше, — к событию
@@ -44,6 +45,12 @@ namespace Kare.Space.Core
         /// идёт ≈ 5,5 мин, на ×10 — полминуты. Шаг интегратора тот же (см. MaxPhysicsWarp), точность импульса не теряется:
         /// apollo8 при 60 и при 15 вышел на одну и ту же орбиту 109,9 × 110,3 км, а кадров стало 5512 → 4693.</summary>
         public const double AutoBurnWarpMin = 15;
+        /// <summary>
+        /// Сколько секунд после разделения рельсы закрыты (§6.11): отделившиеся части и толчок пиросистемы должны
+        /// отработать в физике, иначе автоускорение сразу уводило борт на рельсы и разделение «проскакивало» за кадр.
+        /// Пара: больше CollisionGrace — части успевают разойтись, пока физика ещё идёт.
+        /// </summary>
+        public const double StageRailsGrace = 5;
 
         public readonly SolarSystem System;
         public double Time { get; private set; }
@@ -53,6 +60,8 @@ namespace Kare.Space.Core
         /// <summary>Фактический множитель последнего кадра и был ли он на рельсах — для HUD.</summary>
         public double EffectiveWarp { get; private set; } = 1;
         public bool RailsActive { get; private set; }
+        /// <summary>Момент последнего разделения активного борта — для StageRailsGrace.</summary>
+        double lastStageTime = double.NegativeInfinity;
 
         public AscentAutopilot Ascent;
         public NodeAutopilot NodePilot;
@@ -280,6 +289,7 @@ namespace Kare.Space.Core
             var block = Active.StageBlock;
             if (block != null) { Post(block); return; }
             if (Active.OnRails) LeaveRails(Active);
+            lastStageTime = Time;
             AddSeparated(Active, Active.Stage());
             // Расстыковка с переходом экипажа (§6.6): управление — отошедшему борту (ЛМ уходит на посадку).
             if (Active.ControlTransfer != null)
@@ -355,6 +365,7 @@ namespace Kare.Space.Core
         {
             if (v == null || !v.Alive) return null;
             if (v.AnyEngineRunning) return "работает двигатель";
+            if (Time - lastStageTime < StageRailsGrace) return "разделение";
             // Ступень на возврате (§6.9) живёт только в физике — рельсы закрыты для всех, пока она не села.
             if (AnyRecovery) return "посадка ступени";
             if (v.RcsForward > 0 || v.RcsTranslate.sqrMagnitude > 0) return "работает РСУ";
@@ -463,6 +474,12 @@ namespace Kare.Space.Core
             double h = dt / n;
             var physics = new List<Vessel>();
             var passive = PassivePhysicsSet();
+            // К какому моменту относится Position борта, выпавшего из физики посреди кадра. Отделившийся на подшаге s
+            // стоит там, где был в Time подшага, а не в t0: с эпохой t0 рельсы сдвигали его на s·h по орбите — S-IVB с ЛМ
+            // «отлетал» на 852 м (0,11 с × 7,8 км/с) дальше TranspositionRange, перестроения не было, и «Аполлон-11»
+            // уходил к Луне без ЛМ (auto_apollo11, 15.10.2026). То же у бывшего активного после передачи управления.
+            var known = new HashSet<Vessel>(Vessels);
+            var stamp = new Dictionary<Vessel, double>();
             // Погибшая ступень из физики выпадает (v.Alive) — её пилот сам не узнает, а рельсы держал бы закрытыми вечно.
             foreach (var p in Recoveries)
                 if (p.Running && !p.Vessel.Alive) p.Abort(p.Vessel.DestroyReason ?? "потеряна");
@@ -480,18 +497,28 @@ namespace Kare.Space.Core
                 RunAutopilots(h);
                 foreach (var p in Recoveries)
                     if (p.Running && physics.Contains(p.Vessel)) p.Update(Time, h);
+                NoteBorn(known, stamp);
                 foreach (var v in physics) FlightPhysics.Step(v, Time, h);
                 Time += h;
-                foreach (var v in physics) CheckSoi(v);
+                foreach (var v in physics) { CheckSoi(v); stamp[v] = Time; }
                 if (Collisions) Collide(physics);
+                NoteBorn(known, stamp);
             }
             foreach (var v in Vessels)
             {
                 if (v == Active || !v.Alive) continue;
                 if (v.IsLanded) FlightPhysics.UpdateLandedPose(v, Time);
-                else if (!physics.Contains(v)) MovePassive(v, Time, passive.Contains(v) || passive.Count < MaxPassivePhysics, t0);
+                else if (!physics.Contains(v))
+                    MovePassive(v, Time, passive.Contains(v) || passive.Count < MaxPassivePhysics, stamp.TryGetValue(v, out var tb) ? tb : t0);
             }
             eventValid = false;
+        }
+
+        /// <summary>Новые борта кадра (разделение, расстыковка) — с моментом, к которому относится их Position.</summary>
+        void NoteBorn(HashSet<Vessel> known, Dictionary<Vessel, double> stamp)
+        {
+            foreach (var v in Vessels)
+                if (known.Add(v)) stamp[v] = Time;
         }
 
         void RunAutopilots(double h)
@@ -865,7 +892,7 @@ namespace Kare.Space.Core
             double start = WarpLimitTime();
             if (v.Node != null)
             {
-                double burn = FlightControl.BurnTime(v, v.Node.Total);
+                double burn = FlightControl.StagedBurnTime(v, v.Node.Total);
                 start = v.Node.Time - (double.IsInfinity(burn) ? 0 : burn / 2);
             }
             i = Ladder(Math.Min(start, next) - Time, Array.IndexOf(Warps, MaxPhysicsWarp));
@@ -889,7 +916,7 @@ namespace Kare.Space.Core
             if (!eventValid)
             {
                 var orbit = a.OnRails ? a.Orbit : KeplerOrbit.FromState(a.Position, a.Velocity, a.Body.Mu, Time);
-                nextEvent = PatchedConics.FindNext(orbit, a.Body, Time, PatchedConics.DefaultHorizon(orbit));
+                nextEvent = PatchedConics.FindNext(orbit, a.Body, Time, PatchedConics.DefaultHorizon(orbit, a.Body));
                 eventValid = true;
             }
             return nextEvent.Time;
@@ -902,7 +929,7 @@ namespace Kare.Space.Core
             var v = Active;
             if (v?.Node != null)
             {
-                double burn = FlightControl.BurnTime(v, v.Node.Total);
+                double burn = FlightControl.StagedBurnTime(v, v.Node.Total);
                 if (double.IsInfinity(burn)) burn = 0;
                 limit = Math.Min(limit, v.Node.Time - burn / 2 - NodeWarpMargin);
             }
@@ -934,7 +961,7 @@ namespace Kare.Space.Core
                     EnterRails(a);
                     if (!eventValid)
                     {
-                        nextEvent = PatchedConics.FindNext(a.Orbit, a.Body, Time, PatchedConics.DefaultHorizon(a.Orbit));
+                        nextEvent = PatchedConics.FindNext(a.Orbit, a.Body, Time, PatchedConics.DefaultHorizon(a.Orbit, a.Body));
                         eventValid = true;
                     }
                 }
@@ -946,8 +973,11 @@ namespace Kare.Space.Core
 
                 if (nextEvent.Type != TransitionType.None && stop >= nextEvent.Time)
                 {
+                    int warpBefore = WarpIndex;
                     HandleTransition(a, nextEvent);
                     eventValid = false;
+                    // Ускорение снижено у новой цели — остаток кадра не доигрывать на старом.
+                    if (WarpIndex < warpBefore) break;
                     // После смены тела предел другой: посадку на Луну планируют уже в её сфере влияния.
                     limit = WarpLimitTime();
                     if (nextEvent.Type == TransitionType.Atmosphere) break;
@@ -1039,6 +1069,18 @@ namespace Kare.Space.Core
                     Post(tr.Type == TransitionType.Escape
                         ? $"Выход из сферы влияния → {v.Body.Name}"
                         : $"Вход в сферу влияния: {v.Body.Name}");
+                    // Ручное ускорение у новой цели — не выше того, что оставляет AutoWarpLead секунд до перицентра:
+                    // на ×10⁷ пролёт Сатурна (≈ 50 сут в сфере) проходил за пару кадров — ни колец, ни коррекции (§6.11).
+                    if (tr.Type == TransitionType.Encounter && !autoDriving)
+                    {
+                        double tPe = v.Orbit.TimeToPeriapsis(Time);
+                        int cap = tPe > 0 ? Ladder(tPe, Warps.Length - 1) : 0;
+                        if (WarpIndex > cap)
+                        {
+                            SetWarp(cap);
+                            Post($"Ускорение снижено до ×{Warps[cap]:0}: подход к телу {v.Body.Name}");
+                        }
+                    }
                     break;
                 }
                 case TransitionType.Atmosphere:

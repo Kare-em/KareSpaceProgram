@@ -125,6 +125,11 @@ namespace Kare.Space.Core
         const double PorkTofMin = 0.6, PorkTofMax = 1.4;
         /// <summary>Цена Δv в метрах промаха у планеты: 1 м/с ≈ 100 км — промах в тысячи км дешевле лишнего разгона.</summary>
         const double PlanetDvPenalty = 1e5;
+        /// <summary>Захват в оценке окна — эллипс с апоцентром на этой доле SOI цели.
+        /// Пара: MapView.CaptureApoSoi (та же оценка в меню перелётов).</summary>
+        const double PorkCaptureApoSoi = 0.5;
+        /// <summary>Горизонт поиска сближения для коррекции, лет — как прогноз вокруг Солнца (PatchedConics.HelioHorizonYears).</summary>
+        const double HelioCorrectionYears = 40;
 
         /// <summary>Синодический период двух тел одного родителя, с: через столько повторяется окно старта.</summary>
         public static double SynodicPeriod(CelestialBody a, CelestialBody b, double t)
@@ -160,6 +165,14 @@ namespace Kare.Space.Core
             double aH = 0.5 * (rb0.magnitude + rt0.magnitude);
             double tH = Math.PI * Math.Sqrt(aH * aH * aH / sun.Mu);
             var pro = Vector3d.Cross(rb0, vb0).normalized;
+            // Цена окна — Δv с ЭТОЙ опорной орбиты, а не сумма избытков: разгон у перицентра (Оберт) с поворотом
+            // на угол β асимптоты к плоскости орбиты, плюс захват у цели. Сумма |v∞| выбирала к Сатурну переход на 160°
+            // с асимптотой 48° к экваториальной орбите: узел 13,9 км/с вместо 8,1 (замер 15.10.2026, вылет с 300 км).
+            var hPark = Vector3d.Cross(r, v).normalized;
+            double rq = orbit.PeriapsisRadius, vq = Math.Sqrt(body.Mu * (2 / rq - 1 / orbit.A));
+            double rqT = Math.Max(targetMiss, target.Radius * 1.05);
+            double raT = Math.Max(rqT, PorkCaptureApoSoi * target.SoiRadius);
+            double vqT = Math.Sqrt(2 * target.Mu * raT / (rqT * (rqT + raT)));
 
             double bestPork = double.PositiveInfinity, dep = double.NaN, tof = double.NaN;
             Vector3d vInf = Vector3d.zero;
@@ -173,7 +186,13 @@ namespace Kare.Space.Core
                     double tf = tH * (PorkTofMin + (PorkTofMax - PorkTofMin) * j / (PorkTofs - 1));
                     target.LocalStateAt(td + tf, out var rt, out var vt);
                     if (!Lambert.Solve(rb, rt, tf, sun.Mu, pro, out var v1, out var v2)) continue;
-                    double c = (v1 - vb).magnitude + (v2 - vt).magnitude;
+                    var vi = v1 - vb;
+                    double vinf = vi.magnitude, va = (v2 - vt).magnitude;
+                    double sinB = vinf > 0 ? Math.Min(1, Math.Abs(Vector3d.Dot(vi, hPark)) / vinf) : 0;
+                    double vp = Math.Sqrt(vinf * vinf + 2 * body.Mu / rq);
+                    double depart = Math.Sqrt(Math.Max(0, vq * vq + vp * vp - 2 * vq * vp * Math.Sqrt(1 - sinB * sinB)));
+                    double capture = Math.Sqrt(va * va + 2 * target.Mu / rqT) - vqT;
+                    double c = depart + capture;
                     if (c < bestPork)
                     {
                         bestPork = c;
@@ -184,6 +203,20 @@ namespace Kare.Space.Core
                 }
             }
             if (double.IsNaN(dep)) return null;
+            return PlanDeparture(body, r, v, t0, vInf, dep, target, targetMiss, tof);
+        }
+
+        /// <summary>
+        /// Разгон с опорной орбиты к заданному гиперболическому избытку vInf, когда окно уже выбрано: dep — конец витка
+        /// старта, tof — перелёт до цели. Момент на витке и импульс по асимптоте, затем спуск по промаху у цели.
+        /// Отдельно от PlanInterplanetary: «Вояджеру» окно задаёт тур с гравманёврами (TourPlanner), а не минимум Δv.
+        /// </summary>
+        public static TransferPlan PlanDeparture(CelestialBody body, Vector3d r, Vector3d v, double t0, Vector3d vInf,
+            double dep, CelestialBody target, double targetMiss, double tof)
+        {
+            var sun = body.Parent;
+            var orbit = KeplerOrbit.FromState(r, v, body.Mu, t0);
+            if (sun == null || !orbit.IsElliptic) return null;
 
             // Момент на витке: перебор за виток до окна, импульс по скорости до нужного избытка.
             double period = orbit.Period, dt = period / 180;
@@ -225,6 +258,119 @@ namespace Kare.Space.Core
             var best = DescendBy(cost, start, cost(start), new[] { dt / 8, 2, 2, 2 }, t0 + 60, out _);
             cost(best);
             return best;
+        }
+
+        /// <summary>Коррекция: импульс через столько секунд — успеть развернуться (пара: Universe.NodeWarpMargin).</summary>
+        const double CorrectionLead = 3600;
+        /// <summary>Перицентр у цели после коррекции, в радиусах: 3 R — снаружи колец Сатурна (2,3 R).</summary>
+        const double CorrectionPeRadii = 3;
+        const int CorrectionSamples = 200;
+
+        /// <summary>
+        /// Коррекция на перелёте (GDD §6.11): с орбиты вокруг родителя цели (Солнце → Сатурн) — импульс через
+        /// CorrectionLead, Ламберт до точки прицела у цели с наименьшим Δv по времени прибытия (0,5–1,5 текущего).
+        /// Без неё 8-минутный разгон Р-7 к Сатурну промахивался мимо сферы, а автоплан отвечал «с замкнутой орбиты».
+        /// Прицел — прицельная дальность под перицентр CorrectionPeRadii с учётом фокусировки притяжением цели,
+        /// с той же стороны, с какой корабль проходит сейчас.
+        /// </summary>
+        public static TransferPlan PlanCorrection(CelestialBody body, Vector3d r, Vector3d v, double t0, CelestialBody target) =>
+            PlanCorrection(body, r, v, t0, target, (ta, rel, vrel, h) =>
+            {
+                // Сторона и скорость пролёта — по текущей траектории.
+                var u = vrel.normalized;
+                var side = rel - u * Vector3d.Dot(rel, u);
+                if (side.sqrMagnitude < 1) side = Vector3d.Cross(u, h);
+                double rp = CorrectionPeRadii * target.Radius, vinf2 = Math.Max(vrel.sqrMagnitude, 1);
+                return side.normalized * (rp * Math.Sqrt(1 + 2 * target.Mu / (rp * vinf2)));
+            }, CorrectionLead, 1);
+
+        /// <summary>
+        /// Точка прицела у цели в момент прибытия ta по прогнозу: rel — где корабль относительно цели,
+        /// vrel — скорость относительно неё, h — нормаль орбиты корабля. Возвращает смещение от центра цели, м.
+        /// </summary>
+        public delegate Vector3d AimPoint(double ta, Vector3d rel, Vector3d vrel, Vector3d h);
+
+        /// <summary>
+        /// Коррекция к произвольной точке прицела (картинная плоскость гравманёвра — TourPlanner). passes > 1 —
+        /// точка пересчитывается по траектории ПОСЛЕ коррекции: от неё зависит избыток у цели, а с ним и прицел.
+        /// lead — через сколько импульс: прожиг зонда с ЖРД по 0,9 Н идёт десятки минут, его центр должен успеть.
+        /// </summary>
+        public static TransferPlan PlanCorrection(CelestialBody body, Vector3d r, Vector3d v, double t0, CelestialBody target,
+            AimPoint aim, double lead, int passes)
+        {
+            if (target.Parent != body) return null;
+            var orbit = KeplerOrbit.FromState(r, v, body.Mu, t0);
+            double tc = t0 + lead;
+            orbit.GetState(tc, out var rc, out var vc);
+            double horizon = HelioCorrectionYears * 365.25 * 86400;
+            double span = orbit.IsElliptic ? Math.Min(orbit.Period, horizon) : horizon;
+            ClosestApproach(orbit, target, tc, span, out double ta0);
+            double tof0 = ta0 - tc;
+            if (tof0 < lead) return null;
+
+            var h = Vector3d.Cross(rc, vc).normalized;
+            target.LocalStateAt(ta0, out var rt0, out var vt0);
+            orbit.GetState(ta0, out var rs0, out var vs0);
+            var offset = aim(ta0, rs0 - rt0, vs0 - vt0, h);
+            TransferPlan plan = null;
+            for (int pass = 0; pass < passes; pass++)
+            {
+                plan = SolveCorrection(body, target, rc, vc, h, tc, tof0, offset, out double bestT, out var dv);
+                if (plan == null || pass + 1 >= passes) break;
+                var after = KeplerOrbit.FromState(rc, vc + dv, body.Mu, tc);
+                target.LocalStateAt(bestT, out var rt, out var vt);
+                after.GetState(bestT, out var rs, out var vs);
+                offset = aim(bestT, rs - rt, vs - vt, h);
+            }
+            return plan;
+        }
+
+        /// <summary>Ламберт из (rc, vc) в точку «цель + offset» с наименьшим Δv по времени прибытия (0,5–1,5 tof0).</summary>
+        static TransferPlan SolveCorrection(CelestialBody body, CelestialBody target, Vector3d rc, Vector3d vc, Vector3d h,
+            double tc, double tof0, Vector3d offset, out double bestT, out Vector3d dvBest)
+        {
+            dvBest = Vector3d.zero;
+            Func<double, Vector3d?> solve = ta =>
+            {
+                target.LocalStateAt(ta, out var rt, out _);
+                if (!Lambert.Solve(rc, rt + offset, ta - tc, body.Mu, h, out var v1, out _)) return null;
+                return v1 - vc;
+            };
+            double lo = tc + 0.5 * tof0, hi = tc + 1.5 * tof0, step = (hi - lo) / CorrectionSamples;
+            bestT = double.NaN;
+            double best = double.PositiveInfinity;
+            for (int i = 0; i <= CorrectionSamples; i++)
+            {
+                double ta = lo + i * step;
+                var dv = solve(ta);
+                if (dv.HasValue && dv.Value.magnitude < best) { best = dv.Value.magnitude; bestT = ta; }
+            }
+            if (double.IsNaN(bestT)) return null;
+            // Уточнение золотым сечением в соседних шагах сетки.
+            double a = bestT - step, b = bestT + step;
+            const double g = 0.6180339887498949;
+            for (int i = 0; i < 50 && b - a > 1; i++)
+            {
+                double x1 = b - g * (b - a), x2 = a + g * (b - a);
+                var d1 = solve(x1); var d2 = solve(x2);
+                double f1 = d1.HasValue ? d1.Value.magnitude : double.PositiveInfinity;
+                double f2 = d2.HasValue ? d2.Value.magnitude : double.PositiveInfinity;
+                if (f1 < f2) b = x2; else a = x1;
+                if (Math.Min(f1, f2) < best) { best = Math.Min(f1, f2); bestT = f1 < f2 ? x1 : x2; }
+            }
+            dvBest = solve(bestT).Value;
+            var pro = vc.normalized;
+            var rad = Vector3d.Cross(pro, h);
+            var plan = new TransferPlan
+            {
+                Time = tc,
+                Prograde = Vector3d.Dot(dvBest, pro),
+                Normal = Vector3d.Dot(dvBest, h),
+                Radial = Vector3d.Dot(dvBest, rad),
+            };
+            var after = KeplerOrbit.FromState(rc, vc + dvBest, body.Mu, tc);
+            plan.Miss = ClosestApproach(after, target, tc, 1.5 * (bestT - tc), out plan.ArrivalTime);
+            return plan;
         }
 
         /// <summary>Гипербола ухода после импульса: момент выхода из сферы влияния и состояние относительно родителя.</summary>

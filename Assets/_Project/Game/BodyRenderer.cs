@@ -48,19 +48,11 @@ namespace Kare.Space.Game
         }
 
         public BodyMapSet[] Maps;
-        [Tooltip("Кольца Сатурна (Solar System Scope): полоса, x — радиус от RingInner до RingOuter, альфа — плотность")]
+        [Tooltip("Кольца Сатурна (Solar System Scope): рябь и оттенок внутри колец, привязка — RingProfiles.StripCol")]
         public Texture2D SaturnRing;
 
         /// <summary>Пиксели Small для SurfaceColor: тот вызывается из Parallel.For, Texture2D там трогать нельзя.</summary>
         static readonly Dictionary<string, (Color32[] Px, int W, int H)> smallPx = new Dictionary<string, (Color32[], int, int)>();
-
-        /// <summary>
-        /// Кольца Сатурна по полосе SSS, м от центра: край C на ≈ 290-м столбце из 8192, щель Кассини
-        /// (117 580–122 170 км) — на 5450–5850, внешний край A (136 775 км) — на 7650, щель Энке — на 7296.
-        /// Линейная подгонка по этим трём меткам даёт 8,44 км на столбец. Пара: SaturnRing.png — меняешь одно, правь второе.
-        /// </summary>
-        const double RingInner = 72.2e6, RingOuter = 141.35e6;
-        const int RingSegments = 256;
 
         BodyMapSet MapFor(string id)
         {
@@ -202,7 +194,7 @@ namespace Kare.Space.Game
                 }
                 BuildLod(e);
                 SetupGround(e);
-                if (b.Id == "saturn" && SaturnRing != null) AddRing(e);
+                if (RingProfiles.Has(b.Id)) PlanetRings.Attach(e.Tr, b, e.SphereRadius, SaturnRing);
                 mr.sharedMaterial = e.Mat;
                 // Тени от планеты на планету рисовать бессмысленно (каскады 2 км), затмения — SunLight.
                 mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -316,52 +308,6 @@ namespace Kare.Space.Game
         {
             lod.Add(o);
             return o;
-        }
-
-        /// <summary>
-        /// Кольца Сатурна (§9.4): плоское кольцо в экваторе — ребёнок сферы, поворот и сжатие оболочки берёт от неё
-        /// (единица сетки — SphereRadius). Lit, двусторонний: с теневой стороны колец свет проходит слабее — темнее.
-        /// Тень планеты на кольцах не рисуется (тела теней не отбрасывают, см. Start).
-        /// </summary>
-        void AddRing(Entry e)
-        {
-            var go = new GameObject("Rings");
-            go.transform.SetParent(e.Tr, false);
-            float r0 = (float)(RingInner / e.SphereRadius), r1 = (float)(RingOuter / e.SphereRadius);
-            int n = RingSegments;
-            var verts = new Vector3[(n + 1) * 2];
-            var uvs = new Vector2[verts.Length];
-            var tris = new int[n * 6];
-            for (int i = 0; i <= n; i++)
-            {
-                float a = 2 * Mathf.PI * i / n, c = Mathf.Cos(a), s = Mathf.Sin(a);
-                verts[i * 2] = new Vector3(c * r0, 0, s * r0);
-                verts[i * 2 + 1] = new Vector3(c * r1, 0, s * r1);
-                uvs[i * 2] = new Vector2(0, (float)i / n);
-                uvs[i * 2 + 1] = new Vector2(1, (float)i / n);
-                if (i == n) continue;
-                int k = i * 6, v = i * 2;
-                tris[k] = v; tris[k + 1] = v + 1; tris[k + 2] = v + 2;
-                tris[k + 3] = v + 2; tris[k + 4] = v + 1; tris[k + 5] = v + 3;
-            }
-            var mesh = new Mesh { name = "Rings" };
-            mesh.vertices = verts;
-            mesh.uv = uvs;
-            mesh.triangles = tris;
-            mesh.normals = System.Array.ConvertAll(verts, _ => Vector3.up);
-            mesh.RecalculateBounds();
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var mr = go.AddComponent<MeshRenderer>();
-            var m = new Material(BaseMaterial) { name = "Rings" };
-            m.SetColor("_BaseColor", Color.white);
-            m.SetFloat("_Smoothness", 0);
-            m.SetFloat("_Metallic", 0);
-            m.SetFloat("_EnableFogOnTransparent", 0);
-            m.SetFloat("_DoubleSidedEnable", 1);
-            m.SetTexture("_BaseColorMap", SaturnRing);
-            HDMaterial.SetSurfaceType(m, true); // внутри — ValidateMaterial (ставит и двусторонность)
-            mr.sharedMaterial = m;
-            mr.shadowCastingMode = ShadowCastingMode.Off;
         }
 
         /// <summary>Анизотропия облаков: слой с орбиты виден под скользящим углом у горизонта.</summary>

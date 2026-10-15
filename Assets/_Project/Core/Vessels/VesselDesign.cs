@@ -65,6 +65,8 @@ namespace Kare.Space.Core
         ShuttleOrbiter, ShuttleET, ShuttleSRB, Buran, EnergiaCore, EnergiaBlockA,
         // SpaceX (Tools/blender/spacex_parts.py): Super Heavy, Starship, кольцо горячего разделения.
         SuperHeavy, Starship, HotStageRing,
+        // «Вояджер» (Tools/blender/voyager_parts.py): ядро «Титана IIIE», РДТТ UA1205, разгонный модуль TE-M-364-4, зонд.
+        Titan3Core, TitanSRB, VoyagerPM, Voyager,
     }
 
     public enum SectionKind
@@ -613,6 +615,8 @@ namespace Kare.Space.Core
                 case "surveyor": return AtlasCentaurSurveyor();
                 case "apollo8": return SaturnApollo8();
                 case "apollo11": return SaturnApollo11();
+                case "voyager1": return TitanCentaurVoyager(1);
+                case "voyager2": return TitanCentaurVoyager(2);
                 default: return ModernById(id) ?? WingedById(id) ?? SpaceXById(id) ?? Kara1Heavy(); // после «Аполлона» — StationRockets.cs, крылатые — WingedRockets.cs
             }
         }

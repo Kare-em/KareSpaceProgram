@@ -15,7 +15,7 @@ namespace Kare.Space.Game
     /// подписи тела. Линии орбиты от фокуса не зависят — меняется только центр облёта.
     /// </summary>
     [DefaultExecutionOrder(110)]
-    public sealed class MapView : MonoBehaviour
+    public sealed partial class MapView : MonoBehaviour
     {
         public static bool IsOpen { get; private set; }
         static MapView instance;
@@ -39,8 +39,9 @@ namespace Kare.Space.Game
         const float BodyFocusRadii = 4;
         /// <summary>Фокус на борту: стартовая дистанция и ближний предел, м (борт — метка, меш на карте скрыт).</summary>
         const float VesselFocusDistance = 2e6f, VesselFocusMin = 1e3f;
-        /// <summary>Дальний предел зума, м: ≈ 3,3 а. е. — от Солнца видны орбиты до пояса астероидов.</summary>
-        const float MaxDistance = 5e11f;
+        /// <summary>Дальний предел зума, м: ≈ 67 а. е. — от Солнца в кадр входит орбита Нептуна (30 а. е.).
+        /// Пара: дальняя плоскость карты — distance·20, ближняя — distance·1e-4 (см. LateUpdate).</summary>
+        const float MaxDistance = 1e13f;
 
         static readonly Color[] PatchColors =
         {
@@ -61,11 +62,11 @@ namespace Kare.Space.Game
 
         float distance, yaw = 20, pitch = 50;
         float near0, far0;
-        readonly List<LineRenderer> lines = new List<LineRenderer>();
+        readonly List<Ribbon> lines = new List<Ribbon>();
         List<OrbitPatch> patches;
         float nextPredict;
         /// <summary>Точек на патч (§9.6) — DetailSettings.MapPoints; буфер пересоздаётся при смене уровня.</summary>
-        Vector3[] buf = new Vector3[0]; // PlayerPrefs нельзя читать из инициализатора поля — размер ставит Draw
+        Vector3d[] buf = new Vector3d[0]; // PlayerPrefs нельзя читать из инициализатора поля — размер ставит Draw
         readonly List<Mark> marks = new List<Mark>();
         readonly List<Rect> placed = new List<Rect>();
         GUIStyle markStyle;
@@ -87,7 +88,12 @@ namespace Kare.Space.Game
         void OnDestroy()
         {
             if (instance == this) { instance = null; IsOpen = false; BodyRenderer.Compression = true; }
+            foreach (var l in lines) l.Destroy();
         }
+
+        /// <summary>Ноль Unity на карте — центр тела в фокусе (FloatingOrigin): точность float у камеры карты.
+        /// null — фокус на борту или карта закрыта, ноль как в полёте.</summary>
+        public static Vector3d? OriginOverride => IsOpen && instance != null && instance.focus != null ? instance.focus.Position : (Vector3d?)null;
 
         /// <summary>Выбранное на карте тело (Tab) — цель для P «манёвр к цели»; null — карта закрыта или фокус на борту.</summary>
         public static CelestialBody Focus => IsOpen ? instance?.focus : null;
@@ -98,6 +104,7 @@ namespace Kare.Space.Game
             IsOpen = !IsOpen;
             BodyRenderer.Compression = !IsOpen;
             instance.OnToggle();
+            FloatingOrigin.Refresh(); // ноль переезжает к фокусу карты и обратно — без кадра со старым нулём
         }
 
         void OnToggle()
@@ -123,7 +130,7 @@ namespace Kare.Space.Game
             {
                 Camera.nearClipPlane = near0;
                 Camera.farClipPlane = far0;
-                foreach (var l in lines) l.gameObject.SetActive(false);
+                foreach (var l in lines) l.Go.SetActive(false);
             }
         }
 
@@ -135,6 +142,7 @@ namespace Kare.Space.Game
             if (Input.GetKeyDown(KeyCode.Tab)) CycleFocus(u, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1);
             // Ось облёта — полюс тела в фокусе; у борта — полюс тела, вокруг которого он летит.
             var body = focus ?? v.Body;
+            FloatingOrigin.Refresh(); // фокус мог смениться (Tab) — ноль за ним, до расчёта камеры и линий
 
             if (Input.GetMouseButton(1))
             {
@@ -166,8 +174,9 @@ namespace Kare.Space.Game
             int used = 0;
             marks.Clear();
             marks.Add(new Mark { World = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v)), Text = "▲ " + v.Name, Color = Color.white });
-            float width = distance * LineWidth;
-            if (buf.Length != DetailSettings.MapPoints + 1) buf = new Vector3[DetailSettings.MapPoints + 1];
+            // Толщина — множитель к LineWidth от расстояния камеры до каждой точки (SetLine): пиксели одинаковые вблизи и вдали.
+            float width = 1;
+            if (buf.Length != DetailSettings.MapPoints + 1) buf = new Vector3d[DetailSettings.MapPoints + 1];
 
             if (patches != null)
             {
@@ -213,7 +222,7 @@ namespace Kare.Space.Game
                 SetLine(used++, Sample(o, other.Body, u.Time, end, buf), OtherVesselColor, width * BodyOrbitWidth);
                 marks.Add(new Mark { World = FloatingOrigin.ToUnity(FloatingOrigin.WorldP(other)), Text = "△ " + other.Name, Color = OtherVesselColor });
             }
-            for (int i = used; i < lines.Count; i++) lines[i].gameObject.SetActive(false);
+            for (int i = used; i < lines.Count; i++) lines[i].Go.SetActive(false);
             // Подписи тел из списка фокуса: по ним видно, где Луна или Марс, и по клику — облёт вокруг.
             foreach (var b in focusList)
                 if (b != null && b != focus)
@@ -324,13 +333,13 @@ namespace Kare.Space.Game
         /// Шаг — по истинной аномалии, а не по времени: у вытянутой орбиты (перелёт к Луне, e ≈ 0,97) почти все
         /// равные по времени точки ложились у апоцентра, а перицентр рисовался ломаной из пары отрезков.
         /// </summary>
-        static int Sample(KeplerOrbit o, CelestialBody body, double t0, double t1, Vector3[] outPts)
+        static int Sample(KeplerOrbit o, CelestialBody body, double t0, double t1, Vector3d[] outPts)
         {
             var bodyU = body.Position;
             int n = outPts.Length;
             double nu0 = UnwrappedTrueAnomaly(o, t0), nu1 = UnwrappedTrueAnomaly(o, t1);
             for (int i = 0; i < n; i++)
-                outPts[i] = FloatingOrigin.ToUnity(bodyU + o.PositionAtTrueAnomaly(nu0 + (nu1 - nu0) * i / (n - 1)));
+                outPts[i] = FloatingOrigin.ToUnityD(bodyU + o.PositionAtTrueAnomaly(nu0 + (nu1 - nu0) * i / (n - 1)));
             return n;
         }
 
@@ -344,7 +353,7 @@ namespace Kare.Space.Game
             return KeplerSolver.MeanToTrue(m - 2 * System.Math.PI * k, o.E) + 2 * System.Math.PI * k;
         }
 
-        static int? Ring(CelestialBody body, Vector3d normal, double radius, Vector3[] outPts)
+        static int? Ring(CelestialBody body, Vector3d normal, double radius, Vector3d[] outPts)
         {
             if (normal.sqrMagnitude < 1e-12) return null;
             var e1 = Vector3d.AnyPerpendicular(normal).normalized;
@@ -353,36 +362,96 @@ namespace Kare.Space.Game
             for (int i = 0; i < n; i++)
             {
                 double a = 2 * System.Math.PI * i / (n - 1);
-                outPts[i] = FloatingOrigin.ToUnity(body.Position + (e1 * System.Math.Cos(a) + e2 * System.Math.Sin(a)) * radius);
+                outPts[i] = FloatingOrigin.ToUnityD(body.Position + (e1 * System.Math.Cos(a) + e2 * System.Math.Sin(a)) * radius);
             }
             return n;
         }
 
+        /// <summary>
+        /// Линия карты — своя лента-меш, повёрнутая к камере, а не LineRenderer: LineRenderer дальше ≈ 1e10 м от
+        /// камеры не рисовался вовсе (орбиты пропадали на зуме, замер 15.10.2026: 1e9 — видно, 1e10/1e11 — нет).
+        /// Вершины считаются в double относительно камеры, объект стоит в её точке — float теряет точность
+        /// только в разнице, а она мала рядом с камерой и не важна вдали. Толщина width — доля LineWidth от
+        /// расстояния до каждой точки, то есть постоянная в пикселях.
+        /// </summary>
         void SetLine(int i, int n, Color col, float width)
         {
-            var line = GetLine(i);
-            line.sharedMaterial.SetColor("_UnlitColor", col * LineBrightness);
-            line.positionCount = n;
-            line.SetPositions(buf);
-            line.widthMultiplier = width;
-            line.gameObject.SetActive(true);
+            if (n < 2) return;
+            var r = GetLine(i);
+            r.Mat.SetColor("_UnlitColor", col * LineBrightness);
+            var cp = Camera.transform.position;
+            var cam = new Vector3d(cp.x, cp.y, cp.z);
+            double k = 0.5 * LineWidth * width;
+            r.Ensure(n);
+            for (int j = 0; j < n; j++)
+            {
+                var p = buf[j] - cam;
+                var tan = buf[j < n - 1 ? j + 1 : j] - buf[j > 0 ? j - 1 : j];
+                var side = Vector3d.Cross(tan, p);
+                double sm = side.magnitude;
+                side = sm > 0 ? side * (k * p.magnitude / sm) : Vector3d.zero;
+                r.Verts[2 * j] = FloatingOrigin.ToVector3(p - side);
+                r.Verts[2 * j + 1] = FloatingOrigin.ToVector3(p + side);
+            }
+            r.Mesh.vertices = r.Verts;
+            r.Mesh.RecalculateBounds();
+            r.Go.transform.SetPositionAndRotation(cp, Quaternion.identity);
+            r.Go.SetActive(true);
         }
 
-        LineRenderer GetLine(int i)
+        Ribbon GetLine(int i)
         {
             while (lines.Count <= i)
-            {
-                var go = new GameObject($"Orbit {lines.Count}");
-                go.transform.SetParent(transform, false);
-                var l = go.AddComponent<LineRenderer>();
-                l.useWorldSpace = true;
-                l.numCapVertices = 0;
-                l.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                l.receiveShadows = false;
-                l.sharedMaterial = LineMaterial != null ? new Material(LineMaterial) : new Material(Shader.Find("HDRP/Unlit"));
-                lines.Add(l);
-            }
+                lines.Add(new Ribbon($"Orbit {lines.Count}", LineMaterial != null ? new Material(LineMaterial) : new Material(Shader.Find("HDRP/Unlit"))));
             return lines[i];
+        }
+
+        /// <summary>Лента из пар вершин (слева/справа от точки) — n − 1 четырёхугольников.</summary>
+        sealed class Ribbon
+        {
+            public readonly GameObject Go;
+            public readonly Mesh Mesh;
+            public readonly Material Mat;
+            public Vector3[] Verts = new Vector3[0];
+
+            public Ribbon(string name, Material mat)
+            {
+                // Без родителя: масштаб и поворот MapView не должны попадать в вершины, посчитанные от камеры.
+                Go = new GameObject(name);
+                Mesh = new Mesh { name = name };
+                Mesh.MarkDynamic();
+                Go.AddComponent<MeshFilter>().sharedMesh = Mesh;
+                var mr = Go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = Mat = mat;
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                // Лента перестраивается каждый кадр вслед за камерой — векторы движения дали бы смаз (motion blur).
+                mr.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+            }
+
+            public void Ensure(int n)
+            {
+                if (Verts.Length == 2 * n) return;
+                Verts = new Vector3[2 * n];
+                var tris = new int[(n - 1) * 6];
+                for (int j = 0; j < n - 1; j++)
+                {
+                    // Лицом к камере: сторона = касательная × луч от камеры, и обход (L0, L1, R0) даёт нормаль на зрителя.
+                    int v = 2 * j, k = 6 * j;
+                    tris[k] = v; tris[k + 1] = v + 2; tris[k + 2] = v + 1;
+                    tris[k + 3] = v + 1; tris[k + 4] = v + 2; tris[k + 5] = v + 3;
+                }
+                Mesh.Clear();
+                Mesh.vertices = Verts;
+                Mesh.triangles = tris;
+            }
+
+            public void Destroy()
+            {
+                if (Go != null) Object.Destroy(Go);
+                Object.Destroy(Mesh);
+                Object.Destroy(Mat);
+            }
         }
 
         void OnGUI()
@@ -417,9 +486,10 @@ namespace Kare.Space.Game
                 }
             }
             FocusPanel(u);
+            TransferPanel(u);
             GUI.color = Color.white;
             markStyle.normal.textColor = Color.white;
-            var hint = "КАРТА · ПКМ — вращать, колесо — масштаб, Tab — фокус, N — манёвр, M — назад";
+            var hint = "КАРТА · ПКМ — вращать, колесо — масштаб, Tab — фокус, F6 — перелёты, N — манёвр, M — назад";
             float hw = markStyle.CalcSize(new GUIContent(hint)).x;
             GUI.Label(new Rect((Screen.width - hw) * 0.5f, Screen.height - 165, hw, 22), hint, markStyle); // над нижними панелями HUD
         }
@@ -445,6 +515,11 @@ namespace Kare.Space.Game
                 if (GUI.Button(new Rect(x, y, wdt, rowH), name, listStyle)) SetFocus(u.Active, b);
                 y += rowH;
             }
+
+            // Меню перелётов (F6) — кнопкой тоже: клавишу на карте не видно.
+            GUI.color = transfersOpen ? new Color(0.45f, 0.85f, 1f) : Color.white;
+            if (GUI.Button(new Rect(x, y + 6, wdt, rowH), "Перелёты (F6)", listStyle)) { transfersOpen = !transfersOpen; nextRows = 0; planResult = null; }
+            y += rowH + 6;
 
             // Аппараты (§6.13): щелчок — управление им, как PageUp/PageDown. Сначала управляемые, обломки — следом,
             // не больше VesselRows строк: после пакета Р-7 обломков с десяток.

@@ -432,3 +432,14 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
 - `Destroy` is deferred: old preview children still count in bounds in the same frame → `SetParent(null, false)` before Destroy.
 - Condensation effects (vapor cone, wingtip vortices) — lit transparent smoke material, not emissive: additive emission is
   invisible in daylight below ~1e4 nits. LineRenderer with a lit material needs `generateLightingData = true`, else it is black.
+
+## Map at solar-system scale, Saturn rings (15.10.2026, `MapView.cs`, `BodyRenderer.AddRing`)
+- **Rings vanished from one side:** HDRP double-sided with `_DoubleSidedNormalMode = Mirror` flips the normal on back faces;
+  the ring mesh winding faced down while normals pointed up → lit side black / culled. Winding must face along the supplied
+  normal (Unity front = `Cross(b-a, c-a)`), plus tangents `(1,0,0,1)` — Lit reads them.
+- **LineRenderer is not drawn at ≥ 1e10 m from the camera** (measured: 1e9 visible, 1e10/1e11 not) — map orbits vanished on
+  zoom-out. Replaced with a camera-facing ribbon mesh (`MapView.Ribbon`): vertices in double relative to the camera, GameObject
+  at the camera position, half-width `0.5·LineWidth·|p−cam|` (constant pixels), `ForceNoMotion` (else motion blur smears it).
+- **Planet orbits jittered** on the map: float ulp at 1.3e12 m (Saturn) ≈ 131 km. The floating origin moves to the map focus
+  body while the map is open (`MapView.OriginOverride`, `FloatingOrigin.Refresh` on toggle and every LateUpdate).
+- Map zoom limit `MaxDistance = 1e13` (≈ 67 AU) is paired with the map camera near/far = distance·1e-4 / ·20.
