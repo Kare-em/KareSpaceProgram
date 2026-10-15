@@ -443,3 +443,8 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
 - **Planet orbits jittered** on the map: float ulp at 1.3e12 m (Saturn) ≈ 131 km. The floating origin moves to the map focus
   body while the map is open (`MapView.OriginOverride`, `FloatingOrigin.Refresh` on toggle and every LateUpdate).
 - Map zoom limit `MaxDistance = 1e13` (≈ 67 AU) is paired with the map camera near/far = distance·1e-4 / ·20.
+
+- **Plume width from the section diameter** (15.10.2026): Voyager's section radius is the 3.66 m HGA dish, Centaur's is the
+  tank — plumes came out wider than the vehicle and "from nowhere". Take the nozzle exit radius from the engine's
+  `NozzleArea` (core's SL thrust-loss area; for vacuum engines with ThrustSL = ThrustVac — from ≈ 1.5 atm exit pressure).
+  Same rule for RCS: jet length by section radius gave 1.3 m cones on 0.89 N thrusters → explicit `MicroThrusterLength`.

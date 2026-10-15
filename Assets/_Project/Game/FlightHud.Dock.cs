@@ -47,7 +47,7 @@ namespace Kare.Space.Game
             float x = r.x + 10, y = r.y + 4;
             GUI.Label(new Rect(x, y, DockPanelW - 20, 22), $"<b>СТЫКОВКА</b> · {tg.Name}", small);
             GUI.color = Dim;
-            GUI.Label(new Rect(x, y + 18, DockPanelW - 20, 20), u.Docking != null ? "ведёт автопилот (V — снять)" : "вручную · Tab — выйти", small);
+            GUI.Label(new Rect(x, y + 18, DockPanelW - 20, 20), u.Docking != null ? $"ведёт автопилот ({KeyBinds.Label(Bind.Dock)} — снять)" : $"вручную · {KeyBinds.Label(Bind.DockMode)} — выйти", small);
             GUI.color = Color.white;
 
             // Квадрат прибора.

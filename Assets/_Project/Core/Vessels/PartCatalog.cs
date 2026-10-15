@@ -465,7 +465,7 @@ namespace Kare.Space.Core
             Add(new PartDef
             {
                 Id = "dock-1", Name = "Стыковочный узел", Category = PartCategory.Coupling, Diameter = 1, Length = 0.4, DryMass = 300,
-                DockingPort = true, Description = "Стыковка (V), §6.6",
+                DockingPort = true, Description = "Ставьте на самый верх. В полёте: V — автостыковка, Tab — ручная (§6.6)",
             });
 
             // ---------------------------------------------------------------- аэродинамика

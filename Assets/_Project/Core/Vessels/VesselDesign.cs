@@ -67,6 +67,9 @@ namespace Kare.Space.Core
         SuperHeavy, Starship, HotStageRing,
         // «Вояджер» (Tools/blender/voyager_parts.py): ядро «Титана IIIE», РДТТ UA1205, разгонный модуль TE-M-364-4, зонд.
         Titan3Core, TitanSRB, VoyagerPM, Voyager,
+        // «Кассини — Гюйгенс» (Tools/blender/cassini_parts.py): ядро «Титана IVB», РДТТ SRMU, орбитер, лобовой экран,
+        // задняя крышка с основным парашютом, спускаемый модуль «Гюйгенса».
+        Titan4Core, Titan4SRMU, Cassini, HuygensShield, HuygensCover, Huygens,
     }
 
     public enum SectionKind
@@ -617,6 +620,7 @@ namespace Kare.Space.Core
                 case "apollo11": return SaturnApollo11();
                 case "voyager1": return TitanCentaurVoyager(1);
                 case "voyager2": return TitanCentaurVoyager(2);
+                case "cassini": return TitanCentaurCassini();
                 default: return ModernById(id) ?? WingedById(id) ?? SpaceXById(id) ?? Kara1Heavy(); // после «Аполлона» — StationRockets.cs, крылатые — WingedRockets.cs
             }
         }

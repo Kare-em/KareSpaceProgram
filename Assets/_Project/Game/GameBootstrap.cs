@@ -176,17 +176,29 @@ namespace Kare.Space.Game
             LoadHeight("mars", MarsHeight);
             LoadHeight("mercury", MercuryHeight);
             LoadHeight("venus", VenusHeight);
-            universe = MissionTracker.CreateUniverse(Mission, SolarSystem.CreateReal());
-            if (NextDesign != null)
+            // Загрузка сохранения (§10.3, SaveController): вселенная и трекер — из файла, а не со стола миссии.
+            var loaded = SaveController.TakePending(SolarSystem.CreateReal());
+            if (loaded != null)
             {
-                universe.Vessels.Remove(universe.Active);
-                universe.Launch(NextDesign, Mission.SiteId);
+                Mission = loaded.Mission;
+                universe = loaded.Universe;
+                Tracker = loaded.Tracker;
             }
-            Tracker = new MissionTracker(Mission);
+            else
+            {
+                universe = MissionTracker.CreateUniverse(Mission, SolarSystem.CreateReal());
+                if (NextDesign != null)
+                {
+                    universe.Vessels.Remove(universe.Active);
+                    universe.Launch(NextDesign, Mission.SiteId);
+                }
+                Tracker = new MissionTracker(Mission);
+            }
             universe.Message += OnMessage;
             Tracker.Changed += OnMessage;
             OnMessage($"Миссия «{Mission.Title}»: {Mission.Brief}");
             gameObject.AddComponent<PauseMenu>();
+            gameObject.AddComponent<SaveController>();
             gameObject.AddComponent<FlightView>();
             new GameObject("Flight Audio").AddComponent<FlightAudio>();
             if (PlumeMaterial != null && SmokeMaterial != null && VesselMaterial != null)

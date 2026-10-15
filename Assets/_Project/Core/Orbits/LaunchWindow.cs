@@ -70,7 +70,7 @@ namespace Kare.Space.Core
         }
 
         /// <summary>Нормаль плоскости орбиты при старте в момент t: зенит площадки × курс.</summary>
-        static Vector3d PlaneNormal(CelestialBody body, LaunchSite site, double azimuthDeg, double t)
+        public static Vector3d PlaneNormal(CelestialBody body, LaunchSite site, double azimuthDeg, double t)
         {
             var q = body.OrientationAt(t);
             var up = q * site.DirectionBodyFixed;

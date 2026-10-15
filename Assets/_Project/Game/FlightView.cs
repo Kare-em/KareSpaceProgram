@@ -77,7 +77,7 @@ namespace Kare.Space.Game
             if (companion == null) { u.Post("Нет ступени на возврате"); return; }
             focus = companion;
             PromptUntil = -1;
-            u.Post($"Вид: {focus.Name} — {u.Active.Name} летит сам. F2 — вернуться");
+            u.Post($"Вид: {focus.Name} — {u.Active.Name} летит сам. {KeyBinds.Label(Bind.StageFocus)} — вернуться");
         }
 
         /// <summary>F3: сплит-скрин.</summary>

@@ -61,6 +61,25 @@ namespace Kare.Space.Game
         static readonly Color AtmosphereColor = new Color(0.35f, 0.55f, 1f, 1f) * 0.6f;
 
         float distance, yaw = 20, pitch = 50;
+        /// <summary>Сдвиг центра облёта (СКМ) в осях Unity от точки фокуса, м. В осях мира, не камеры: сдвинули, потом
+        /// покрутили — вращение идёт вокруг сдвинутой точки, как в полёте (FlightCamera).</summary>
+        Vector3 pan;
+        float panTravel;
+        /// <summary>Сдвиг СКМ — доля дистанции на единицу оси мыши: точка под курсором идёт за рукой на любом масштабе.
+        /// Щелчок СКМ без сдвига (сумма осей меньше PanClick) возвращает центр на фокус.</summary>
+        const float PanSpeed = 0.06f, PanClick = 0.2f;
+
+        /// <summary>
+        /// Вид карты переживает закрытие (M): зум, углы, сдвиг, фокус и свой зум у каждого фокуса. Статика: экземпляр
+        /// MapView один на сцену, но вид принадлежит игроку. Привязан к Universe — новый сеанс (миссия, загрузка) начинает
+        /// с вида по умолчанию, а Play без перезагрузки домена не тащит чужой фокус.
+        /// </summary>
+        static Universe savedFor;
+        static string savedFocus = "";
+        static float savedDistance, savedYaw, savedPitch;
+        static Vector3 savedPan;
+        /// <summary>Дистанция по фокусам (ключ — Id тела, "" — борт): вернулся на Луну — прежний масштаб, а не «по умолчанию».</summary>
+        static readonly Dictionary<string, float> focusDistances = new Dictionary<string, float>();
         float near0, far0;
         readonly List<Ribbon> lines = new List<Ribbon>();
         List<OrbitPatch> patches;
@@ -116,22 +135,75 @@ namespace Kare.Space.Game
                 near0 = Camera.nearClipPlane;
                 far0 = Camera.farClipPlane;
                 var v = u.Active;
-                focus = v.Body;
-                distance = (float)System.Math.Max(v.Body.Radius * 4, v.Position.magnitude * 2.5);
-                // Камера — со стороны борта и чуть сверху: иначе борт и вход в атмосферу часто оказывались у лимба
-                // или за планетой, и траектория читалась наполовину.
-                var pole = FloatingOrigin.DirToUnity(v.Body.Orientation * Vector3d.forward);
-                var f = -(Quaternion.Inverse(Quaternion.FromToRotation(Vector3.up, pole)) * FloatingOrigin.DirToUnity(v.Position).normalized);
-                pitch = Mathf.Clamp(-Mathf.Asin(Mathf.Clamp(f.y, -1, 1)) * Mathf.Rad2Deg + ViewTilt, -89, 89);
-                yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
+                if (savedFor == u)
+                {
+                    // Тот же сеанс — вид как при закрытии. Тело могло исчезнуть из системы (null = борт) — тогда борт.
+                    focus = savedFocus.Length > 0 ? u.System.Get(savedFocus) : null;
+                    distance = savedDistance;
+                    yaw = savedYaw;
+                    pitch = savedPitch;
+                    pan = savedPan;
+                }
+                else
+                {
+                    focus = v.Body;
+                    distance = (float)System.Math.Max(v.Body.Radius * 4, v.Position.magnitude * 2.5);
+                    pan = Vector3.zero;
+                    focusDistances.Clear();
+                    AimAtVessel(v);
+                }
                 nextPredict = 0;
             }
             else
             {
+                Save();
                 Camera.nearClipPlane = near0;
                 Camera.farClipPlane = far0;
                 foreach (var l in lines) l.Go.SetActive(false);
             }
+        }
+
+        /// <summary>Запомнить вид на закрытие карты (см. savedFor).</summary>
+        void Save()
+        {
+            var u = GameBootstrap.U;
+            if (u == null) return;
+            savedFor = u;
+            savedFocus = focus != null ? focus.Id : "";
+            savedDistance = distance;
+            savedYaw = yaw;
+            savedPitch = pitch;
+            savedPan = pan;
+            focusDistances[savedFocus] = distance;
+        }
+
+        /// <summary>Углы камеры — со стороны борта и чуть сверху: иначе борт и вход в атмосферу часто оказывались у лимба
+        /// или за планетой, и траектория читалась наполовину.</summary>
+        void AimAtVessel(Vessel v)
+        {
+            var pole = FloatingOrigin.DirToUnity(v.Body.Orientation * Vector3d.forward);
+            var f = -(Quaternion.Inverse(Quaternion.FromToRotation(Vector3.up, pole)) * FloatingOrigin.DirToUnity(v.Position).normalized);
+            pitch = Mathf.Clamp(-Mathf.Asin(Mathf.Clamp(f.y, -1, 1)) * Mathf.Rad2Deg + ViewTilt, -89, 89);
+            yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
+        }
+
+        /// <summary>
+        /// Сброс вида (MapResetView): фокус на борт, сдвиг убран, углы со стороны борта, дистанция такая, чтобы вся орбита
+        /// борта была в кадре: берём дальнюю из точек — радиус борта и апоцентр первого участка прогноза (на перелёте
+        /// к Луне эллипс охватывает не только окрестности Земли). Множитель 3,4 ≈ 2/tan(30°) при FOV 60°: диаметр
+        /// орбиты помещается в высоту кадра. Пара с ViewTilt: наклон камеры не должен срезать дальнюю часть эллипса.
+        /// </summary>
+        void ResetView(Vessel v)
+        {
+            focusDistances[focus != null ? focus.Id : ""] = distance;
+            focus = null;
+            pan = Vector3.zero;
+            double reach = v.Position.magnitude;
+            if (patches != null && patches.Count > 0 && patches[0].Body == v.Body && patches[0].Orbit.IsElliptic)
+                reach = System.Math.Max(reach, patches[0].Orbit.ApoapsisRadius);
+            distance = Mathf.Clamp((float)System.Math.Max(v.Body.Radius * 4, reach * 3.4), VesselFocusMin, MaxDistance);
+            AimAtVessel(v);
+            nextPredict = 0;
         }
 
         void LateUpdate()
@@ -139,7 +211,9 @@ namespace Kare.Space.Game
             var u = GameBootstrap.U;
             if (!IsOpen || u?.Active == null || Camera == null) return;
             var v = u.Active;
-            if (Input.GetKeyDown(KeyCode.Tab)) CycleFocus(u, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1);
+            if (KeyBinds.Down(Bind.MapResetView)) ResetView(v);
+            // Tab на карте — смена фокуса (в полёте та же клавиша — «Ручная стыковка», FlightInput её на карте пропускает).
+            if (KeyBinds.Down(Bind.MapFocus)) CycleFocus(u, Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1);
             // Ось облёта — полюс тела в фокусе; у борта — полюс тела, вокруг которого он летит.
             var body = focus ?? v.Body;
             FloatingOrigin.Refresh(); // фокус мог смениться (Tab) — ноль за ним, до расчёта камеры и линий
@@ -156,7 +230,16 @@ namespace Kare.Space.Game
             // Ось карты — полюс тела, чтобы экватор лежал «горизонтально».
             var pole = FloatingOrigin.DirToUnity(body.Orientation * Vector3d.forward);
             var rot = Quaternion.FromToRotation(Vector3.up, pole) * Quaternion.Euler(pitch, yaw, 0);
-            var center = FloatingOrigin.ToUnity(focus != null ? focus.Position : FloatingOrigin.WorldP(v));
+            // СКМ — сдвиг: тянем картинку за рукой, шаг пропорционален дистанции (как FlightCamera.PanSpeed).
+            if (Input.GetMouseButtonDown(2)) panTravel = 0;
+            if (Input.GetMouseButton(2))
+            {
+                float mx = Input.GetAxis("Mouse X"), my = Input.GetAxis("Mouse Y");
+                panTravel += Mathf.Abs(mx) + Mathf.Abs(my);
+                pan = Vector3.ClampMagnitude(pan - rot * new Vector3(mx, my, 0) * (distance * PanSpeed), MaxDistance);
+            }
+            if (Input.GetMouseButtonUp(2) && panTravel < PanClick) pan = Vector3.zero;
+            var center = FloatingOrigin.ToUnity(focus != null ? focus.Position : FloatingOrigin.WorldP(v)) + pan;
             Camera.transform.SetPositionAndRotation(center - rot * Vector3.forward * distance, rot);
             Camera.nearClipPlane = Mathf.Max(1, distance * 1e-4f);
             Camera.farClipPlane = Mathf.Max(distance * 20, 1e9f);
@@ -261,10 +344,14 @@ namespace Kare.Space.Game
 
         void SetFocus(Vessel v, CelestialBody b)
         {
+            // Дистанцию уходящего фокуса помним: вернулся на Луну — тот же масштаб, а не «по умолчанию».
+            focusDistances[focus != null ? focus.Id : ""] = distance;
             focus = b;
+            pan = Vector3.zero; // сдвиг относился к прежнему фокусу
             distance = b != null ? (float)b.Radius * BodyFocusRadii : VesselFocusDistance;
             // Борт у своего тела: дистанцию берём как при открытии карты — видна вся орбита.
             if (b == v.Body) distance = (float)System.Math.Max(b.Radius * BodyFocusRadii, v.Position.magnitude * 2.5);
+            if (focusDistances.TryGetValue(b != null ? b.Id : "", out float prev)) distance = prev;
             distance = Mathf.Min(distance, MaxDistance);
         }
 
@@ -489,7 +576,10 @@ namespace Kare.Space.Game
             TransferPanel(u);
             GUI.color = Color.white;
             markStyle.normal.textColor = Color.white;
-            var hint = "КАРТА · ПКМ — вращать, колесо — масштаб, Tab — фокус, F6 — перелёты, N — манёвр, M — назад";
+            // Клавиши — подписями из KeyBinds: переназначил, сменилась и строка.
+            var hint = $"КАРТА · ПКМ — вращать, СКМ — двигать, колесо — масштаб, {KeyBinds.Label(Bind.MapFocus)} — фокус, " +
+                       $"{KeyBinds.Label(Bind.MapResetView)} — к аппарату, {KeyBinds.Label(Bind.Transfers)} — перелёты, " +
+                       $"{KeyBinds.Label(Bind.NodeNew)} — манёвр, {KeyBinds.Label(Bind.Map)} — назад";
             float hw = markStyle.CalcSize(new GUIContent(hint)).x;
             GUI.Label(new Rect((Screen.width - hw) * 0.5f, Screen.height - 165, hw, 22), hint, markStyle); // над нижними панелями HUD
         }
@@ -505,7 +595,7 @@ namespace Kare.Space.Game
             var sun = u.System.Sun;
             float x = 12, y = 230, rowH = 22, wdt = 170;
             GUI.color = Color.white;
-            GUI.Label(new Rect(x, y, wdt, rowH), "Фокус (Tab)", markStyle);
+            GUI.Label(new Rect(x, y, wdt, rowH), $"Фокус ({KeyBinds.Label(Bind.MapFocus)})", markStyle);
             y += rowH + 2;
             foreach (var b in focusList)
             {
@@ -518,14 +608,14 @@ namespace Kare.Space.Game
 
             // Меню перелётов (F6) — кнопкой тоже: клавишу на карте не видно.
             GUI.color = transfersOpen ? new Color(0.45f, 0.85f, 1f) : Color.white;
-            if (GUI.Button(new Rect(x, y + 6, wdt, rowH), "Перелёты (F6)", listStyle)) { transfersOpen = !transfersOpen; nextRows = 0; planResult = null; }
+            if (GUI.Button(new Rect(x, y + 6, wdt, rowH), $"Перелёты ({KeyBinds.Label(Bind.Transfers)})", listStyle)) { transfersOpen = !transfersOpen; nextRows = 0; planResult = null; }
             y += rowH + 6;
 
             // Аппараты (§6.13): щелчок — управление им, как PageUp/PageDown. Сначала управляемые, обломки — следом,
             // не больше VesselRows строк: после пакета Р-7 обломков с десяток.
             y += 8;
             GUI.color = Color.white;
-            GUI.Label(new Rect(x, y, wdt + 60, rowH), "Аппараты (PgUp/PgDn)", markStyle);
+            GUI.Label(new Rect(x, y, wdt + 60, rowH), $"Аппараты ({KeyBinds.Label(Bind.PrevVessel)}/{KeyBinds.Label(Bind.NextVessel)})", markStyle);
             y += rowH + 2;
             int rows = 0;
             for (int pass = 0; pass < 2 && rows < VesselRows; pass++)

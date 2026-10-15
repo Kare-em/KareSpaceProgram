@@ -53,14 +53,14 @@ namespace Kare.Space.Game
                              || u.Docking != null || u.Lunar != null ? "автопилот" : "без автопилота";
                 // Без имени корабля: оба имени не влезают в полосу (замер 05.10.2026, «Falcon 9 «Crew Dragon Demo-2»»).
                 Banner(new Rect((wl - BannerWidth) / 2, y, BannerWidth, 26),
-                    $"Вид: {FlightView.Main.Name} · корабль: {who} · F2 — назад", Accent);
+                    $"Вид: {FlightView.Main.Name} · корабль: {who} · {KeyBinds.Label(Bind.StageFocus)} — назад", Accent);
                 y += 30;
             }
             if (u.Deferred.Count > 0)
             {
                 var d = u.Deferred[0];
                 Banner(new Rect((wl - BannerWidth) / 2, y, BannerWidth, 26),
-                    $"Посадка «{d.Vessel.Name}» отложена {GameCalendar.FormatDuration(u.Time - d.FrozenAt)} · F4 — продолжить", Warn);
+                    $"Посадка «{d.Vessel.Name}» отложена {GameCalendar.FormatDuration(u.Time - d.FrozenAt)} · {KeyBinds.Label(Bind.DeferLanding)} — продолжить", Warn);
                 y += 30;
             }
 
@@ -75,7 +75,7 @@ namespace Kare.Space.Game
                 GUI.Label(new Rect(r.x + 10, r.y + 6, r.width - 20, 24), $"«{run.Vessel.Name}» идёт на посадку", c);
                 GUI.color = Color.white;
                 GUI.Label(new Rect(r.x + 10, r.y + 32, r.width - 20, 48),
-                    "F2 — смотреть посадку (корабль летит сам) · F4 — сначала корабль, посадка потом · F3 — оба на экране", c);
+                    $"{KeyBinds.Label(Bind.StageFocus)} — смотреть посадку (корабль летит сам) · {KeyBinds.Label(Bind.DeferLanding)} — сначала корабль, посадка потом · {KeyBinds.Label(Bind.SplitScreen)} — оба на экране", c);
             }
         }
 

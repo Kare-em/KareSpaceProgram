@@ -32,44 +32,47 @@ namespace Kare.Space.Game
             var v = u?.Active;
             if (v == null || PauseMenu.IsOpen) return;
 
-            if (Input.GetKeyDown(KeyCode.M)) MapView.Toggle();
-            if (Input.GetKeyDown(KeyCode.Period)) u.WarpUp();
-            if (Input.GetKeyDown(KeyCode.Comma)) u.WarpDown();
+            if (KeyBinds.Down(Bind.Map)) MapView.Toggle();
+            if (KeyBinds.Down(Bind.WarpUp)) u.WarpUp();
+            if (KeyBinds.Down(Bind.WarpDown)) u.WarpDown();
             // «/» — сброс ускорения сразу в ×1, как в KSP.
-            if (Input.GetKeyDown(KeyCode.Slash) || Input.GetKeyDown(KeyCode.KeypadDivide)) u.WarpReset();
+            if (KeyBinds.Down(Bind.WarpReset)) u.WarpReset();
             // Порядок «ступень — корабль» после отделения (§6.9, FlightView): F2 — вид на посадку ступени, F3 — сплит-скрин,
             // F4 — отложить посадку / продолжить отложенную. Это вид, а не управление: открыто и под автопилотом миссии.
-            if (Input.GetKeyDown(KeyCode.F2)) FlightView.ToggleFocus(u);
-            if (Input.GetKeyDown(KeyCode.F3)) FlightView.ToggleSplit(u);
-            if (Input.GetKeyDown(KeyCode.F4)) FlightView.ToggleDefer(u);
-            // F5 — режим камеры (§10.3), F6 — меню перелётов на карте (§6.11).
-            if (Input.GetKeyDown(KeyCode.F5)) u.Post("Камера: " + FlightCamera.CycleMode(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? -1 : 1));
-            if (Input.GetKeyDown(KeyCode.F6)) MapView.ToggleTransfers();
+            if (KeyBinds.Down(Bind.StageFocus)) FlightView.ToggleFocus(u);
+            if (KeyBinds.Down(Bind.SplitScreen)) FlightView.ToggleSplit(u);
+            if (KeyBinds.Down(Bind.DeferLanding)) FlightView.ToggleDefer(u);
+            // F5 — режим камеры (§10.3; подпись режима камера показывает сама), F6 — меню перелётов на карте (§6.11).
+            if (KeyBinds.Down(Bind.CameraMode)) FlightCamera.CycleMode(ShiftKey ? -1 : 1);
+            if (KeyBinds.Down(Bind.Transfers)) MapView.ToggleTransfers();
             // PageUp / PageDown — переключение между бортами (§6.13, как [ ] в KSP: скобки здесь двигают время узла,
             // Shift/Ctrl — газ). Home — назад к борту миссии. Работает и после гибели активного — увести управление на живой.
-            if (Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.PageDown))
+            bool prev = KeyBinds.Down(Bind.PrevVessel), nextKey = KeyBinds.Down(Bind.NextVessel);
+            if (prev || nextKey)
             {
-                var next = u.NextVessel(Input.GetKeyDown(KeyCode.PageDown) ? 1 : -1);
+                var next = u.NextVessel(nextKey ? 1 : -1);
                 if (next == null) u.Post("Других аппаратов нет");
                 else u.SwitchTo(next);
                 return;
             }
-            if (Input.GetKeyDown(KeyCode.Home) && u.MissionVessel != null) { u.SwitchTo(u.MissionVessel); return; }
+            // Home на открытой карте — «к аппарату, сброс масштаба» (MapView): одна клавиша, разный смысл по контексту.
+            if (KeyBinds.Down(Bind.MissionVessel) && !(MapView.IsOpen && KeyBinds.Key(Bind.MapResetView) == KeyBinds.Key(Bind.MissionVessel))
+                && u.MissionVessel != null) { u.SwitchTo(u.MissionVessel); return; }
             if (!v.Alive) return;
             // Y — автопилот всей миссии (§6.11): от стола до последней цели без рук, ускорением правит сам.
             // Снимается только повторным Y: руль, газ и прочие клавиши на время автопилота закрыты.
-            if (Input.GetKeyDown(KeyCode.Y))
+            if (KeyBinds.Down(Bind.MissionAutopilot))
             {
                 if (u.Mission != null) { DropAutopilots(u); FlightControl.Cutoff(v); u.SetWarp(0); u.Post("Автопилот миссии снят"); return; }
                 var boot = GameBootstrap.Instance;
                 u.Mission = new MissionAutopilot(u, boot.Tracker);
-                u.Post($"Автопилот миссии: «{boot.Mission.Title}» без рук. Снять — Y");
+                u.Post($"Автопилот миссии: «{boot.Mission.Title}» без рук. Снять — {KeyBinds.Label(Bind.MissionAutopilot)}");
             }
             if (u.Mission != null)
             {
                 if (!u.Mission.OwnsPilotInput) v.PilotInput = default;
                 foreach (var k in LockedKeys)
-                    if (Input.GetKeyDown(k)) { u.Post("Ведёт автопилот миссии — снять: Y"); break; }
+                    if (KeyBinds.Down(k)) { u.Post("Ведёт автопилот миссии — снять: " + KeyBinds.Label(Bind.MissionAutopilot)); break; }
                 return;
             }
             Maneuver(u, v);
@@ -77,7 +80,7 @@ namespace Kare.Space.Game
             // Ось: x тангаж (W = +1), y рыскание (D = +1), z крен (E = +1) — соглашение Core.
             // Tab — режим стыковки (§6.6, как в KSP): WASD двигают борт РСУ вбок (W — к «верху» навбола, D — вправо),
             // Shift/Ctrl — вперёд/назад, повороты — стрелками, Q/E — крен. Цель — ближайший совместимый борт.
-            if (Input.GetKeyDown(KeyCode.Tab) && !MapView.IsOpen) ToggleDockMode(u, v);
+            if (KeyBinds.Down(Bind.DockMode) && !(MapView.IsOpen && KeyBinds.Key(Bind.MapFocus) == KeyBinds.Key(Bind.DockMode))) ToggleDockMode(u, v);
             if (DockMode && (v.Target == null || !v.Target.Alive)) ToggleDockMode(u, v);
 
             Vector3d pilot;
@@ -86,12 +89,12 @@ namespace Kare.Space.Game
                 pilot = new Vector3d(
                     Axis(KeyCode.UpArrow, KeyCode.DownArrow),
                     Axis(KeyCode.RightArrow, KeyCode.LeftArrow),
-                    Axis(KeyCode.E, KeyCode.Q));
+                    KeyBinds.Axis(Bind.RollRight, Bind.RollLeft));
                 // Связанные оси: верх навбола — −X, право — −Z, нос — +Y (см. FlightHud.NavBall).
                 var tr = new Vector3d(
-                    Axis(KeyCode.S, KeyCode.W),
-                    (Shift ? 1 : 0) - (Ctrl ? 1 : 0),
-                    Axis(KeyCode.A, KeyCode.D));
+                    KeyBinds.Axis(Bind.PitchUp, Bind.PitchDown),
+                    KeyBinds.Axis(Bind.ThrottleUp, Bind.ThrottleDown),
+                    KeyBinds.Axis(Bind.YawLeft, Bind.YawRight));
                 if (tr.sqrMagnitude > 0) DropAutopilots(u);
                 if (u.Docking == null) v.RcsTranslate = tr; // автопилот V сам правит РСУ — не перебивать нулём
             }
@@ -99,46 +102,47 @@ namespace Kare.Space.Game
             {
                 // Alt+W/S — триммер тангажа (§4.6, как в KSP): балансировочный щиток или смещение элевонов; W/S не тангаж.
                 // Знак как у W/S (FlightControl: W — нос к брюху = −Z); PitchTrim > 0 — нос вверх, поэтому S — плюс.
-                double trim = v.PitchTrim + Axis(KeyCode.S, KeyCode.W) * TrimRate * Time.deltaTime;
+                double trim = v.PitchTrim + KeyBinds.Axis(Bind.PitchUp, Bind.PitchDown) * TrimRate * Time.deltaTime;
                 v.PitchTrim = System.Math.Max(-1, System.Math.Min(1, trim));
-                pilot = new Vector3d(0, Axis(KeyCode.D, KeyCode.A), Axis(KeyCode.E, KeyCode.Q));
+                pilot = new Vector3d(0, KeyBinds.Axis(Bind.YawRight, Bind.YawLeft), KeyBinds.Axis(Bind.RollRight, Bind.RollLeft));
             }
             else
                 pilot = new Vector3d(
-                    Axis(KeyCode.W, KeyCode.S),
-                    Axis(KeyCode.D, KeyCode.A),
-                    Axis(KeyCode.E, KeyCode.Q));
+                    KeyBinds.Axis(Bind.PitchDown, Bind.PitchUp),
+                    KeyBinds.Axis(Bind.YawRight, Bind.YawLeft),
+                    KeyBinds.Axis(Bind.RollRight, Bind.RollLeft));
             v.PilotInput = pilot;
             // Рули крылатых (§4.6): 1 — воздушный тормоз (расщеп руля), 2 — тормозной парашют на пробеге, 3 — триммер в ноль.
-            if (Input.GetKeyDown(KeyCode.Alpha1))
+            if (KeyBinds.Down(Bind.AirBrake))
             {
                 v.AirBrake = v.AirBrake > 0.5 ? 0 : 1;
                 u.Post(v.AirBrake > 0 ? "Воздушный тормоз выпущен" : "Воздушный тормоз убран");
             }
-            if (Input.GetKeyDown(KeyCode.Alpha2) && v.DragChuteArea() > 0)
+            if (KeyBinds.Down(Bind.DragChute) && v.DragChuteArea() > 0)
             {
                 if (v.DragChute == DragChuteState.Open) v.JettisonDragChute();
                 else if (v.DragChute == DragChuteState.Stowed) v.DeployDragChute();
                 else u.Post("Тормозной парашют уже сброшен");
             }
-            if (Input.GetKeyDown(KeyCode.Alpha3)) { v.PitchTrim = 0; u.Post("Триммер — 0"); }
+            if (KeyBinds.Down(Bind.TrimReset)) { v.PitchTrim = 0; u.Post("Триммер — 0"); }
             if (pilot.sqrMagnitude > 0) DropAutopilots(u);
 
             double thr = v.Throttle;
-            if (!DockMode && Shift) thr += ThrottleRate * Time.deltaTime;
-            if (!DockMode && Ctrl) thr -= ThrottleRate * Time.deltaTime;
-            if (Input.GetKeyDown(KeyCode.Z)) thr = 1;
-            if (Input.GetKeyDown(KeyCode.X)) thr = 0;
+            if (!DockMode && KeyBinds.Held(Bind.ThrottleUp)) thr += ThrottleRate * Time.deltaTime;
+            if (!DockMode && KeyBinds.Held(Bind.ThrottleDown)) thr -= ThrottleRate * Time.deltaTime;
+            // Z (полный газ) у причала — удар в станцию; X (отсечка) безопасен и в режиме стыковки (§6.6).
+            if (!DockMode && KeyBinds.Down(Bind.ThrottleFull)) thr = 1;
+            if (KeyBinds.Down(Bind.ThrottleCut)) thr = 0;
             thr = System.Math.Max(0, System.Math.Min(1, thr));
             if (thr != v.Throttle) { v.Throttle = thr; DropAutopilots(u); }
 
-            if (Input.GetKeyDown(KeyCode.Space)) StageKey(u, v);
-            if (Input.GetKeyDown(KeyCode.T))
+            if (KeyBinds.Down(Bind.Stage)) StageKey(u, v);
+            if (KeyBinds.Down(Bind.Sas))
             {
                 v.Sas = v.Sas == SasMode.Off ? SasMode.Stability : SasMode.Off;
                 v.SasHoldValid = false;
             }
-            if (Input.GetKeyDown(KeyCode.F))
+            if (KeyBinds.Down(Bind.SasMode))
             {
                 // Режимы по кругу §4.9, Off пропускаем — для него есть T.
                 int n = System.Enum.GetValues(typeof(SasMode)).Length;
@@ -146,16 +150,16 @@ namespace Kare.Space.Game
                 v.SasHoldValid = false;
             }
             // G — раскладное (§6.12, как в KSP): опоры выпустить/убрать, трапы КТ откинуть на грунте.
-            if (Input.GetKeyDown(KeyCode.G)) u.ToggleDeploy();
+            if (KeyBinds.Down(Bind.Deploy)) u.ToggleDeploy();
             // Предложение §10.1, не зафиксировано: H — автопилот выведения на 200 км; у тела без атмосферы в полёте —
             // автопилот посадки (§6.12): сам сводит с орбиты, тормозит по прогнозу и садит. Повтор — снять.
-            if (Input.GetKeyDown(KeyCode.H))
+            if (KeyBinds.Down(Bind.AutoTakeoffLanding))
             {
                 if (!v.Body.HasAtmosphere && !v.IsLanded)
                     u.Landing = u.Landing == null ? new LandingAutopilot(v.Body) : null;
                 // На спуске в атмосфере выведение не нужно (крылатый на заходе, Starship брюхом): посадку ведёт Y.
                 else if (!v.IsLanded && v.VerticalSpeed < -DescentNoAscent && u.Ascent == null)
-                    u.Post("Снижение: H — автопилот выведения не включён. Посадку ведёт Y — автопилот миссии");
+                    u.Post($"Снижение: {KeyBinds.Label(Bind.AutoTakeoffLanding)} — автопилот выведения не включён. Посадку ведёт {KeyBinds.Label(Bind.MissionAutopilot)} — автопилот миссии");
                 else if (u.Ascent == null)
                 {
                     u.Ascent = new AscentAutopilot { TargetAltitude = 200000 };
@@ -171,13 +175,13 @@ namespace Kare.Space.Game
             }
             // P — узел манёвра к цели с автоматическим расчётом (§6.11): тело, выбранное на карте (Tab), иначе
             // Луна с орбиты Земли / Земля с орбиты Луны. Выполнить — B.
-            if (Input.GetKeyDown(KeyCode.P) && u.NodePilot == null)
+            if (KeyBinds.Down(Bind.ManeuverToTarget) && u.NodePilot == null)
             {
                 var target = MapView.Focus != null && MapView.Focus != v.Body ? MapView.Focus : ManeuverAutoPlan.DefaultTarget(v);
                 u.Post(ManeuverAutoPlan.Plan(u, target, out _));
             }
             // R — автопилот «к Луне» (§6.4, §6.11): опорная орбита, разгон, перестроение «Аполлона», коррекция, LOI. Повтор — снять.
-            if (Input.GetKeyDown(KeyCode.R))
+            if (KeyBinds.Down(Bind.ToMoon))
             {
                 if (u.Lunar != null) { u.Lunar = null; FlightControl.Cutoff(v); u.Post("Автопилот к Луне снят"); }
                 else
@@ -187,7 +191,7 @@ namespace Kare.Space.Game
                 }
             }
             // V — сближение и стыковка с ближайшим совместимым бортом (§6.6): Ламберт, торможение, причаливание на РСУ.
-            if (Input.GetKeyDown(KeyCode.V))
+            if (KeyBinds.Down(Bind.Dock))
             {
                 if (u.Docking != null) { u.Docking = null; FlightControl.Cutoff(v); u.Post("Стыковка прервана"); }
                 else if (v.IsDocked) u.Undock();
@@ -208,13 +212,13 @@ namespace Kare.Space.Game
         void Maneuver(Universe u, Vessel v)
         {
             double now = u.Time;
-            if (Input.GetKeyDown(KeyCode.Backspace) || Input.GetKeyDown(KeyCode.Delete))
+            if (KeyBinds.Down(Bind.NodeDelete))
             {
                 v.Node = null;
                 u.NodePilot = null;
                 return;
             }
-            if (Input.GetKeyDown(KeyCode.N) && u.NodePilot == null)
+            if (KeyBinds.Down(Bind.NodeNew) && u.NodePilot == null)
             {
                 if (v.Node == null)
                 {
@@ -225,7 +229,7 @@ namespace Kare.Space.Game
                 else anchor = NodePlanner.Cycle(v, now, anchor);
             }
             if (v.Node == null) return;
-            if (Input.GetKeyDown(KeyCode.B))
+            if (KeyBinds.Down(Bind.NodeExecute))
             {
                 if (u.NodePilot != null)
                 {
@@ -243,17 +247,17 @@ namespace Kare.Space.Game
                 }
             }
             if (u.NodePilot != null) return;
-            if (Input.GetKeyDown(KeyCode.C)) NodePlanner.Circularize(v, now);
+            if (KeyBinds.Down(Bind.Circularize)) NodePlanner.Circularize(v, now);
 
             var dv = new Vector3d(
-                Axis(KeyCode.I, KeyCode.K),
-                Axis(KeyCode.L, KeyCode.J),
-                Axis(KeyCode.O, KeyCode.U));
-            double shift = Axis(KeyCode.RightBracket, KeyCode.LeftBracket);
+                KeyBinds.Axis(Bind.NodePrograde, Bind.NodeRetrograde),
+                KeyBinds.Axis(Bind.NodeNormal, Bind.NodeAntiNormal),
+                KeyBinds.Axis(Bind.NodeRadialOut, Bind.NodeRadialIn));
+            double shift = KeyBinds.Axis(Bind.NodeLater, Bind.NodeEarlier);
             if (dv.sqrMagnitude == 0 && shift == 0) { nodeHeld = 0; return; }
             nodeHeld += Time.unscaledDeltaTime;
             double accel = 1 + (nodeHeld * NodeAccel) * (nodeHeld * NodeAccel);
-            if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt)) accel *= NodeFine;
+            if (Alt) accel *= NodeFine;
             double step = accel * Time.unscaledDeltaTime;
             if (dv.sqrMagnitude > 0)
                 NodePlanner.Adjust(v, now, dv.x * NodeDvRate * step, dv.y * NodeDvRate * step, dv.z * NodeDvRate * step);
@@ -266,11 +270,11 @@ namespace Kare.Space.Game
         }
 
         /// <summary>Управление, закрытое при автопилоте миссии: нажатие — подсказка «снять: Y».</summary>
-        static readonly KeyCode[] LockedKeys =
+        static readonly Bind[] LockedKeys =
         {
-            KeyCode.W, KeyCode.S, KeyCode.A, KeyCode.D, KeyCode.Q, KeyCode.E, KeyCode.Z, KeyCode.X, KeyCode.LeftShift,
-            KeyCode.LeftControl, KeyCode.Space, KeyCode.T, KeyCode.F, KeyCode.G, KeyCode.H, KeyCode.R, KeyCode.V, KeyCode.P, KeyCode.B, KeyCode.N, KeyCode.Tab,
-            KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3,
+            Bind.PitchDown, Bind.PitchUp, Bind.YawLeft, Bind.YawRight, Bind.RollLeft, Bind.RollRight, Bind.ThrottleFull, Bind.ThrottleCut,
+            Bind.ThrottleUp, Bind.ThrottleDown, Bind.Stage, Bind.Sas, Bind.SasMode, Bind.Deploy, Bind.AutoTakeoffLanding, Bind.ToMoon,
+            Bind.Dock, Bind.ManeuverToTarget, Bind.NodeExecute, Bind.NodeNew, Bind.DockMode, Bind.AirBrake, Bind.DragChute, Bind.TrimReset,
         };
 
         /// <summary>
@@ -288,7 +292,7 @@ namespace Kare.Space.Game
             if (v.NextStageSeparates && v.DynamicPressure > StageConfirmQ && Time.unscaledTime - stageAsked > StageConfirmWindow)
             {
                 stageAsked = Time.unscaledTime;
-                u.Post($"Напор {v.DynamicPressure / 1000:F0} кПа: после отделения ступень может сорваться в кувырок. Пробел ещё раз — отделить");
+                u.Post($"Напор {v.DynamicPressure / 1000:F0} кПа: после отделения ступень может сорваться в кувырок. {KeyBinds.Label(Bind.Stage)} ещё раз — отделить");
                 return;
             }
             stageAsked = -100;
@@ -298,11 +302,14 @@ namespace Kare.Space.Game
         /// <summary>Ручной режим стыковки (Tab): клавиши — поступательная РСУ, HUD — прибор сближения.</summary>
         public static bool DockMode { get; private set; }
 
+        // Статика переживает перезагрузку сцены (и Play без перезагрузки домена) — режим стыковки сбрасываем.
+        void OnEnable() => DockMode = false;
+
         /// <summary>Скорость триммера, доля хода в секунду: весь ход за 2 с — тонко подстроить успеваешь, держать долго не надо.</summary>
         const double TrimRate = 0.5;
         static bool Alt => Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
-        static bool Shift => Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        static bool Ctrl => Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        /// <summary>Модификатор «назад» (Shift+F5 и т. п.) — физический Shift, не переназначаемый газ.</summary>
+        static bool ShiftKey => Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
         static void ToggleDockMode(Universe u, Vessel v)
         {
@@ -317,7 +324,8 @@ namespace Kare.Space.Game
             if (v.Target == null) { u.Post("Нет борта для стыковки"); return; }
             DockMode = true;
             v.SetNose(true); // узел Crew Dragon под обтекателем — откинуть, иначе причаливание не захватит (§6.6)
-            u.Post($"Режим стыковки: цель {v.Target.Name}. WASD — сдвиг, Shift/Ctrl — вперёд/назад, стрелки — поворот"
+            u.Post($"Режим стыковки: цель {v.Target.Name}. {KeyBinds.Label(Bind.PitchDown)}{KeyBinds.Label(Bind.YawLeft)}{KeyBinds.Label(Bind.PitchUp)}{KeyBinds.Label(Bind.YawRight)} — сдвиг, "
+                + $"{KeyBinds.Label(Bind.ThrottleUp)}/{KeyBinds.Label(Bind.ThrottleDown)} — вперёд/назад, стрелки — поворот"
                 + (v.RcsThrust > 0 ? "" : ". Нет РСУ — сдвиг не работает"));
         }
 

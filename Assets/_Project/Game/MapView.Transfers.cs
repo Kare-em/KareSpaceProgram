@@ -80,7 +80,7 @@ namespace Kare.Space.Game
             float x0 = box.x + pad, y = box.y + pad;
 
             cellStyle.alignment = TextAnchor.MiddleLeft;
-            GUI.Label(new Rect(x0, y, w, rowH), $"Перелёты (F6) · запас Δv {have:0} м/с (вакуум)", headStyle);
+            GUI.Label(new Rect(x0, y, w, rowH), $"Перелёты ({KeyBinds.Label(Bind.Transfers)}) · запас Δv {have:0} м/с (вакуум)", headStyle);
             y += rowH;
             string[] head = { "Цель", "Отлёт", "Захват", "Σ Δv", "Окно через", "В пути", "" };
             float x = x0;

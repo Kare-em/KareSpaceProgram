@@ -1,6 +1,6 @@
 ﻿<Solution>
-  <Project Path="Kare.Space.Editor.csproj" />
   <Project Path="Kare.Space.Game.csproj" />
+  <Project Path="Kare.Space.Editor.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
   <Project Path="Kare.Space.Core.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />

@@ -395,3 +395,108 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   (`TurnSideways`), so the separation push no longer shifts the entry perigee; `TransferPlanner` polish now predicts with
   the burn (`node.Remaining`). vympel / luna17 / auto_luna17 / auto_apollo8 pass again.
 - Tests (15.10.2026): full run 199 OK / 0 FAIL. auto_apollo11 fixed (rails epoch of vessels staged mid-frame — `Universe.AdvancePhysics` stamp; transposition passes); autoplan earth→moon aims at the periapsis (`PlanIntercept(..., periapsis:)`), perilune 100 km — `docs/pitfalls-core.md`.
+
+## Voyager 1/2: planetary profile, gravity assists (15.10.2026)
+- Missions `voyager1` (Jupiter → Saturn), `voyager2` (Jupiter → Saturn → Uranus → Neptune) — `Core/Missions/PlanetaryMissions.cs`;
+  Titan IIIE + Centaur D-1T + TE-M-364-4 kick, probe on hydrazine ≈ 290 m/s — `Core/Vessels/PlanetaryRockets.cs`; models
+  `Models/Titan3_Core.fbx`, `Titan_SRB.fbx`, `Voyager.fbx`, `Voyager_PM.fbx`.
+- `ProfileType.Planetary` (`MissionAutopilot.Planetary.cs`): tour plan (`TourPlanner` — Lambert chain near historical dates,
+  penalty `HistoryScale` 2 d) → launch window for the plane containing the departure asymptote (`LaunchAzimuths`: 90° or the
+  pair for "declination + 0.5°", V2 121.4°) → parking orbit → tour re-planned from the real time → departure (`PlanDeparture`
+  with B-plane aim, solid kick guided by the asymptote `KickAim`) → per leg: early correction 5 d after leaving the SOI, late
+  75 d before the flyby, corridor check (abort text shows the flyby periapsis).
+- Aiming: intermediate body — `TourAim` (v∞ turned toward the next planet's tour date, rp from the turn angle, clamped to the
+  corridor) refined by `TransferPlanner.PlanThroughFlyby` (exact patched-conic targeting of the next planet, warm start between
+  lead passes); last body — middle of the corridor, rp shifted by `PeriapsisAfter` (patched-conic prediction).
+- `Universe.StageRailsGrace` 5 s: no rails warp for 5 s after `Stage()` ("разделение").
+- Results (15.10.2026): V1 corrections Jupiter 14.36 / 0.69, Saturn 8.32 / 0.75 m/s; V2 Jupiter 11.12 / 49.49, Saturn
+  2.78 / 0.92, Uranus 20.56 / 3.71, Neptune 30.98 / 1.67 m/s, Neptune Pe 12 281 km (historical 4 950 km over clouds; corridor 3–20 thousand).
+- Pitfalls — `docs/pitfalls-core.md` "Voyager".
+
+## Constructor 2.1: less clutter (15.10.2026, `Game/HangarController.cs`, `.Build.cs`)
+- Top bar: Новая · Пресеты ▾ (dropdown) · Сохранить · Открыть… | ◄ mission ▾ (scrollable list of all missions) ► · Исторический ·
+  ЗАПУСК. Dropdowns are a `GUI.Window` (drawn on top, gets clicks first); a click outside closes and is consumed; Esc closes.
+- Catalog: search over ALL categories (name, id, description), Esc clears, ✕ button; "Ничего не нашлось".
+- Collapsible "Ступени" (right column) and stats panel (▾/▴): collapsed stats = one line summary + first error/warning with
+  count, cut with "…" (`Fit`).
+- Status messages are a toast above the help line (fade 0.5 s), not a label in the top bar.
+- Files window: ✕ per row → inline "Удалить «…»? Да/Нет"; `_last.json` autosave on every change (hidden from the list).
+- Dropping a moved part off any node returns it ("Отпущено мимо узла — деталь вернулась на место"); a drop over UI panels is not
+  a snap. Clicking the preview releases text-field focus (hotkeys work only with `keyboardControl == 0`).
+- Docking: Z is blocked in dock mode, dock mode resets on enable; CraftCompiler warns about docking ports (`dock-1` description).
+
+## Controls menu, warp x30, plumes, cinematic camera (15.10.2026)
+- **Key rebinding** (`Game/KeyBinds.cs`, `Game/ControlsMenu.cs`): every action is a `Bind` with group/title/default
+  (+ alt key), stored in PlayerPrefs; Esc → "Управление (клавиши)…" — two-column list, click a key → press a new one
+  (captured in Update by iterating KeyCode < Mouse0, Esc cancels), conflicts in orange, "Сбросить всё". All hints (HUD
+  bottom line `FlightHud.KeysHint`, tutor, map, docking, stage view) use `KeyBinds.Label(Bind.X)` → change with the binding.
+  `KeyBinds.Version` invalidates cached hint strings. Context pairs that share a key without conflict:
+  MapResetView/MissionVessel (Home), MapFocus/DockMode (Tab) — FlightInput skips the flight action while the map is open.
+- **Physical warp up to x30** (`Universe.MaxPhysicsWarp = 30`, `MaxPhysicsSubsteps = 75`): in the atmosphere and under
+  thrust; HUD shows "×30 физика" / "×30 рельсы". Checked: R-7 under thrust at 27 km — "×30 физика", 116 fps.
+- **Camera**: F5/Shift+F5 modes, F7 cinematic shots (cycle; Shift+F7 — exit), F8 look at the parent body (smooth blend,
+  F8 again — back) — `Game/FlightCamera.Cinematic.cs`. Map: middle mouse — pan, wheel — zoom, zoom/pan kept between
+  openings, Home — reset to the vessel.
+- **Plumes by propellant** (`Game/VesselView.Exhaust.cs`, `PlumeKind`): kerolox (white → orange → red), hydrolox (pale
+  blue, almost invisible in vacuum), hypergolic (orange-pink, by engine name), solid (bright white-yellow, smoky). Plume
+  width = nozzle exit radius from `NozzleArea`, not section diameter. Thrust per nozzle < 50 N or monoprop (Isp < 240,
+  thrust < 1 kN) — no plume. Small separate nozzles (exit radius < 0.3 ring radius) — a plume per nozzle.
+- **RCS**: Voyager / Voyager PM jets at the bus bottom / PM top, length `RcsJets.MicroThrusterLength` 0.22 m (0.89 N
+  hydrazine — short pale puff).
+- Voyager model: opaque bus underside, long magnetometer boom (13 m) and PRA/PWS antennas (10 m) — `Tools/blender/voyager_parts.py`.
+
+## Saves (15.10.2026, `Core/Save/SaveGame*.cs`, `Game/SaveController.cs`, GDD §10.3)
+- Format: text `.ksav` in `persistentDataPath/saves`. Line 1 is a header JSON (`format: "kare-save"`, `version` 1, save time,
+  mission, vessel, body, altitude, game time, `customDesign`), so the slot list reads one line. The rest is the body: the
+  `universe` fields, the `tracker`, and the `objects` table (Core class instances, referenced as `{"$r": n}`).
+  Bodies, sites, the mission, the universe, the system and the tracker are written by id/name (`$body`, `$site`, `$mission`, `$x`).
+- **Reflection over every instance field** (public and private) of Universe and of everything reachable from it.
+  New `Vessel` fields are saved with no code change. Old saves load as long as field meaning is unchanged: missing fields
+  keep constructor defaults, unknown fields are ignored. A file whose `version` is newer than `SaveGame.Version` is refused.
+- **Restored:**
+  - time and warp index (the game drops warp to x1 on load);
+  - all vessels with their designs, including hangar crafts. Shared designs stay shared, so docking and `RadialPiece` work;
+  - sections, staging, propellant, ignitions, engines/throttle, deployables, chutes, attitude/angular velocity, situation;
+  - nodes, targets, docking links, the fresh-separation list, the rails event cache;
+  - Ascent/NodePilot/Landing/Docking/Lunar, booster recoveries and deferred recoveries;
+  - tracker progress and the universe log.
+- **Not restored:**
+  - the whole-mission autopilot `Universe.Mission` (Y). It is an iterator script, so the save writes `null` and lists it in
+    `LoadedGame.Dropped`; the player presses Y again. Any autopilot that holds a delegate or a non-Core object is dropped
+    the same way.
+  - static settings (damage toggles, `UnlimitedIgnitions`, land/height maps).
+- Keys: F9 = quicksave (overwrites `quicksave.ksav`), F10 = load the newest slot (`KeyBinds.QuickSave/QuickLoad`).
+- `SaveController.DrawMenu(Rect)` is the Esc block: "Сохранить" (new slot `save_yyyyMMdd_HHmmss`), then slots newest first,
+  each with "Загрузить" and "Удалить" (two clicks). Its height is `SaveController.MenuHeight`.
+- Load path: `SaveController.Load` sets the static `pending` text and `NextMissionId`, then reloads the scene.
+  `GameBootstrap.Awake` takes the universe from `SaveController.TakePending(...)` instead of `CreateUniverse`.
+  For a custom-design save, `NextDesign` is set from the saved design, so "Начать заново" relaunches it.
+- Tests:
+  - `save`: Vostok mid-ascent with Ascent running, then +250 s through staging and to orbit. Next, stage + node +
+    NodePilot, a re-save of the loaded copy, rails x1000, and the TDU burn. Then a Semyorka from the hangar, saved at
+    29 km, +200 s through booster separation.
+  - `save_booster`: Falcon 9 with Y running and the booster landing pilot, through the landing.
+  - All comparisons are **bitwise equal**, and re-saving the loaded copy gives a byte-identical body. A save is 14–28 KB
+    and takes 1–20 ms.
+
+## Cassini–Huygens: VVEJGA tour, Saturn orbit, Titan landing (15.10.2026)
+- Mission `cassini` (`Core/Missions/PlanetaryMissions.cs`): Venus, Venus, Earth, Jupiter flybys → Saturn flyby/capture (Orbit, 1 d)
+  → Landing on Titan. Start 15.10.1997 08:43 UTC, Canaveral. Preset `cassini` — `PlanetaryRockets.TitanCentaurCassini`:
+  Titan IVB core + 2× SRMU, stage 2, Centaur T (2 ignitions), orbiter (2125 + 3130 kg, 445 N, Isp 308), Huygens as three capsule
+  sections (shield 2.7 m / back cover with 8.3 m chute / probe with 3.03 m chute). `VesselPresets.CassiniOrbiter = 4`.
+- Models `Models/Titan4_Core.fbx`, `Titan4_SRMU.fbx`, `Cassini.fbx`, `Huygens_Shield.fbx`, `Huygens_Cover.fbx`, `Huygens.fbx` —
+  `Tools/blender/cassini_parts.py`; wired in `FlightSceneBuilder` (model table), `VesselView.CraftPalette`, `LaunchPadView` (LC Titan).
+  Huygens is stacked above the HGA (not on the side as in reality) — sections are a stack.
+- Autopilot (`MissionAutopilot.Planetary.cs`, `.Titan.cs`): `TourPlanner` with a deep-space manoeuvre on the V1→V2 leg
+  (`DeepSpaceManeuver`: Lambert to the V2 aim + `PlanThroughFlyby` to Earth); `FlybyTrim` inside each SOI on the exact Kepler
+  hyperbola (only for tours with a DSM, `HasDsm`); `AimedExit`/`FloatingExit` — next-body date floats so |v_out| matches the
+  flyby v∞. Saturn: capture → `MoonApproach` at apoapsis (scan the Titan meeting over one revolution, cost Δv + 5·(v∞ − 5500)) →
+  corrections → in the Titan SOI `EntryTrim` (periapsis for −65° at the atmosphere top) → release Huygens → chute armed → descent.
+- Result `auto_cassini` (15.10.2026): C3 23, Venus corr. 50.1, V1 trim 9.6 (5391 km), DSM 403.7 (plan 347), V2 trim 7.4
+  (2733 km), Earth 6.5 + 8.5 (1136 km), Jupiter 6.9 + 20.7 (6.38 mln km, 28.02.2001), Saturn 139.8 (arrival 27.05.2006), capture
+  409 m/s → 20.2 × 8948 thousand km, Titan targeting 437.6 (v∞ 5367), entry 5840 m/s at −65.1°, peak 27 g, touchdown 3.1 m/s.
+  Orbiter spent ≈ 1.5 of ≈ 2.5 km/s.
+- Deviations from 1997–2005 (also in the Brief): Saturn 2006 instead of 1.07.2004, flybys higher, DSM 404 vs 450, release inside
+  the Titan SOI (real: 20 d before), main chute at 15 km (FlightPhysics.ChuteAltitudeMax; real 160 km), no orbiter deflection
+  manoeuvre (orbiter debris follows towards Titan — after the release the active vessel is Huygens).
+- Pitfalls — `docs/pitfalls-core.md` "Cassini".

@@ -26,6 +26,9 @@ namespace Kare.Space.Game
         const float LengthPerRadius = 0.7f, LengthMin = 0.35f, LengthMax = 2f;
         /// <summary>В атмосфере струя короче (противодавление): доля длины при p = 1 атм.</summary>
         const float SeaLevelLength = 0.45f;
+        /// <summary>Струя гидразиновых микро-ЖРД (Вояджер: 0,89 Н, сопло ~1 см), м. По радиусу секции (тарелка 3,66 м)
+        /// выходил метровый конус шире самой шины; у таких сопел видимого факела почти нет — короткий бледный «пшик».</summary>
+        const float MicroThrusterLength = 0.22f;
         /// <summary>Сопло отступает от обшивки на эту долю длины струи, а соседние сопла блока — друг от друга.</summary>
         const float NozzleStandoff = 0.06f;
         /// <summary>Нарастание и спад струи, с: клапан РСУ открывается за десятки мс.</summary>
@@ -126,7 +129,8 @@ namespace Kare.Space.Game
                 // Орбитер на баке стоит сбоку от оси — там же, где его ставит вид (VesselView: Part.Radial).
                 offsets[i] = s.Beside && i > 0 && v.Attached[0] && !secs[0].IsRadial
                     ? new Vector3(-(float)s.BesideOffset, 0, 0) : Vector3.zero;
-                float jet = Mathf.Clamp((float)s.Radius * LengthPerRadius, LengthMin, LengthMax);
+                float jet = s.Model == SectionModel.Voyager || s.Model == SectionModel.VoyagerPM
+                    ? MicroThrusterLength : Mathf.Clamp((float)s.Radius * LengthPerRadius, LengthMin, LengthMax);
                 foreach (var c in Clusters(s))
                     foreach (var ex in c.Ex)
                     {
@@ -205,6 +209,12 @@ namespace Kare.Space.Game
                     return Quads(2.65f, 0.73f, 45);
                 case SectionModel.GeminiAdapter: // OAMS на юбке переходника (конус 1,45 → 1,2 м)
                     return Quads(1.15f, 1.33f, 45);
+                case SectionModel.VoyagerPM:     // четыре блока гидразиновых ЖРД у верха модуля (b_voyager_pm: r 0,86 + 0,08, z 1,78)
+                    return Quads(1.78f, 0.94f, 45);
+                case SectionModel.Voyager:
+                    // Сопла у низа десятигранной шины (b_voyager: r 0,89, z 0,42–0,89). Диаметр секции — тарелка HGA 3,66 м:
+                    // по запасному правилу струи били из пустоты над кромкой тарелки, на высоте 2,9 м.
+                    return Quads(0.5f, 0.92f, 18);
                 case SectionModel.SuperHeavy:
                     // Кольцо холодного газа у верха бака (b_super_heavy: кольцо горячего разделения с 71 м, решётчатые рули
                     // на hot−2,4 м под азимутами 45 + 90k, цапфы 0/180 на hot−6, магистраль на 90). Азимуты 22,5 + 90k — между

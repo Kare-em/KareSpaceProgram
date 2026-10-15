@@ -260,3 +260,35 @@ Read before working through MCP, debugging in Play, and bulk file edits.
 - **`FlightCamera.pan` cannot frame the top of a tall stack**: pan beyond the fit limit or a change of vessel length re-fits
   `Distance` (3 tries — the frame jumped far away). Payload close-up — the RT clone-camera recipe above, `LookRotation(target − pos,
   vessel.up)`, FOV 40, 12 renders: worked first time.
+
+- **Open meshes look "see-through" in Unity (backface culling)** (15.10.2026, Voyager): `hulls_lib.strut()` makes an open tube (no
+  end caps) and a `lathe` profile that does not start/end on the axis (r=0) or is not `closed=True` leaves a hole. Measured with a
+  bmesh check (edges with `len(link_faces) != 2`, per-island signed volume): Voyager had 284 non-manifold edges / 22 open islands
+  (21 struts + the foil adapter cone without a bottom disc), Voyager_PM 384 / 32. Fix: `voyager_parts.py` overrides `strut()` with
+  a capped one (module-level redefinition after the `exec` of hulls_lib — `truss()` picks it up through shared globals, hulls_lib
+  untouched) and the cone profile starts at `(0, 0)`; result 0 / 0, no inverted islands. Run the same check after any new part.
+- **A long thin boom does not resize the section**: VesselView places `Craft` models at scale 1 by section length and uses only
+  `mesh.bounds.min.y` (`ownBottom` → exhaust position) and `max.y` vs `CraftTopOriginShare` — a 13 m horizontal boom (Voyager
+  magnetometer, rmax 14) is safe as long as all geometry stays at Blender z ≥ 0 (bus plane) and z-max does not change.
+- Thin parts (PRA whips 2.5 cm square, 10 m): use a 4-sided capped prism (`strut(..., segs=4)`, rad = circumradius = side/√2).
+- Headless render check: `hide_render = True` on every other object (`isolate()` only hides the viewport — other parts.blend
+  models leaked into the Workbench render), `render.engine = 'BLENDER_WORKBENCH'`, a camera object via `to_track_quat('-Z','Y')`.
+
+## IMGUI in the constructor and testing it via MCP (15.10.2026)
+- **`GUI.Window` is on top only among windows of the SAME OnGUI order.** The "Ступени подробно" button is drawn by the
+  `PartInspector` OnGUI and showed through the missions dropdown (first row hidden). Fix: hide such buttons while `popup != None`.
+- **Test IMGUI without clicks:** in Play, `execute_code` + reflection on `HangarController` private fields (`popup`, `search`,
+  `statsOpen`, `showFiles`, `confirmDelete`) and invoke `OpenPopup(Popup, Rect)` with the SAME rect the button passes
+  (a wrong rect gives a 30 px popup that looks like a bug). Then `manage_camera screenshot` to `Captures/` (an absolute path
+  outside the project is refused), downscale to 960 px with PIL.
+- After `refresh_unity` the console may show "Mismatched state in DefaultScenario, was Stopping but expected Idle" — editor
+  internal, not ours. The MCP bridge can drop for one call right after entering Play ("No Unity Editor instances") — retry.
+
+- Entering Play may leave the editor's active scene (Hangar) running, `GameBootstrap.U == null`. Load the mission directly:
+  `GameBootstrap.NextMissionId = "voyager2"; GameBootstrap.NextDesign = null;
+  EditorSceneManager.LoadSceneInPlayMode("Assets/_Project/Scenes/Flight.unity", new LoadSceneParameters(LoadSceneMode.Single))`.
+  Universe: `GameBootstrap.U`; sections — `v.Design.Sections` with `v.Attached[i]` (no `v.Sections`/`v.Craft`);
+  `Vector3d` has no `Length` (check members before use). `u.Stage()` several times in one
+  call works (the active vessel shrinks to the probe).
+- RCS jets can be checked without keys: `u.Active.RcsTranslate = new Vector3d(0.6, 0.6, 0.6)` (outside dock mode
+  FlightInput does not overwrite it); `PauseMenu.IsOpen` has a private setter — close it via reflection.

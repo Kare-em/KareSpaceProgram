@@ -168,6 +168,8 @@ namespace Kare.Space.Game
             public Renderer CoreR, GlowR;
             public Light PlumeLight;
             public float PlumeRadius, Throttle;
+            /// <summary>Вид факела по топливу (VesselView.Exhaust): цвет, яркость, длина.</summary>
+            public PlumeKind Kind;
             public Transform Chute;
             /// <summary>Купола веера (SectionDef.ChuteCount) — дети Chute; стропы всех — одна ломаная Lines.</summary>
             public Transform[] Canopies;
@@ -306,6 +308,14 @@ namespace Kare.Space.Game
                 case SectionModel.VoyagerPM: return new[] { FoilColor, BlackColor, MetalColor, NozzleColor };
                 // UA1205 — белые сегменты, чёрные юбка и обтекатель носа, металл — бак ВПУ и крепления.
                 case SectionModel.TitanSRB: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
+                // SRMU «Титана IVB» — слоты b_titan4_srmu: белые сегменты, чёрные юбка и нос, металл — узлы.
+                case SectionModel.Titan4SRMU: return new[] { WhiteColor, BlackColor, MetalColor, NozzleColor };
+                // «Кассини»: HGA белая, ЭВТИ и РИТЭГи тёмные, штанги металлом, баки в золотой фольге (b_cassini).
+                case SectionModel.Cassini: return new[] { WhiteColor, BlackColor, MetalColor, FoilColor };
+                // «Гюйгенс»: плитки экрана, тыл и кромка; крышка и модуль — фольга, люк/контейнер купола, металл.
+                case SectionModel.HuygensShield: return new[] { ShieldColor, BlackColor, MetalColor };
+                case SectionModel.HuygensCover:
+                case SectionModel.Huygens: return new[] { FoilColor, BlackColor, MetalColor };
                 // Корпуса ступеней: слоты Hull/Black/Metal/Nozzle (hulls_lib.py). Окраска — по фото: Сатурн, Редстоун,
                 // Протон белые; Атлас, Центавр, Аджена — полированная нержавейка; Титан и Блок Д — металл.
                 case SectionModel.AtlasBooster:
@@ -316,6 +326,7 @@ namespace Kare.Space.Game
                 case SectionModel.Centaur: return new[] { PolishedColor, BlackColor, MetalColor, NozzleColor };
                 case SectionModel.TitanStage1:
                 case SectionModel.Titan3Core:   // ядро Titan IIIE — та же ступень Titan II, окраска общая
+                case SectionModel.Titan4Core:   // ядро Titan IVB — так же (b_titan4_core)
                 case SectionModel.TitanStage2:
                 case SectionModel.BlokD: return new[] { MetalColor, BlackColor, PolishedColor, NozzleColor };
                 case SectionModel.Redstone:
@@ -599,6 +610,11 @@ namespace Kare.Space.Game
                     // Сопло уже в модели аппарата (ТДУ «Востока», КТДУ Е-6): факел — от днища секции.
                     bool ownNozzle = model != null && s.Model != SectionModel.Sputnik;
                     if (ownNozzle && s.Model == SectionModel.VostokService) nr = r * ServiceNozzleShare;
+                    // Сопло нарисовано в модели — его размер угадан по секции, а не по чертежу: струя не шире среза,
+                    // который следует из тяги (у «Вояджера» диаметр секции — тарелка антенны). Колокола «из кода»
+                    // не трогаем: факел должен совпадать с нарисованным срезом.
+                    var kind = KindOf(s.Engine, s.EngineCount);
+                    if (ownNozzle) nr = Mathf.Min(nr, ExitRadius(s.Engine));
                     var nozzlePos = new Vector3(0, ownNozzle ? (craft ? ownBottom : 0) : -nr * 1.4f, 0);
                     if (craft) OwnPlume(s, i, ref nozzlePos, ref rr, ref nr);
                     var nozzle = new GameObject("Nozzle");
@@ -645,16 +661,25 @@ namespace Kare.Space.Game
                     }
                     // Общий факел на связку: струи у земли сливаются в один столб, отдельные 9 факелов
                     // дали бы 18 аддитивных слоёв и пересвет на стыках.
-                    nr = ring > 0 ? (rr + nr) * PlumeClusterFill : nr;
+                    // Редкие мелкие сопла на модели аппарата не сливаются (MergeShare) — у каждого свой факел (копии).
+                    bool apart = craft && ring > 0 && nr < rr * MergeShare;
+                    nr = ring > 0 && !apart ? (rr + nr) * PlumeClusterFill : nr;
+                    if (kind == PlumeKind.None)
+                    {
+                        // Монотопливные микродвигатели: факела нет — в пустоте струя гидразина прозрачна (§9.5).
+                        if (s.ParachuteArea > 0) AddChute(part);
+                        parts.Add(part);
+                        continue;
+                    }
 
                     // Факел: ядро (сужается) + свечение (расширяется), оба аддитивные двусторонние —
                     // передняя и задняя стенки складываются, к оси струя плотнее, как у объёма.
                     var plume = new GameObject("Plume");
                     plume.transform.SetParent(nozzle.transform, false);
-                    part.CoreR = AddPlume(plume, ProcMesh.Plume(1, CoreGrow, CorePower, 16, 12));
+                    part.CoreR = AddPlume(plume, ProcMesh.Plume(1, CoreGrow, CorePower, 16, 12), kind);
                     var glow = new GameObject("Glow");
                     glow.transform.SetParent(nozzle.transform, false);
-                    part.GlowR = AddPlume(glow, ProcMesh.Plume(1f, GlowGrow, GlowPower, 16, 12));
+                    part.GlowR = AddPlume(glow, ProcMesh.Plume(1f, GlowGrow, GlowPower, 16, 12), kind);
                     var lgo = new GameObject("Plume Light");
                     lgo.transform.SetParent(nozzle.transform, false);
                     lgo.transform.localPosition = new Vector3(0, -nr * 3, 0);
@@ -662,17 +687,19 @@ namespace Kare.Space.Game
                     light.type = LightType.Point;
                     lgo.AddComponent<HDAdditionalLightData>();
                     light.lightUnit = UnityEngine.Rendering.LightUnit.Candela;
-                    light.color = new Color(1f, 0.72f, 0.45f);
+                    light.color = Look(kind).Light;
                     light.range = PlumeLightRange;
                     light.shadows = LightShadows.None;
                     part.PlumeLight = light;
                     part.Plume = plume.transform;
                     part.Glow = glow.transform;
                     part.PlumeRadius = nr;
+                    part.Kind = kind;
                     plume.SetActive(false);
                     glow.SetActive(false);
                     lgo.SetActive(false);
                     if (craft && HasDraco(s)) AddDracoMirrors(part, nozzle.transform);
+                    else if (apart) AddRingMirrors(part, nozzle.transform, ring, rr);
                 }
                 if (s.ParachuteArea > 0) AddChute(part);
                 parts.Add(part);
@@ -1399,66 +1426,40 @@ namespace Kare.Space.Game
             }
         }
 
-        Renderer AddPlume(GameObject go, Mesh mesh)
+        Renderer AddPlume(GameObject go, Mesh mesh, PlumeKind kind)
         {
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = plumeMat;
+            mr.sharedMaterial = PlumeMaterial(kind);
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             mr.receiveShadows = false;
             return mr;
         }
 
-        /// <summary>Градиент по длине струи (V = 0 у среза): белый → жёлтый → оранжево-красный, яркость спадает.</summary>
-        static Texture2D gradient;
-        static Texture2D PlumeGradient()
-        {
-            if (gradient != null) return gradient;
-            const int n = 64;
-            gradient = new Texture2D(1, n, TextureFormat.RGBAHalf, false, true) { name = "Plume Gradient", wrapMode = TextureWrapMode.Clamp };
-            for (int i = 0; i < n; i++)
-            {
-                // Альфа = 1: аддитив HDRP умножает цвет на альфу — затухание только в RGB.
-                var c = PlumeGradientColor(i / (n - 1f));
-                c.a = 1;
-                gradient.SetPixel(0, i, c);
-            }
-            gradient.Apply(false, true);
-            return gradient;
-        }
-
-        /// <summary>Цвет и яркость струи на доле длины t (0 — срез). Один источник для текстуры и для силы света.</summary>
-        static Color PlumeGradientColor(float t)
-        {
-            var c = Color.Lerp(Color.Lerp(new Color(1f, 0.95f, 0.85f), new Color(1f, 0.7f, 0.3f), Mathf.Clamp01(t * 3)),
-                               new Color(0.9f, 0.3f, 0.1f), Mathf.Clamp01(t * 1.5f - 0.3f));
-            // Срез без резкой кромки, хвост гаснет в ноль.
-            float fade = Mathf.Clamp01(t * 12) * Mathf.Exp(-3.5f * t) * (1 - t);
-            return c * fade;
-        }
+        /// <summary>Градиент керосинового факела — им же светится плазма входа (копия plumeMat).</summary>
+        static Texture2D PlumeGradient() => PlumeGradient(PlumeKind.Kerolox);
 
         /// <summary>Светящаяся площадь мешей факела на единицу длины и радиуса среза (∫ 2·r(t)·яркость(t) dt) и центр
-        /// свечения (доля длины). Считается один раз из профиля мешей и градиента — правка любого из них меняет и свет.</summary>
-        static bool shapeReady;
-        static float coreShape, coreCenter, glowShape, glowCenter;
-        static void PlumeShape()
+        /// свечения (доля длины) — по виду топлива. Считается один раз из профиля мешей и градиента — правка любого
+        /// из них меняет и свет.</summary>
+        struct Shape { public float Core, CoreCenter, Glow, GlowCenter; }
+        static readonly Dictionary<PlumeKind, Shape> shapes = new Dictionary<PlumeKind, Shape>();
+        static Shape PlumeShape(PlumeKind k)
         {
-            if (shapeReady) return;
+            if (shapes.TryGetValue(k, out var sh)) return sh;
             const int n = 128;
             float ca = 0, cm = 0, ga = 0, gm = 0;
             for (int i = 0; i < n; i++)
             {
                 float t = (i + 0.5f) / n;
-                var c = PlumeGradientColor(t);
+                var c = PlumeGradientColor(k, t);
                 float lum = (0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b) / n;
                 float rc = 2 * (1 + CoreGrow * Mathf.Pow(t, CorePower)) * lum;
                 float rg = 2 * (1 + GlowGrow * Mathf.Pow(t, GlowPower)) * lum;
                 ca += rc; cm += rc * t;
                 ga += rg; gm += rg * t;
             }
-            coreShape = ca; coreCenter = cm / ca;
-            glowShape = ga; glowCenter = gm / ga;
-            shapeReady = true;
+            return shapes[k] = new Shape { Core = ca, CoreCenter = cm / ca, Glow = ga, GlowCenter = gm / ga };
         }
 
         /// <summary>
@@ -1469,14 +1470,14 @@ namespace Kare.Space.Game
         /// белого при EV 7,3, а клубы пыли за 20–40 м светились оранжевыми пятнами (замер 05.10.2026).
         /// Пара: CoreNits/GlowNits, PlumeGradientColor, профиль мешей (CoreGrow…GlowPower), GlowLength.
         /// </summary>
-        static void PlumeLight(Light light, float coreNits, float glowNits, float coreR, float glowR, float len, float flicker)
+        static void PlumeLight(Light light, PlumeKind kind, float coreNits, float glowNits, float coreR, float glowR, float len, float flicker)
         {
-            PlumeShape();
-            float core = coreNits * coreR * len * coreShape;
+            var sh = PlumeShape(kind);
+            float core = coreNits * coreR * len * sh.Core;
             float glowLen = len * GlowLength;
-            float glow = glowNits * glowR * glowLen * glowShape;
+            float glow = glowNits * glowR * glowLen * sh.Glow;
             light.intensity = PlumeWalls * (core + glow) * (1 + (flicker - 1) * PlumeLightFlicker);
-            float center = (core * len * coreCenter + glow * glowLen * glowCenter) / Mathf.Max(core + glow, 1e-6f);
+            float center = (core * len * sh.CoreCenter + glow * glowLen * sh.GlowCenter) / Mathf.Max(core + glow, 1e-6f);
             light.transform.localPosition = new Vector3(0, -center, 0);
         }
 
@@ -1617,13 +1618,14 @@ namespace Kare.Space.Game
                 // В вакууме струя раздувается и удлиняется; яркость/длина — от дросселя (§9.5).
                 float vac = 1 - Mathf.Clamp01(pressure);
                 float spread = 1 + vac * PlumeVacuumWidth;
-                float len = p.PlumeRadius * PlumeLengthSL * (0.4f + 0.6f * thr);
+                var look = Look(p.Kind);
+                float len = p.PlumeRadius * PlumeLengthSL * look.Length * (0.4f + 0.6f * thr);
                 float flicker = Flicker(PlumeFlicker, p.Index);
                 float coreR = p.PlumeRadius * (1 + vac * PlumeVacuumWidth * CoreSpread);
                 p.Plume.localScale = new Vector3(coreR, len * flicker, coreR);
                 p.Glow.localScale = new Vector3(p.PlumeRadius * spread, len * GlowLength * flicker, p.PlumeRadius * spread);
                 // Яркость на единицу площади: раздувшаяся струя тусклее (§9.5).
-                float bright = thr * Mathf.Lerp(1, VacuumBrightness, vac) * BrightnessSettings.Plume;
+                float bright = thr * look.Bright * Mathf.Lerp(1, VacuumBrightness * look.Vacuum, vac) * BrightnessSettings.Plume;
                 float coreNits = CoreNits * bright, glowNits = GlowNits * bright / spread;
                 // Экспозиции — фактическая яркость ядра, с вакуумным множителем и без дрожания. Раньше шло CoreNits·thr:
                 // в вакууме экспозиция ставилась под ядро втрое ярче нарисованного, и всё вокруг было на 1,7 EV темнее.
@@ -1631,7 +1633,7 @@ namespace Kare.Space.Game
                 ReportPlume(coreNits / BrightnessSettings.Plume);
                 SetPlumeColor(p.CoreR, coreNits * flicker);
                 SetPlumeColor(p.GlowR, glowNits * flicker);
-                PlumeLight(p.PlumeLight, coreNits, glowNits, coreR, p.PlumeRadius * spread, len, flicker);
+                PlumeLight(p.PlumeLight, p.Kind, coreNits, glowNits, coreR, p.PlumeRadius * spread, len, flicker);
                 if (p.Mirrors != null) SyncMirrors(p, true);
             }
         }

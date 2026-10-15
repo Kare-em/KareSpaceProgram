@@ -618,12 +618,14 @@ namespace Kare.Space.Core
             foreach (var x in WaitUntil(tL, () => $"Окно старта через {Clock(tL - T)}")) yield return x;
         }
 
-        IEnumerable<object> Ascend(double altitude, Vessel planeOf)
+        /// <param name="azimuth">Курс старта, если плоскость задана не кораблём (окно под асимптоту, «Вояджеры»).</param>
+        /// <param name="plane">Нормаль плоскости, к которой доворачивает наведение; ноль — без неё.</param>
+        IEnumerable<object> Ascend(double altitude, Vessel planeOf, double azimuth = 90, Vector3d plane = default)
         {
             var u = universe;
             if (!V.IsLanded && OnOrbit(V)) yield break;
             Phase = "Выведение";
-            u.Ascent = new AscentAutopilot { TargetAltitude = altitude };
+            u.Ascent = new AscentAutopilot { TargetAltitude = altitude, Azimuth = azimuth, PlaneNormal = plane };
             if (planeOf != null) u.Ascent.AimAtPlane(V, planeOf, T);
             foreach (var x in Await(() => u.Ascent == null, () => "Выведение: " + (u.Ascent?.Status ?? ""))) yield return x;
             if (V.IsLanded || !OnOrbit(V)) throw new Abort("орбита не получена");

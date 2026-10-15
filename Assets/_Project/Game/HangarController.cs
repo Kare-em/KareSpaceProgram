@@ -27,7 +27,12 @@ namespace Kare.Space.Game
         /// <summary>Опорное разрешение IMGUI: всё рисуется в 1920 × 1080 и масштабируется по высоте экрана.</summary>
         const float RefHeight = 1080;
         /// <summary>Ширина каталога слева и колонки сборки справа. Пара: зона мыши камеры (PreviewArea).</summary>
-        const float LeftW = 360, RightW = 440, TopH = 52, StatsH = 230, Pad = 8, Row = 30;
+        const float LeftW = 360, RightW = 440, TopH = 52, Pad = 8, Row = 30;
+        /// <summary>Высота сводки внизу: развёрнутая (таблица ступеней + проверки) и свёрнутая в одну строку.
+        /// Пара: зона мыши камеры и строка подсказки (InPreview, HelpLine) берут текущую — StatsH.</summary>
+        const float StatsOpenH = 230, StatsClosedH = 44, StagingClosedH = 40;
+        /// <summary>Выпадающий список: высота строки и предел высоты (дальше — прокрутка).</summary>
+        const float PopupRow = 30, PopupMaxH = 620;
         /// <summary>Иконки деталей (PartIconSet), px IMGUI: в каталоге — в строку высотой 52, в стеке — в строку Row = 30.</summary>
         const float CatalogIcon = 48, StackIcon = 26, IconPad = 3;
 
@@ -40,6 +45,25 @@ namespace Kare.Space.Game
         int missionIdx;
         bool showFiles;
         string[] files = Array.Empty<string>();
+        /// <summary>Файл, ждущий подтверждения удаления (-1 — нет): удаление необратимо, поэтому в два клика.</summary>
+        int confirmDelete = -1;
+        /// <summary>Свёрнутые панели: место отдаётся предпросмотру (сводка) и стеку сборки (ступени).</summary>
+        bool statsOpen = true, stagingOpen = true;
+        float StatsH => statsOpen ? StatsOpenH : StatsClosedH;
+
+        /// <summary>Открытый выпадающий список: GUI.Window — он рисуется поверх и получает клики раньше панелей.</summary>
+        enum Popup { None, Presets, Missions }
+        Popup popup;
+        Rect popupRect;
+        Vector2 popupScroll;
+        /// <summary>Имена пресетов — один раз; сами пресеты строятся заново по клику, чтобы правка не портила образец.</summary>
+        string[] presetNames;
+
+        /// <summary>Поиск по всем категориям каталога и кеш списка: пересобирается при смене категории или запроса.</summary>
+        string search = "";
+        readonly List<PartDef> catList = new List<PartDef>();
+        PartCategory catListCat = (PartCategory)(-1);
+        string catListQuery;
         string status;
         float statusUntil;
         float scale = 1, vw = 1920, vh = 1080;
@@ -51,7 +75,7 @@ namespace Kare.Space.Game
         Vector3 target = new Vector3(0, 20, 0);
         Vector3 lastMouse;
 
-        GUIStyle head, label, small, btn, btnSmall, tab, rowBtn, rowIconBtn, stackIconBtn, err, warn, box;
+        GUIStyle head, label, small, btn, btnSmall, tab, rowBtn, rowIconBtn, stackIconBtn, err, warn, box, helpStyle, markStyle, toastStyle, hintStyle;
 
         static readonly string[] CategoryNames = { "Командные", "Баки", "Двигатели", "Разделители", "Аэро", "Разное", "Нагрузка" };
         static readonly Color SelColor = new Color(1f, 0.55f, 0.15f);
@@ -113,7 +137,7 @@ namespace Kare.Space.Game
         bool InPreview(Vector3 m)
         {
             float x = m.x / scale, y = (Screen.height - m.y) / scale;
-            return x > LeftW + Pad && x < vw - RightW - Pad && y > TopH && y < vh - StatsH - Pad && !showFiles
+            return x > LeftW + Pad && x < vw - RightW - Pad && y > TopH && y < vh - StatsH - Pad && !showFiles && popup == Popup.None
                 && !PartInspector.OverWindow(m); // окно детали над предпросмотром: тащим окно, а не крутим камеру
         }
 
@@ -345,13 +369,27 @@ namespace Kare.Space.Game
             vh = RefHeight;
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
             if (build == null) return;
+            var ev = Event.current;
+            // Клик мимо выпадающего списка закрывает его и дальше не идёт: не нажмёт кнопку под ним случайно.
+            if (popup != Popup.None && ev.type == EventType.MouseDown && !popupRect.Contains(ev.mousePosition))
+            {
+                popup = Popup.None;
+                ev.Use();
+            }
+            // Esc — сначала закрыть список/окно файлов (деталь в руке Esc отменяет в DragUpdate).
+            if (ev.type == EventType.KeyDown && ev.keyCode == KeyCode.Escape && (popup != Popup.None || showFiles))
+            {
+                popup = Popup.None;
+                showFiles = false;
+                ev.Use();
+            }
 
             TopBar();
             Catalog(new Rect(Pad, TopH, LeftW - Pad, vh - TopH - Pad));
-            float rx = vw - RightW;
-            float stackH = (vh - TopH - Pad) * 0.56f;
-            Assembly(new Rect(rx, TopH, RightW - Pad, stackH));
-            Staging(new Rect(rx, TopH + stackH + Pad, RightW - Pad, vh - TopH - stackH - 2 * Pad));
+            float rx = vw - RightW, colH = vh - TopH - Pad;
+            float stageH = stagingOpen ? colH * 0.44f : StagingClosedH;
+            Assembly(new Rect(rx, TopH, RightW - Pad, colH - stageH - Pad));
+            Staging(new Rect(rx, vh - Pad - stageH, RightW - Pad, stageH));
             Stats(new Rect(LeftW + Pad, vh - StatsH, vw - LeftW - RightW - 2 * Pad, StatsH - Pad));
             if (!showFiles)
             {
@@ -360,7 +398,9 @@ namespace Kare.Space.Game
                 HelpLine();
                 ViewBar();
             }
-            if (showFiles) Files(new Rect(vw * 0.5f - 260, 120, 520, 520));
+            Toast();
+            if (showFiles) Files(new Rect(vw * 0.5f - 280, 120, 560, 560));
+            if (popup != Popup.None) popupRect = GUI.Window(77, popupRect, PopupWindow, GUIContent.none, box);
             if (!string.IsNullOrEmpty(GUI.tooltip))
             {
                 var tip = new Rect(LeftW + 2 * Pad, TopH + ToolH + Pad, 420, 64);
@@ -374,34 +414,47 @@ namespace Kare.Space.Game
             Panel(new Rect(0, 0, vw, TopH - 6));
             float x = Pad, y = 8, h = TopH - 22;
             GUI.Label(new Rect(x, y, 120, h), "Конструктор", head); x += 130;
+            // Enter/Esc в поле имени — снять фокус, иначе горячие клавиши (V, F, Del…) молчат: они ждут keyboardControl == 0.
+            var ev = Event.current;
+            if (ev.type == EventType.KeyDown && GUI.GetNameOfFocusedControl() == "craftName"
+                && (ev.keyCode == KeyCode.Return || ev.keyCode == KeyCode.KeypadEnter || ev.keyCode == KeyCode.Escape))
+            {
+                GUIUtility.keyboardControl = 0;
+                ev.Use();
+            }
+            GUI.SetNextControlName("craftName");
             craft.Name = GUI.TextField(new Rect(x, y, 240, h), craft.Name ?? "", btn); x += 248;
-            if (GUI.Button(new Rect(x, y, 80, h), "Новая", btn))
-            {
+            if (GUI.Button(new Rect(x, y, 80, h), new GUIContent("Новая", "Пустая сборка (Ctrl+Z — вернуть прежнюю)"), btn))
                 Load(new Craft(), "Новая ракета: начните с командного модуля или двигателя");
-            }
             x += 86;
-            foreach (var p in CraftPresets.All())
+            if (GUI.Button(new Rect(x, y, 120, h), "Пресеты ▾", btn))
             {
-                var preset = p;
-                if (GUI.Button(new Rect(x, y, 130, h), preset.Name, btnSmall)) Load(preset, $"Пресет «{preset.Name}»");
-                x += 136;
+                if (presetNames == null)
+                {
+                    var names = new List<string>();
+                    foreach (var p in CraftPresets.All()) names.Add(p.Name);
+                    presetNames = names.ToArray();
+                }
+                OpenPopup(Popup.Presets, new Rect(x, TopH - 4, 260, presetNames.Length * PopupRow + 12));
             }
+            x += 126;
             if (GUI.Button(new Rect(x, y, 110, h), "Сохранить", btn)) Save();
             x += 116;
             if (GUI.Button(new Rect(x, y, 110, h), "Открыть…", btn))
             {
                 showFiles = !showFiles;
-                files = Directory.Exists(Dir) ? Directory.GetFiles(Dir, "*.json") : Array.Empty<string>();
+                confirmDelete = -1;
+                RefreshFiles();
             }
-            x += 116;
 
-            // Справа: миссия (цель, дата, стол) и запуск.
+            // Справа: миссия (цель, дата, стол) и запуск. Название — кнопка со списком всех миссий.
             var all = MissionCatalog.All;
-            float rx = vw - 640;
+            float rx = vw - 660;
             if (GUI.Button(new Rect(rx, y, 32, h), "◄", btn)) missionIdx = (missionIdx + all.Count - 1) % all.Count;
-            GUI.Label(new Rect(rx + 36, y, 230, h), "Миссия: " + all[missionIdx].Title, label);
-            if (GUI.Button(new Rect(rx + 270, y, 32, h), "►", btn)) missionIdx = (missionIdx + 1) % all.Count;
-            if (GUI.Button(new Rect(rx + 310, y, 150, h), new GUIContent("Исторический", "Лететь на штатной ракете миссии"), btnSmall))
+            if (GUI.Button(new Rect(rx + 36, y, 284, h), new GUIContent(all[missionIdx].Title + " ▾", "Миссия: цель, дата и стартовый стол"), btnSmall))
+                OpenPopup(Popup.Missions, new Rect(rx + 36, TopH - 4, 380, Mathf.Min(all.Count * PopupRow + 12, PopupMaxH)));
+            if (GUI.Button(new Rect(rx + 324, y, 32, h), "►", btn)) missionIdx = (missionIdx + 1) % all.Count;
+            if (GUI.Button(new Rect(rx + 364, y, 130, h), new GUIContent("Исторический", "Лететь на штатной ракете миссии"), btnSmall))
             {
                 GameBootstrap.NextDesign = null;
                 GameBootstrap.NextMissionId = all[missionIdx].Id;
@@ -409,10 +462,59 @@ namespace Kare.Space.Game
             }
             GUI.enabled = build.Ok;
             GUI.color = build.Ok ? new Color(0.5f, 1f, 0.6f) : Color.white;
-            if (GUI.Button(new Rect(rx + 468, y, 160, h), build.Ok ? "ЗАПУСК ▶" : "Есть ошибки", btn)) Launch();
+            if (GUI.Button(new Rect(rx + 502, y, 150, h), build.Ok ? "ЗАПУСК ▶" : "Есть ошибки", btn)) Launch();
             GUI.color = Color.white;
             GUI.enabled = true;
-            if (status != null) GUI.Label(new Rect(x, y, rx - x - 8, h), status, small);
+        }
+
+        void OpenPopup(Popup which, Rect r)
+        {
+            popup = popup == which ? Popup.None : which;
+            popupRect = r;
+            popupScroll = which == Popup.Missions ? new Vector2(0, Mathf.Max(0, missionIdx * PopupRow - PopupRow * 4)) : Vector2.zero;
+        }
+
+        void PopupWindow(int id)
+        {
+            float w = popupRect.width - 12;
+            if (popup == Popup.Presets)
+            {
+                for (int i = 0; i < presetNames.Length; i++)
+                {
+                    if (!GUI.Button(new Rect(6, 6 + i * PopupRow, w, PopupRow - 2), presetNames[i], rowBtn)) continue;
+                    popup = Popup.None;
+                    int k = 0;
+                    foreach (var p in CraftPresets.All())
+                        if (k++ == i) { Load(p, $"Пресет «{p.Name}» (Ctrl+Z — вернуть прежнюю)"); break; }
+                }
+                return;
+            }
+            var all = MissionCatalog.All;
+            var view = new Rect(6, 6, w, popupRect.height - 12);
+            popupScroll = GUI.BeginScrollView(view, popupScroll, new Rect(0, 0, w - 20, all.Count * PopupRow));
+            for (int i = 0; i < all.Count; i++)
+            {
+                GUI.color = i == missionIdx ? SelColor : Color.white;
+                if (GUI.Button(new Rect(0, i * PopupRow, w - 20, PopupRow - 2), all[i].Title, rowBtn)) { missionIdx = i; popup = Popup.None; }
+            }
+            GUI.color = Color.white;
+            GUI.EndScrollView();
+        }
+
+        /// <summary>Сообщение над строкой подсказки: в верхней панели его обрезало место между кнопками.</summary>
+        void Toast()
+        {
+            if (string.IsNullOrEmpty(status)) return;
+            float l = LeftW + 2 * Pad, w = vw - RightW - Pad - l;
+            float tw = Mathf.Min(w, toastStyle.CalcSize(new GUIContent(status)).x + 32);
+            var r = new Rect(l + (w - tw) * 0.5f, vh - StatsH - Pad - 70, tw, 32);
+            // Последние полсекунды — растворение, а не обрыв.
+            float a = Mathf.Clamp01((statusUntil - Time.time) * 2);
+            GUI.color = new Color(0.1f, 0.18f, 0.3f, 0.92f * a);
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = new Color(1, 1, 1, a);
+            GUI.Label(r, status, toastStyle);
+            GUI.color = Color.white;
         }
 
         void Catalog(Rect r)
@@ -427,12 +529,28 @@ namespace Kare.Space.Game
                 if (GUI.Button(br, CategoryNames[i], tab)) category = (PartCategory)i;
                 GUI.color = Color.white;
             }
-            y += 2 * (Row + 4) + 6;
+            y += 2 * (Row + 4) + 4;
+            // Поиск — по всем категориям сразу: имя, id и описание («стык», «РСУ», «парашют»).
+            var ev0 = Event.current;
+            if (ev0.type == EventType.KeyDown && GUI.GetNameOfFocusedControl() == "partSearch"
+                && (ev0.keyCode == KeyCode.Escape || ev0.keyCode == KeyCode.Return || ev0.keyCode == KeyCode.KeypadEnter))
+            {
+                if (ev0.keyCode == KeyCode.Escape) search = "";
+                GUIUtility.keyboardControl = 0;
+                ev0.Use();
+            }
+            var sr = new Rect(x, y, w - (search.Length > 0 ? 34 : 0), Row - 2);
+            GUI.SetNextControlName("partSearch");
+            search = GUI.TextField(sr, search ?? "", btnSmall);
+            if (search.Length == 0 && GUI.GetNameOfFocusedControl() != "partSearch")
+                GUI.Label(new Rect(sr.x + 8, sr.y, sr.width - 8, sr.height), "Поиск по всем деталям…", hintStyle);
+            if (search.Length > 0 && GUI.Button(new Rect(x + w - 30, y, 30, Row - 2), "✕", btnSmall)) { search = ""; GUIUtility.keyboardControl = 0; }
+            y += Row + 2;
             string into = selRadial >= 0 ? $"в боковую группу {selRadial + 1}" : selStack >= 0 ? "над выбранной деталью" : "наверх стека";
             GUI.Label(new Rect(x, y, w, 22), "Клик — добавить " + into + " · или тащите в сборку", small);
             y += 26;
-            var list = new List<PartDef>();
-            foreach (var p in PartCatalog.All) if (p.Category == category) list.Add(p);
+            var list = CatalogList();
+            if (list.Count == 0) GUI.Label(new Rect(x, y, w, 24), "Ничего не нашлось", small);
             const float item = 52;
             var view = new Rect(x, y, w, r.yMax - y - 8);
             partsScroll = GUI.BeginScrollView(view, partsScroll, new Rect(0, 0, w - 20, list.Count * (item + 4)));
@@ -449,6 +567,24 @@ namespace Kare.Space.Game
                 if (icon != null) GUI.DrawTexture(new Rect(row.x + IconPad, row.y + (item - CatalogIcon) * 0.5f, CatalogIcon, CatalogIcon), icon, ScaleMode.ScaleToFit);
             }
             GUI.EndScrollView();
+        }
+
+        List<PartDef> CatalogList()
+        {
+            string q = (search ?? "").Trim().ToLowerInvariant();
+            if (catListCat == category && catListQuery == q) return catList;
+            catListCat = category;
+            catListQuery = q;
+            catList.Clear();
+            foreach (var p in PartCatalog.All)
+            {
+                if (q.Length == 0 ? p.Category != category
+                    : !((p.Name ?? "").ToLowerInvariant().Contains(q) || p.Id.ToLowerInvariant().Contains(q)
+                        || (p.Description ?? "").ToLowerInvariant().Contains(q))) continue;
+                catList.Add(p);
+            }
+            partsScroll = Vector2.zero;
+            return catList;
         }
 
         static string EngineText(PartDef p)
@@ -624,12 +760,13 @@ namespace Kare.Space.Game
         {
             Panel(r);
             float x = r.x + 8, y = r.y + 8, w = r.width - 16;
-            GUI.Label(new Rect(x, y, w - 110, 24), "Ступени (по пробелу)", label);
+            if (GUI.Button(new Rect(x, y, w - 110, 24), (stagingOpen ? "▾ " : "▸ ") + "Ступени (по пробелу)", label)) stagingOpen = !stagingOpen;
             if (GUI.Button(new Rect(x + w - 100, y, 100, 26), new GUIContent("Авто", "Расставить ступени заново"), btnSmall))
             {
                 CraftCompiler.AutoStage(craft);
                 dirty = true;
             }
+            if (!stagingOpen) return;
             y += 32;
             var items = new List<StageItem>();
             for (int i = 0; i < craft.Stack.Count; i++)
@@ -680,8 +817,22 @@ namespace Kare.Space.Game
             double dv = 0;
             foreach (var s in build.Stats) dv += s.DeltaVVac;
             string twr = build.Stats.Count > 0 ? $"{build.Stats[0].TwrSL:0.00}" : "—";
-            GUI.Label(new Rect(x, y, w, 24),
-                $"Масса {build.Mass / 1000:0.0} т · высота {build.Height:0.0} м · ширина {build.Width:0.0} м · Δv {dv:0} м/с · TWR старта {twr}", label);
+            if (GUI.Button(new Rect(r.xMax - 36, y, 28, 24), new GUIContent(statsOpen ? "▾" : "▴", statsOpen ? "Свернуть сводку" : "Развернуть сводку"), btnSmall))
+                statsOpen = !statsOpen;
+            string sum = $"Масса {build.Mass / 1000:0.0} т · высота {build.Height:0.0} м · Δv {dv:0} м/с · TWR старта {twr}";
+            if (!statsOpen)
+            {
+                // Свёрнуто: сводка + счётчик проверок; первая ошибка — красным, чтобы не искать, почему запуск серый.
+                float sw = label.CalcSize(new GUIContent(sum)).x;
+                GUI.Label(new Rect(x, y, sw, 24), sum, label);
+                float ex0 = x + sw + 16, ew0 = r.xMax - 44 - ex0;
+                // В одну строку с «…»: перенос длинного предупреждения вылезал за полосу высотой StatsClosedH.
+                if (build.Errors.Count > 0) GUI.Label(new Rect(ex0, y, ew0, 24), Fit(err, $"✖ {build.Errors.Count}: {build.Errors[0]}", ew0), err);
+                else if (build.Warnings.Count > 0) GUI.Label(new Rect(ex0, y, ew0, 24), Fit(warn, $"⚠ {build.Warnings.Count}: {build.Warnings[0]}", ew0), warn);
+                else GUI.Label(new Rect(ex0, y, ew0, 24), "✔ Проверки пройдены", label);
+                return;
+            }
+            GUI.Label(new Rect(x, y, w - 40, 24), sum + $" · ширина {build.Width:0.0} м", label);
             y += 28;
             float colW = w * 0.58f;
             // Слева — ступени по пробелам (как VesselDesign.ComputeStats: параллельная работа боковушек — одним прожигом).
@@ -705,12 +856,24 @@ namespace Kare.Space.Game
             foreach (var e in build.Warnings) { GUI.Label(new Rect(ex, ey, ew, 40), "⚠ " + e, warn); ey += warn.CalcHeight(new GUIContent("⚠ " + e), ew) + 2; }
         }
 
+        /// <summary>Текст, обрезанный с «…» под ширину w в стиле s (CalcSize меряет без переноса).</summary>
+        static string Fit(GUIStyle s, string text, float w)
+        {
+            if (s.CalcSize(new GUIContent(text)).x <= w) return text;
+            int lo = 0, hi = text.Length;
+            while (lo < hi)
+            {
+                int mid = (lo + hi + 1) / 2;
+                if (s.CalcSize(new GUIContent(text.Substring(0, mid) + "…")).x <= w) lo = mid; else hi = mid - 1;
+            }
+            return text.Substring(0, lo) + "…";
+        }
+
         void Files(Rect r)
         {
-            Panel(r);
-            Panel(r);
+            Panel(r, 0.97f);
             float x = r.x + 10, y = r.y + 10, w = r.width - 20;
-            GUI.Label(new Rect(x, y, w - 40, 24), "Сохранённые ракеты", label);
+            GUI.Label(new Rect(x, y, w - 40, 24), "Сохранённые ракеты (Esc — закрыть)", label);
             if (GUI.Button(new Rect(r.xMax - 40, y, 30, 26), "✕", btnSmall)) showFiles = false;
             y += 32;
             GUI.Label(new Rect(x, y, w, 20), Dir, small);
@@ -719,7 +882,23 @@ namespace Kare.Space.Game
             filesScroll = GUI.BeginScrollView(view, filesScroll, new Rect(0, 0, w - 20, files.Length * (Row + 4)));
             for (int i = 0; i < files.Length; i++)
             {
-                if (!GUI.Button(new Rect(0, i * (Row + 4), w - 20, Row), Path.GetFileNameWithoutExtension(files[i]), rowBtn)) continue;
+                float ry = i * (Row + 4), iw = w - 20;
+                if (confirmDelete == i)
+                {
+                    GUI.Label(new Rect(8, ry, iw - 150, Row), $"Удалить «{Path.GetFileNameWithoutExtension(files[i])}»?", err);
+                    if (GUI.Button(new Rect(iw - 140, ry, 66, Row), "Да", btnSmall))
+                    {
+                        try { File.Delete(files[i]); Say($"Удалено: {Path.GetFileName(files[i])}"); }
+                        catch (Exception e) { Say($"Не удалилось: {e.Message}"); }
+                        confirmDelete = -1;
+                        RefreshFiles();
+                        break;
+                    }
+                    if (GUI.Button(new Rect(iw - 70, ry, 70, Row), "Нет", btnSmall)) confirmDelete = -1;
+                    continue;
+                }
+                if (GUI.Button(new Rect(iw - 34, ry, 34, Row), new GUIContent("✕", "Удалить файл"), btnSmall)) { confirmDelete = i; continue; }
+                if (!GUI.Button(new Rect(0, ry, iw - 40, Row), Path.GetFileNameWithoutExtension(files[i]), rowBtn)) continue;
                 try
                 {
                     Load(Craft.FromJson(File.ReadAllText(files[i])), $"Открыта «{Path.GetFileName(files[i])}»");
@@ -731,9 +910,20 @@ namespace Kare.Space.Game
             GUI.EndScrollView();
         }
 
-        void Panel(Rect r)
+        /// <summary>Сохранения без автосохранения: _last.json — это текущая сборка, открывать её незачем.</summary>
+        void RefreshFiles()
         {
-            GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.9f);
+            var list = new List<string>();
+            if (Directory.Exists(Dir))
+                foreach (var f in Directory.GetFiles(Dir, "*.json"))
+                    if (!string.Equals(f, LastPath, StringComparison.OrdinalIgnoreCase)) list.Add(f);
+            list.Sort(StringComparer.OrdinalIgnoreCase);
+            files = list.ToArray();
+        }
+
+        void Panel(Rect r, float alpha = 0.9f)
+        {
+            GUI.color = new Color(0.06f, 0.08f, 0.12f, alpha);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
             GUI.color = Color.white;
         }
@@ -760,6 +950,18 @@ namespace Kare.Space.Game
             err.normal.textColor = new Color(1f, 0.45f, 0.4f);
             warn = new GUIStyle(small);
             warn.normal.textColor = new Color(1f, 0.85f, 0.4f);
+            helpStyle = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter };
+            markStyle = new GUIStyle(small) { fontStyle = FontStyle.Bold };
+            toastStyle = new GUIStyle(small) { fontSize = 15, alignment = TextAnchor.MiddleCenter, wordWrap = false };
+            hintStyle = new GUIStyle(small);
+            hintStyle.normal.textColor = new Color(1, 1, 1, 0.4f);
+            // Подложка выпадающего списка: непрозрачная, иначе строки читаются поверх деталей.
+            var bg = new Texture2D(1, 1);
+            bg.SetPixel(0, 0, new Color(0.08f, 0.1f, 0.15f, 0.98f));
+            bg.Apply();
+            box = new GUIStyle(GUI.skin.box) { padding = new RectOffset(0, 0, 0, 0) };
+            box.normal.background = bg;
+            box.onNormal.background = bg;
         }
     }
 }

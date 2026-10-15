@@ -210,9 +210,11 @@ namespace Kare.Space.Core
         /// Разгон с опорной орбиты к заданному гиперболическому избытку vInf, когда окно уже выбрано: dep — конец витка
         /// старта, tof — перелёт до цели. Момент на витке и импульс по асимптоте, затем спуск по промаху у цели.
         /// Отдельно от PlanInterplanetary: «Вояджеру» окно задаёт тур с гравманёврами (TourPlanner), а не минимум Δv.
+        /// aim — точка в картинной плоскости цели (гравманёвр): без неё спуск попадал в нужную дальность с любой
+        /// стороны Юпитера, и первая коррекция переносила точку прицела за 49 м/с при ошибке разгона 12 (15.10.2026).
         /// </summary>
         public static TransferPlan PlanDeparture(CelestialBody body, Vector3d r, Vector3d v, double t0, Vector3d vInf,
-            double dep, CelestialBody target, double targetMiss, double tof)
+            double dep, CelestialBody target, double targetMiss, double tof, AimPoint aimAt = null)
         {
             var sun = body.Parent;
             var orbit = KeplerOrbit.FromState(r, v, body.Mu, t0);
@@ -253,7 +255,14 @@ namespace Kare.Space.Core
                 if (!Escape(orbit, body, p, out var tx, out var vh, out var rh)) return NoReturnCost;
                 var helio = KeplerOrbit.FromState(rh, vh, sun.Mu, tx);
                 p.Miss = ClosestApproach(helio, target, tx, span, out p.ArrivalTime);
-                return Math.Abs(p.Miss - targetMiss) + PlanetDvPenalty * p.DeltaV;
+                if (aimAt == null) return Math.Abs(p.Miss - targetMiss) + PlanetDvPenalty * p.DeltaV;
+                // Промах — вектор в картинной плоскости (поперёк скорости относительно цели) против точки прицела.
+                helio.GetState(p.ArrivalTime, out var rs, out var vs);
+                target.LocalStateAt(p.ArrivalTime, out var rt, out var vt);
+                Vector3d rel = rs - rt, vrel = vs - vt, uh = vrel.normalized;
+                var bvec = rel - uh * Vector3d.Dot(rel, uh);
+                var hh = Vector3d.Cross(rh, vh).normalized;
+                return (bvec - aimAt(p.ArrivalTime, rel, vrel, hh)).magnitude + PlanetDvPenalty * p.DeltaV;
             };
             var best = DescendBy(cost, start, cost(start), new[] { dt / 8, 2, 2, 2 }, t0 + 60, out _);
             cost(best);
@@ -371,6 +380,206 @@ namespace Kare.Space.Core
             var after = KeplerOrbit.FromState(rc, vc + dvBest, body.Mu, tc);
             plan.Miss = ClosestApproach(after, target, tc, 1.5 * (bestT - tc), out plan.ArrivalTime);
             return plan;
+        }
+
+        /// <summary>Шаг конечных разностей для якобиана сквозного прицела, м/с: 1 мм/с перед Юпитером — ~10⁴ км у Сатурна.</summary>
+        const double ThroughStep = 1e-3;
+        /// <summary>Сквозной прицел сошёлся, когда промах у следующей планеты меньше этого, м.</summary>
+        const double ThroughTolerance = 100e3;
+        /// <summary>
+        /// Решение принимается и без полной сходимости, если промах у следующей планеты меньше этого, м: у «Вояджера-1»
+        /// итерации вставали на 8–20 тыс. км у Сатурна (шум конечных разностей), а такой промах следующая коррекция
+        /// снимает за доли м/с. Пара: должен быть много меньше коридора следующей планеты (у Нептуна 17 тыс. км — снимут
+        /// ранняя и поздняя коррекции перелёта).
+        /// </summary>
+        const double ThroughAccept = 30e6;
+        /// <summary>
+        /// Решение дороже плана по картинной плоскости flyby больше чем на столько отбрасывается, м/с: у зонда всего
+        /// ~290 м/с. Ограничивать сам шаг нельзя — предел 5 м/с за итерацию у «Вояджера-1» полз по 230 тыс. км из
+        /// 79 млн и за 40 итераций не сошёлся; без предела итерации заходят до 3000 м/с, но сходятся к 18 м/с.
+        /// </summary>
+        const double ThroughMaxExtra = 150;
+        const int ThroughIterations = 60;
+        /// <summary>
+        /// Удержание перицентра у flyby в коридоре: невязка по нему — выход за [rpMin + доля, rpMax − доля] коридора,
+        /// умноженный на вес. Без неё решение «минимальной нормы» у «Вояджера-1» ушло на 240 тыс. км при дне коридора
+        /// 270 тыс., а поздняя коррекция — на ветку с перицентром 22 млн км. Вес: 1 м/с за 75 сут сдвигает перицентр
+        /// у Юпитера на ~6500 км, а картинную плоскость Сатурна — на десятки тысяч, так что ×10 их уравнивает.
+        /// </summary>
+        const double ThroughRpMargin = 0.05, ThroughRpWeight = 10;
+
+        /// <summary>
+        /// Коррекция «сквозь» гравманёвр (GDD §6.11): импульс через lead подбирается так, чтобы ПОСЛЕ пролёта flyby
+        /// траектория попала в точку прицела nextAim у следующей планеты next. Прицел по картинной плоскости самого
+        /// flyby (Ламберт от центра планеты, асимптота = скорость на границе сферы) у Юпитера ошибался на ~1,5° и ~1 %
+        /// скорости, а на перелёте к Сатурну это десятки млн км: коррекция к Сатурну вышла 1609 м/с при запасе 290.
+        /// Здесь прогноз — те же конические сечения, что ведут корабль на рельсах: Солнце → гипербола в сфере flyby →
+        /// снова Солнце, — поэтому он точный. Решатель — Гаусс–Ньютон к решению минимальной нормы всего импульса
+        /// (у последней планеты прицел — по сути одно уравнение |b| = Baim, система недоопределена) с откатом шага.
+        /// guess — план по картинной плоскости flyby, от него старт. null — промах больше ThroughAccept, импульс дороже
+        /// guess на ThroughMaxExtra или перицентр у flyby вне коридора [rpMin, rpMax]: тогда остаётся guess.
+        /// </summary>
+        public static TransferPlan PlanThroughFlyby(CelestialBody body, Vector3d r, Vector3d v, double t0, CelestialBody flyby,
+            CelestialBody next, double tNext, AimPoint nextAim, double lead, TransferPlan guess, double rpMin, double rpMax,
+            TransferPlan start = null)
+        {
+            if (guess == null || flyby.Parent != body || next.Parent != body) return null;
+            var orbit = KeplerOrbit.FromState(r, v, body.Mu, t0);
+            double tc = t0 + lead;
+            orbit.GetState(tc, out var rc, out var vc);
+            var pro = vc.normalized;
+            var h = Vector3d.Cross(rc, vc).normalized;
+            var rad = Vector3d.Cross(pro, h);
+            ClosestApproach(orbit, flyby, tc, HelioCorrectionYears * 365.25 * 86400, out double ta0);
+            if (double.IsNaN(ta0) || ta0 <= tc) return null;
+            double tEnd = ta0 + 0.5 * (ta0 - tc);
+
+            // Прогноз от импульса dv: промах у next в картинной плоскости, перицентр и момент пролёта flyby.
+            double rpLast = double.NaN, tpLast = double.NaN;
+            Func<Vector3d, Vector3d?> residual = dv =>
+            {
+                var helio = KeplerOrbit.FromState(rc, vc + dv, body.Mu, tc);
+                double te = PatchedConics.FindEncounter(helio, flyby, tc, tEnd);
+                if (double.IsNaN(te)) return null;
+                // Вход в сферу — ньютоном до долей миллисекунды: бисекция FindEncounter (1 мс) ломала бы якобиан.
+                for (int k = 0; k < 4; k++)
+                {
+                    helio.GetState(te, out var rs, out var vs);
+                    flyby.LocalStateAt(te, out var rf, out var vf);
+                    Vector3d dr = rs - rf, dvv = vs - vf;
+                    double d = dr.magnitude, rate = Vector3d.Dot(dr, dvv) / d;
+                    if (Math.Abs(rate) < 1e-9) break;
+                    te -= (d - flyby.SoiRadius) / rate;
+                }
+                helio.GetState(te, out var r1, out var v1);
+                PatchedConics.ChangeFrame(body, flyby, te, ref r1, ref v1);
+                var hyp = KeplerOrbit.FromState(r1, v1, flyby.Mu, te);
+                double tx = hyp.NextTimeAtRadius(flyby.SoiRadius, te, true);
+                if (double.IsNaN(tx)) return null;
+                rpLast = hyp.PeriapsisRadius;
+                double band = ThroughRpMargin * (rpMax - rpMin);
+                double rpOut = rpLast - MathD.Clamp(rpLast, rpMin + band, rpMax - band);
+                tpLast = te + hyp.TimeToPeriapsis(te);
+                hyp.GetState(tx, out var r2, out var v2);
+                PatchedConics.ChangeFrame(flyby, body, tx, ref r2, ref v2);
+                var helio2 = KeplerOrbit.FromState(r2, v2, body.Mu, tx);
+                ClosestApproach(helio2, next, tx, 2 * Math.Max(tNext - tx, 30 * 86400), out double ta);
+                helio2.GetState(ta, out var rs2, out var vs2);
+                next.LocalStateAt(ta, out var rn, out var vn);
+                Vector3d rel = rs2 - rn, vrel = vs2 - vn, u = vrel.normalized;
+                var b = rel - u * Vector3d.Dot(rel, u);
+                var h2 = Vector3d.Cross(r2, v2).normalized;
+                // Третья ось невязки — вдоль u: картинная плоскость ей перпендикулярна, оси не мешают друг другу.
+                return b - nextAim(ta, rel, vrel, h2) + u * (rpOut * ThroughRpWeight);
+            };
+
+            // Старт — прошлое сквозное решение, если есть: от плана по картинной плоскости (промах у Сатурна ~93 млн км)
+            // «Вояджер-2» за 40 итераций полз до 0,5 млн км, а пересчёт с бо́льшим lead отличается от прошлого на минуты.
+            var s0 = start ?? guess;
+            var x = pro * s0.Prograde + h * s0.Normal + rad * s0.Radial;
+            var res = residual(x);
+            if (!res.HasValue) return null;
+            double err = res.Value.magnitude;
+            for (int it = 0; it < ThroughIterations && err > ThroughTolerance; it++)
+            {
+                // Якобиан 3×3 конечными разностями по осям P.
+                var J = new Vector3d[3];
+                bool ok = true;
+                for (int k = 0; k < 3; k++)
+                {
+                    var e = new Vector3d(k == 0 ? 1 : 0, k == 1 ? 1 : 0, k == 2 ? 1 : 0);
+                    var rk = residual(x + e * ThroughStep);
+                    if (!rk.HasValue) { ok = false; break; }
+                    J[k] = (rk.Value - res.Value) / ThroughStep;
+                }
+                if (!ok) return null;
+                // Шаг к решению минимальной нормы ВСЕГО импульса, а не приращения: (JᵀJ + μI)·x' = Jᵀ·(J·x − res).
+                // Обычный шаг −J⁺·res минимален только на каждой итерации, а по слабому направлению (момент пролёта)
+                // итерации дрейфуют: у «Вояджера-1» ранняя коррекция ушла на 290 м/с при линейной оценке ~10.
+                var Jx = J[0] * x.x + J[1] * x.y + J[2] * x.z - res.Value;
+                var A = new double[3, 3];
+                var g = new double[3];
+                double trace = 0;
+                for (int i = 0; i < 3; i++)
+                {
+                    for (int j = 0; j < 3; j++) A[i, j] = Vector3d.Dot(J[i], J[j]);
+                    g[i] = Vector3d.Dot(J[i], Jx);
+                    trace += A[i, i];
+                }
+                double mu = 1e-9 * trace;
+                for (int i = 0; i < 3; i++) A[i, i] += mu;
+                if (!Solve3(A, g, out var step)) return null;
+                var delta = new Vector3d(step[0], step[1], step[2]) - x;
+                // Откат половинением: за пределами линейности (десятки м/с у Юпитера) полный шаг перелетает.
+                bool better = false;
+                for (int half = 0; half < 20; half++)
+                {
+                    var xt = x + delta;
+                    var rt = residual(xt);
+                    if (rt.HasValue && rt.Value.magnitude < err)
+                    {
+                        x = xt; res = rt; err = rt.Value.magnitude;
+                        better = true;
+                        break;
+                    }
+                    delta *= 0.5;
+                }
+                if (!better) break;
+            }
+            if (err > ThroughAccept || x.magnitude > guess.DeltaV + ThroughMaxExtra) return null;
+            residual(x);
+            if (double.IsNaN(rpLast) || rpLast < rpMin || rpLast > rpMax) return null;
+            return new TransferPlan
+            {
+                Time = tc,
+                Prograde = Vector3d.Dot(x, pro),
+                Normal = Vector3d.Dot(x, h),
+                Radial = Vector3d.Dot(x, rad),
+                Miss = rpLast,
+                ArrivalTime = tpLast,
+            };
+        }
+
+        /// <summary>
+        /// Перицентр у цели после импульса p — теми же коническими сечениями, что ведут корабль на рельсах: Солнце →
+        /// граница сферы цели → гипербола. Прицел по картинной плоскости (асимптота у центра цели) у Нептуна ошибся
+        /// на 12,7 тыс. км (перицентр 24 180 км над облаками при цели 11 500 и коридоре до 20 000). NaN — не входим.
+        /// </summary>
+        public static double PeriapsisAfter(CelestialBody body, Vector3d r, Vector3d v, double t0, TransferPlan p,
+            CelestialBody target)
+        {
+            if (p == null || target.Parent != body) return double.NaN;
+            var orbit = KeplerOrbit.FromState(r, v, body.Mu, t0);
+            orbit.GetState(p.Time, out var rc, out var vc);
+            var pro = vc.normalized;
+            var h = Vector3d.Cross(rc, vc).normalized;
+            var rad = Vector3d.Cross(pro, h);
+            var helio = KeplerOrbit.FromState(rc, vc + pro * p.Prograde + h * p.Normal + rad * p.Radial, body.Mu, p.Time);
+            double span = double.IsNaN(p.ArrivalTime) ? HelioCorrectionYears * 365.25 * 86400 : 1.5 * (p.ArrivalTime - p.Time);
+            double te = PatchedConics.FindEncounter(helio, target, p.Time, p.Time + span);
+            if (double.IsNaN(te)) return double.NaN;
+            helio.GetState(te, out var r1, out var v1);
+            PatchedConics.ChangeFrame(body, target, te, ref r1, ref v1);
+            return KeplerOrbit.FromState(r1, v1, target.Mu, te).PeriapsisRadius;
+        }
+
+        /// <summary>Система 3×3 по Крамеру; false — вырождена.</summary>
+        static bool Solve3(double[,] a, double[] b, out double[] x)
+        {
+            x = new double[3];
+            double det = Det3(a, -1, null);
+            if (Math.Abs(det) < 1e-300) return false;
+            for (int k = 0; k < 3; k++) x[k] = Det3(a, k, b) / det;
+            return true;
+        }
+
+        /// <summary>Определитель 3×3; col ≥ 0 — со столбцом col, заменённым на b.</summary>
+        static double Det3(double[,] a, int col, double[] b)
+        {
+            Func<int, int, double> m = (i, j) => j == col ? b[i] : a[i, j];
+            return m(0, 0) * (m(1, 1) * m(2, 2) - m(1, 2) * m(2, 1))
+                 - m(0, 1) * (m(1, 0) * m(2, 2) - m(1, 2) * m(2, 0))
+                 + m(0, 2) * (m(1, 0) * m(2, 1) - m(1, 1) * m(2, 0));
         }
 
         /// <summary>Гипербола ухода после импульса: момент выхода из сферы влияния и состояние относительно родителя.</summary>

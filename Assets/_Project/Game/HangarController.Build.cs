@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Kare.Space.Core;
 using UnityEngine;
 
@@ -189,6 +190,9 @@ namespace Kare.Space.Game
                 undo.Add(lastJson);
                 if (undo.Count > UndoMax) undo.RemoveAt(0);
                 redo.Clear();
+                // Автосохранение каждой правки: вылет или закрытие окна не теряет сборку (раньше — только при запуске).
+                try { Directory.CreateDirectory(Dir); File.WriteAllText(LastPath, j); }
+                catch (Exception e) { Debug.LogWarning($"[Hangar] автосохранение не записано: {e.Message}"); }
             }
             lastJson = j;
         }
@@ -219,6 +223,8 @@ namespace Kare.Space.Game
                 pressing = lmbOrbit = false;
                 if (InPreview(m) && !HudHits.Contains(m))
                 {
+                    // Клик по сцене — фокус с имени/поиска долой, иначе горячие клавиши так и не оживут.
+                    GUIUtility.keyboardControl = 0;
                     pressing = Hit(m, out pressStack, out pressRadial, out pressRadialPart, out _);
                     lmbOrbit = !pressing;
                     pressAt = m;
@@ -325,6 +331,8 @@ namespace Kare.Space.Game
         void DragUpdate(Vector3 m)
         {
             ComputeSnap(m);
+            // Над панелями узлов нет: луч из камеры их «видит» сквозь интерфейс, и отпускание над стеком ставило деталь.
+            if (!InPreview(m)) snap = default;
             PlaceGhost(m);
             if (Input.GetKeyDown(KeyCode.Escape)) { CancelDrag(); return; }
             if (Input.GetMouseButton(0)) return;
@@ -336,7 +344,13 @@ namespace Kare.Space.Game
                 if (!fromCatalog) Say("Деталь убрана (Ctrl+Z — вернуть)");
                 return;
             }
-            if (snap.Kind == SnapKind.None) { CancelDrag(); return; }
+            if (snap.Kind == SnapKind.None)
+            {
+                bool fromCatalog = drag.FromCatalog;
+                CancelDrag();
+                if (!fromCatalog) Say("Отпущено мимо узла — деталь вернулась на место");
+                return;
+            }
             Apply();
             EndDrag();
         }
@@ -615,8 +629,7 @@ namespace Kare.Space.Game
             GUI.DrawTexture(new Rect(r.x + (r.width - Mathf.Min(r.width, small.CalcSize(new GUIContent(text)).x + 24)) * 0.5f, r.y,
                 Mathf.Min(r.width, small.CalcSize(new GUIContent(text)).x + 24), r.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            var st = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter };
-            GUI.Label(r, text, st);
+            GUI.Label(r, text, helpStyle);
         }
 
         /// <summary>Узлы стека во время переноса: точки на стыках, выбранный — крупный зелёный.</summary>
@@ -707,9 +720,8 @@ namespace Kare.Space.Game
             GUI.DrawTexture(new Rect(p.x - size * 0.5f, p.y - size * 0.5f, size, size), dot);
             GUI.color = Color.white;
             if (text == null) return;
-            var st = new GUIStyle(small) { fontStyle = FontStyle.Bold };
-            st.normal.textColor = c;
-            GUI.Label(new Rect(p.x + size * 0.5f + 4, p.y - 11, 60, 22), text, st);
+            markStyle.normal.textColor = c;
+            GUI.Label(new Rect(p.x + size * 0.5f + 4, p.y - 11, 60, 22), text, markStyle);
         }
 
         static Texture2D Dot()

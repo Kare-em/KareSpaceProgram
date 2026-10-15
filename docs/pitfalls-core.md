@@ -356,3 +356,85 @@ Read when editing `Core/` and the flight game logic (`VesselView`, `FlightInput`
 - **A flyby tour must be anchored to the historical dates.** Zero-mismatch solutions form continuous valleys; without a pull
   term the simplex slid along them towards cheaper departures (V1 Jupiter +235 days). `TourPlanner.HistoryScale` (2 days,
   quadratic) keeps the solution within days of history.
+
+## Voyager: departure accuracy and gravity-assist targeting (15.10.2026, `FlightControl.cs`, `TransferPlanner.Return.cs`, `MissionAutopilot.Planetary.cs`)
+- **Energy-mode "Δv left" must solve the quadratic, not ΔE/|v|.** `EnergyLeft()` = root of dv²/2 + (v·u)·dv − ΔE = 0. The
+  linear estimate overstates by dv²/2v: +3.4 km/s on the Voyager departure → the burn started early (asymptote rotated 4°) and
+  the Centaur was cut late (v∞ +147 m/s). Affects EVERY long energy-mode burn (lunar TLI too). V1 departure error / first
+  correction: before 4.03° / 632 m/s → after EnergyLeft 1.12° / 146 m/s → after kick guidance 0.01° / 49.46 m/s; v∞ 10260 vs 10272.
+- **Unguided solid kick ruins the asymptote.** TE-M-364-4 (≈2 km/s) burns to depletion, so |v∞| is set by the Centaur cutoff
+  and the DIRECTION by the kick attitude: `ManeuverNode.TargetExcess` (wanted v∞ vector, `KeplerOrbit.Excess`), `KickAim` —
+  Gauss–Newton over 2 angles, closed loop on `SolidLeftDeltaV`. Constants `KickGuidanceShare 1.5`, `KickHoldDv 30`.
+- **The departure must aim at the B-plane POINT, not the miss distance.** `PlanDeparture` matched only |b| at Jupiter →
+  12 m/s of real error cost a 49 m/s early correction (relocation around the ring of equal |b|). Now `aimAt` = `TourAim(tour, 0)`.
+- **B-plane aim at a gravity-assist body is not good enough for the next leg.** Lambert from Jupiter's centre + asymptote =
+  velocity at the SOI edge (48 mln km) errs ~1.5° and ~1 % of speed → tens of mln km at Saturn: V1 correction to Saturn
+  1609 m/s with 290 on board. Fix: `PlanThroughFlyby` — residual = B-vector at the NEXT planet minus its aim, propagated by
+  the same patched conics the rails use (Sun → hyperbola in the flyby SOI → Sun), so it is exact. After: V1 Saturn corrections
+  8.32 / 0.75 m/s.
+- **Through-solver details that each cost a failed run:**
+  - Gauss–Newton toward the minimum-norm TOTAL impulse ((JᵀJ + μI)·x' = Jᵀ(J·x − res), μ = 1e-9·trace): the plain −J⁺·res step
+    drifts along the weak direction (flyby time) — V1 early correction went to 290 m/s vs ~10 linear estimate.
+  - Finite-difference step 1e-3 m/s (1 mm/s before Jupiter ≈ 10⁴ km at Saturn); SOI entry refined by Newton, not the 1 ms
+    bisection of `FindEncounter` — the bisection noise broke the Jacobian.
+  - NO per-step cap: 5 m/s per iteration crawled 230 thousand km of 79 mln and never converged. Without a cap iterations visit
+    3000 m/s but converge to 18. Instead the final answer is rejected if it costs more than guess + `ThroughMaxExtra` (150 m/s).
+  - Accept without full convergence when the next-planet miss < `ThroughAccept` 30e6 m: iterations stalled at 8–20 thousand km
+    (FD noise), and the next correction removes that for fractions of m/s.
+  - Keep the flyby periapsis in its corridor by a 3rd residual along u (`ThroughRpMargin 0.05`, `ThroughRpWeight 10`): the
+    minimum-norm solution took V1 to 240 thousand km under a 270 thousand floor.
+  - **Warm start between lead passes.** `Correct()` re-plans with a longer lead when the hydrazine burn is long (3.6 N → 49 m/s
+    ≈ 3 h). Pass 2 restarted from the B-plane guess (93 mln km miss at Saturn), crawled to 48 mln in 40 iterations and failed;
+    the fallback B-plane plan then needed 1572 m/s to Saturn. Fix: `start` = previous through solution, keep it if the new pass
+    fails, `ThroughIterations` 60. V2 Saturn corrections after: 2.78 / 0.92 m/s.
+- **The LAST planet needs the patched-conic periapsis too.** No next leg → no through solver; the B-plane aim
+  (`b = rp·√(1+2μ/(rp·v∞²))` at the centre) put V2 at Neptune 24 180 km over the clouds for a 11 500 target (corridor 3–20
+  thousand) → "мимо коридора". Fix: `TransferPlanner.PeriapsisAfter` (Sun → SOI edge → hyperbola rp) and up to
+  `FinalAimPasses` 4 shifts of the aimed rp by the prediction error (tolerance 5 % of the corridor). After: Pe 12 281 km.
+- **Launch azimuth for an asymptote above the site latitude.** V2's asymptote declination > 28.5°: a due-east plane never
+  contains it, no window, the departure with a plane change cost 7836 m/s vs 7276 → Centaur + kick 92 m/s short, the rest on
+  hydrazine (3.6 N) started 50 min before the node and the probe burned up. Fix: `LaunchAzimuths` — sin A = cos(|δ| + 0.5°)/cos φ,
+  try A and 180 − A, take the earlier window, pass the plane normal to the ascent (`Ascend(..., azimuth, plane)`). V2: 121.4°.
+- **Tutor shows ALTITUDE, the planners use RADIUS.** "перицентр 485869 км" in the cruise hint is above the cloud tops;
+  corridors in `Objective.Min/Max` are altitudes too, add `body.Radius` before comparing with `PeriapsisRadius`.
+
+## Saves (15.10.2026, `Core/Save/SaveGame*.cs`)
+- **Bitwise continuation needs the private caches too.** `Universe.nextEvent/eventValid` (rails transition) and `fresh`
+  (separation pairs) change the step sequence; dropping them makes the copy diverge. The reflection serializer writes all
+  instance fields for this reason. Do not "optimise" it into a hand-picked list.
+- **Events are not saved; `Universe.AfterLoad` re-subscribes `Vessel.Event` → `OnVesselEvent`.** It covers Vessels and also
+  deferred recoveries, whose vessels are outside `Vessels` but keep the subscription, since `ResumeRecovery` does not
+  re-add it. Without this, crashes, landings and docking go unnoticed after a load.
+- **`new Vessel(design)` in `Load` consumes ids from the static `Vessel.nextId`.** The loader restores the counter
+  (max of before, saved, max id + 1). Otherwise a save of the loaded copy differs in `nextVesselId` (seen: 27 vs 31).
+- **Doubles:** "R" on .NET Framework/Mono does not always round-trip, so the writer checks the parse-back and falls back to
+  G17. JSON has no NaN/inf/−0, and Vessel uses NaN as "unset" (`LaunchTime`), so these are written as strings.
+- **An iterator-based autopilot can't be saved.** `MissionAutopilot`'s state machine is compiler-generated, and its field
+  names change with any edit to the script. The writer refuses compiler-generated types and delegates and rolls back the
+  object table for that autopilot, so a new autopilot that keeps a `Func<>` silently becomes "dropped".
+
+## Cassini: VVEJGA tour, Saturn, Titan (15.10.2026, `MissionAutopilot.Planetary.cs`, `.Titan.cs`, `TourPlanner.cs`)
+- **Without a deep-space manoeuvre the VVEJGA tour needs C3 45.7 km²/s²** (Centaur cannot give it). TourPlanner models the DSM on
+  the V1→V2 leg: C3 23, DSM plan 347 m/s, flown 404 (real 16.6 / 450).
+- **Two flybys of the same body: `Objectives.Find(by body)` gives the second Venus flyby the first one's corridor.** Use
+  `TourLeg(i, body)` (by objective order); `Missions.cs` leftBody logic was fixed the same way.
+- **`Correct` (PlanCorrection) frees the arrival time — before a DSM that shifts V2 and breaks the DSM timing.** The DSM leg
+  aims through `DeepSpaceManeuver` itself; `TourAim` before a DSM leg uses the tour's planned `VOut`.
+- **Sun-frame conic flyby periapsis is off by hundreds of km** (V1 +840, V2 −370, Earth +370 km). Fix: `FlybyTrim` right after SOI
+  entry — Gauss–Newton on the exact Kepler hyperbola for the exit direction; 7–21 m/s per flyby. Guard `FlybyTrimMax` 60 m/s.
+- **Exit speed = √(v∞² + 2μ/R_SOI), also for the sun-frame Lambert relative velocity.** Without the term Jupiter's exit predicted
+  7967 m/s vs actual 8290; the Saturn correction became 1791 m/s (arrival 2006-07) instead of 140. Venus +57, Earth +28, Jupiter +300 m/s.
+- **Jupiter's aim point is ≈ 10 mln km from the centre.** Targeting the centre cost a 365 m/s correction; `AimedExit` aims the
+  exit at `TourAim(i+1)` and floats the next date (`FloatingExit`: root of |v_Lambert − v_body| = v∞, nearest planned tof).
+- **`Arrival(moon)` with the default 40-year window finds a later, closer pass**: the release waited for it and the whole stack
+  burned at Titan. Use `Arrival(moon, OneRevolution())`.
+- **Titan v∞ after capture to 20 thousand km periapsis is 7.85 km/s → entry 8.2 km/s, 2.39 MW/m² (MaxHeatFlux 2e6), shield burns.**
+  `MoonApproach` penalises v∞ > 5500 (5 m/s per m/s): 437.6 m/s, v∞ 5367, entry 5840 m/s — matches the real PRM (393 m/s).
+- **Sun/Saturn-frame aim at Titan misses the entry angle by ~10°** (−76° instead of −65°). Release Huygens only after `EntryTrim`
+  inside the Titan SOI (target rp = p/(1+e), h = r·v·cos γ at the atmosphere top, tolerance 50 km).
+- **The post-kick staging loop must not release the probe:** stage only `Separate` actions with `IgniteNext` (Voyager's kick module
+  has it, Huygens separation does not).
+- **Parachute deploy altitude is clamped to 15 km** (`FlightPhysics.ChuteAltitudeMax`): the main chute does not open at 160 km;
+  the probe goes through the upper atmosphere under the shield (≈ 6 m/s at 15 km is fine).
+- **After `Separate(CassiniOrbiter)` the active vessel is Huygens** (`Universe.Stage` keeps the upper sections); the orbiter is
+  debris, so there is no orbiter deflection manoeuvre.

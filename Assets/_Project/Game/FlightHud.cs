@@ -54,7 +54,7 @@ namespace Kare.Space.Game
 
         void Update()
         {
-            if (Input.GetKeyDown(KeyCode.F1)) details = !details;
+            if (KeyBinds.Down(Bind.HudDetails)) details = !details;
         }
 
         void Styles()
@@ -97,8 +97,7 @@ namespace Kare.Space.Game
             ViewOverlay(u, w, wl, h);
 
             GUI.color = Dim;
-            GUI.Label(new Rect(10, h - 24, 1800, 22),
-                "Y автопилот миссии · P манёвр к цели · Пробел ступень · Z/X газ · WASDQE руль · T/F SAS · H взлёт/посадка · G опоры/трапы · R к Луне · V стыковка/расстыковка · Tab ручная стыковка · PgUp/PgDn аппарат · N/B манёвр · ,/. время · M карта · F1 детали · F2 вид на ступень · F3 сплит · F4 отложить посадку · Esc", small);
+            GUI.Label(new Rect(10, h - 24, 2400, 22), KeysHint(), small);
             GUI.color = Color.white;
         }
 
@@ -116,16 +115,46 @@ namespace Kare.Space.Game
                         : "Миссия выполнена";
             var c = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             GUI.Label(new Rect(r.x + 8, r.y + 40, pw - 16, 26), task, c);
-            if (u.WarpIndex > 0 || u.AutoWarpManual)
             {
-                // Фактический множитель, а не выбранный: в физике выше MaxPhysicsWarp время не идёт.
-                // «авто»/«вручную» — кто правит ускорением при работающем автопилоте («.» перехватывает, «/» на ×1 отдаёт).
-                string warp = "×" + u.EffectiveWarp.ToString("0") + (u.RailsActive ? " рельсы" : "")
-                            + (u.AutoWarpDriving ? " авто" : u.AutoWarpManual ? " вручную" : "");
-                GUI.color = Accent;
-                GUI.Label(new Rect(r.xMax + 10, r.y + 6, 300, 30), warp, mid);
+                // Ускорение видно всегда (§6.11): ×1 — тусклым, иначе акцентом с режимом. Фактический множитель, а не
+                // выбранный: выше MaxPhysicsWarp физика не идёт, а при низкой частоте кадров её режет MaxPhysicsSubsteps —
+                // тогда рядом выбранная ступень. «авто»/«вручную» — кто правит ускорением при работающем автопилоте.
+                double chosen = Universe.Warps[u.WarpIndex], eff = u.EffectiveWarp;
+                bool on = u.WarpIndex > 0 || u.AutoWarpManual;
+                string warp = "×" + eff.ToString(eff < 9.95 ? "0.#" : "0")
+                            + (!u.RailsActive && chosen > Universe.MaxPhysicsWarp ? " (рельсы закрыты)"
+                               : !u.RailsActive && chosen > eff * 1.05 ? " из ×" + chosen.ToString("0") : "")
+                            + (on ? (u.RailsActive ? " рельсы" : " физика") : "")
+                            + (u.AutoWarpDriving ? " · авто" : u.AutoWarpManual ? " · вручную" : "");
+                GUI.color = on ? Accent : Dim;
+                GUI.Label(new Rect(r.xMax + 10, r.y + 6, 360, 30), warp, mid);
+                GUI.color = Dim;
+                GUI.Label(new Rect(r.xMax + 10, r.y + 36, 360, 24),
+                    $"{KeyBinds.Label(Bind.WarpDown)} {KeyBinds.Label(Bind.WarpUp)} ускорение · {KeyBinds.Label(Bind.WarpReset)} ×1", label);
                 GUI.color = Color.white;
             }
+        }
+
+        /// <summary>Нижняя строка клавиш (§10.1) — из KeyBinds: переназначил в Esc → «Управление», сменилась и подсказка.
+        /// Строку пересобираем только при смене клавиш или режима камеры — OnGUI зовётся несколько раз за кадр.</summary>
+        static string keysHint, keysHintCamera;
+        static int keysHintVersion = -1;
+
+        static string KeysHint()
+        {
+            string cam = FlightCamera.ModeHint;
+            if (keysHint != null && keysHintVersion == KeyBinds.Version && keysHintCamera == cam) return keysHint;
+            string K(Bind b) => KeyBinds.Label(b);
+            keysHintVersion = KeyBinds.Version;
+            keysHintCamera = cam;
+            return keysHint =
+                $"{K(Bind.MissionAutopilot)} автопилот миссии · {K(Bind.ManeuverToTarget)} манёвр к цели · {K(Bind.Stage)} ступень · " +
+                $"{K(Bind.ThrottleFull)}/{K(Bind.ThrottleCut)} газ · {K(Bind.PitchDown)}{K(Bind.YawLeft)}{K(Bind.PitchUp)}{K(Bind.YawRight)}{K(Bind.RollLeft)}{K(Bind.RollRight)} руль · " +
+                $"{K(Bind.Sas)}/{K(Bind.SasMode)} SAS · {K(Bind.AutoTakeoffLanding)} взлёт/посадка · {K(Bind.Deploy)} опоры/трапы · {K(Bind.ToMoon)} к Луне · " +
+                $"{K(Bind.Dock)} стыковка · {K(Bind.DockMode)} ручная стыковка · {K(Bind.PrevVessel)}/{K(Bind.NextVessel)} аппарат · " +
+                $"{K(Bind.NodeNew)}/{K(Bind.NodeExecute)} манёвр · {K(Bind.WarpDown)}/{K(Bind.WarpUp)} время · {K(Bind.Map)} карта · " +
+                $"{cam} · {K(Bind.CinematicCamera)} кино · {K(Bind.LookAtBody)} на планету · {K(Bind.HudDetails)} детали · " +
+                $"{K(Bind.QuickSave)}/{K(Bind.QuickLoad)} сохр./загр. · Esc — меню и клавиши";
         }
 
         // ---------------------------------------------------------------- предупреждения
@@ -309,7 +338,7 @@ namespace Kare.Space.Game
             else if (u.Docking != null) { icon = Icon.Maneuver; title = "СТЫКОВКА"; status = u.Docking.Status; col = Accent; }
             else if (u.Lunar != null) { icon = Icon.Autopilot; title = "К ЛУНЕ"; status = u.Lunar.Status; col = Accent; }
             else if (v.Sas != SasMode.Off) { icon = SasIcon(v.Sas); title = "SAS"; status = SasName(v.Sas); col = Color.white; }
-            else { icon = Icon.Stability; title = "РУЧНОЕ"; status = "Y — вся миссия, H — взлёт, T — SAS"; col = Warn; }
+            else { icon = Icon.Stability; title = "РУЧНОЕ"; status = $"{KeyBinds.Label(Bind.MissionAutopilot)} — вся миссия, {KeyBinds.Label(Bind.AutoTakeoffLanding)} — взлёт, {KeyBinds.Label(Bind.Sas)} — SAS"; col = Warn; }
             GUI.color = col;
             DrawIcon(new Rect(r.center.x - 22, r.y + 8, 44, 44), icon);
             var c = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
@@ -384,7 +413,7 @@ namespace Kare.Space.Game
             GUI.Label(new Rect(x, y, 230, 22), $"Δv <b>{n.Total:0.0}</b> м/с · {burnText}", label);
             y += 22;
             double tLeft = n.Time - u.Time;
-            string when = tLeft >= 0 ? "через " + GameCalendar.FormatDuration(tLeft) : "<color=#ffc840>узел пропущен — Bksp или N</color>";
+            string when = tLeft >= 0 ? "через " + GameCalendar.FormatDuration(tLeft) : $"<color=#ffc840>узел пропущен — {KeyBinds.Label(Bind.NodeDelete)} или {KeyBinds.Label(Bind.NodeNew)}</color>";
             GUI.Label(new Rect(x, y, 230, 22), when, label);
             y += 22;
             GUI.color = Dim;
@@ -489,12 +518,12 @@ namespace Kare.Space.Game
             if (landed)
             {
                 step = "1. Старт";
-                hint = "Z — полный газ, Пробел — зажигание. Нос строго вверх.";
+                hint = $"{KeyBinds.Label(Bind.ThrottleFull)} — полный газ, {KeyBinds.Label(Bind.Stage)} — зажигание. Нос строго вверх.";
             }
             else if (!burning && FlightControl.NextStageBringsEngine(v) && double.IsInfinity(FlightControl.BurnTime(v, 1)))
             {
                 step = "Ступень";
-                hint = "Двигатель молчит — Пробел: следующая ступень.";
+                hint = $"Двигатель молчит — {KeyBinds.Label(Bind.Stage)}: следующая ступень.";
             }
             else if (v.SurfaceSpeed < AscentAutopilot.VerticalSpeedEnd && v.Altitude < AscentAutopilot.VerticalAltitudeEnd)
             {
@@ -518,7 +547,7 @@ namespace Kare.Space.Game
             else if (burning && restart && v.VerticalSpeed > 0 && toAp > circBurn / 2 + 10)
             {
                 step = "5. Отсечка";
-                hint = $"Апоцентр {Km(apAlt)} набран — X: выключить. Довыведение — в апоцентре.";
+                hint = $"Апоцентр {Km(apAlt)} набран — {KeyBinds.Label(Bind.ThrottleCut)}: выключить. Довыведение — в апоцентре.";
             }
             else if (burning)
             {
@@ -537,8 +566,8 @@ namespace Kare.Space.Game
                 double lead = circBurn / 2;
                 bool now = toAp <= lead + 4 || v.VerticalSpeed < 0;
                 step = "5. Полёт к апоцентру";
-                hint = now ? $"Сейчас: Z — полный газ! Импульс {circDv:0} м/с, ~{circBurn:0} с."
-                           : $"Импульс {circDv:0} м/с, ~{circBurn:0} с работы. Z через {GameCalendar.FormatDuration(toAp - lead)}. Нос — на горизонт.";
+                hint = now ? $"Сейчас: {KeyBinds.Label(Bind.ThrottleFull)} — полный газ! Импульс {circDv:0} м/с, ~{circBurn:0} с."
+                           : $"Импульс {circDv:0} м/с, ~{circBurn:0} с работы. {KeyBinds.Label(Bind.ThrottleFull)} через {GameCalendar.FormatDuration(toAp - lead)}. Нос — на горизонт.";
                 target = 0;
             }
 

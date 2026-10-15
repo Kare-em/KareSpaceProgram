@@ -11,7 +11,7 @@ namespace Kare.Space.Game
     /// </summary>
     [DefaultExecutionOrder(100)]
     [RequireComponent(typeof(Camera))]
-    public sealed class FlightCamera : MonoBehaviour
+    public sealed partial class FlightCamera : MonoBehaviour
     {
         /// <summary>
         /// Пара: оболочка BodyRenderer.ShellStart + ShellWidth = 9,5e6 укладывает все тела внутрь FarClip (§2.7).
@@ -61,8 +61,16 @@ namespace Kare.Space.Game
 
         public static string CycleMode(int dir)
         {
-            int n = ModeNames.Length;
-            Mode = (CameraMode)((((int)Mode + dir) % n + n) % n);
+            // Смена режима снимает «взгляд на планету» (F8) — это переопределение ориентации, а не режим. Из кино F5 просто
+            // выходит в прежний режим: листать сразу дальше нельзя, игрок ещё не видел, куда вернулся.
+            LookAtBodyOn = false;
+            if (CinematicOn) CinematicOn = false;
+            else
+            {
+                int n = ModeNames.Length;
+                Mode = (CameraMode)((((int)Mode + dir) % n + n) % n);
+            }
+            Flash($"Камера: {ModeName}   [{KeyBinds.Label(Bind.CameraMode)} — сменить, Shift — назад]");
             return ModeName;
         }
 
@@ -74,6 +82,9 @@ namespace Kare.Space.Game
         static FlightCamera dragOwner;
 
         Camera cam;
+        /// <summary>FOV, который был у камеры до кино (подгонка дистанции считается по нему), и признак, что сейчас FOV наш.</summary>
+        float baseFov = 60;
+        bool fovOverridden;
         Quaternion frame = Quaternion.identity;
         Vector3 lastUp = Vector3.up;
         bool frameValid;
@@ -88,6 +99,13 @@ namespace Kare.Space.Game
             cam = GetComponent<Camera>();
             cam.nearClipPlane = NearClip;
             cam.farClipPlane = FarClip;
+        }
+
+        void Start()
+        {
+            // Статика переживает перезапуск Play без перезагрузки домена: кино и «взгляд на планету» с прошлого запуска не нужны.
+            // Именно Start, а не Awake: у копии для сплит-скрина Secondary ставят уже после её Awake.
+            if (!Secondary) { CinematicOn = false; LookAtBodyOn = false; }
         }
 
         void OnEnable()
@@ -107,6 +125,11 @@ namespace Kare.Space.Game
             var v = Secondary ? FlightView.Second : FlightView.Main;
             if (v == null) return;
 
+            if (!Secondary) HandleKeys();
+            // FOV кино — наш; свой возвращаем, как только оно кончилось. baseFov — то, по чему считается подгонка дистанции.
+            if (!CinematicOn && fovOverridden) { cam.fieldOfView = baseFov; fovOverridden = false; }
+            if (!fovOverridden) baseFov = cam.fieldOfView;
+
             // Мышь — у камеры под курсором; без сплита — целиком у главной.
             bool split = FlightView.Second != null;
             bool under = !split ? !Secondary : cam.pixelRect.Contains(Input.mousePosition);
@@ -114,12 +137,15 @@ namespace Kare.Space.Game
             bool held = Input.GetMouseButton(1) || Input.GetMouseButton(2);
             bool mine = held ? dragOwner == this : under;
 
-            if (mine && Input.GetMouseButton(1))
+            // В кино кадр ведёт режиссёр, а не рука; при «взгляде на планету» ПКМ крутит этот взгляд вокруг борта,
+            // а не скрытые Yaw/Pitch — иначе после возврата вид оказался бы развёрнут неведомо куда.
+            if (mine && Input.GetMouseButton(1) && !CinematicOn)
             {
-                Yaw += Input.GetAxis("Mouse X") * OrbitSpeed;
-                Pitch = Mathf.Clamp(Pitch - Input.GetAxis("Mouse Y") * OrbitSpeed, -89, 89);
+                float mx = Input.GetAxis("Mouse X") * OrbitSpeed, my = Input.GetAxis("Mouse Y") * OrbitSpeed;
+                if (LookAtBodyOn) { lookYaw += mx; lookPitch = Mathf.Clamp(lookPitch - my, -89, 89); }
+                else { Yaw += mx; Pitch = Mathf.Clamp(Pitch - my, -89, 89); }
             }
-            float wheel = mine ? Input.mouseScrollDelta.y : 0;
+            float wheel = mine && !CinematicOn ? Input.mouseScrollDelta.y : 0;
             if (wheel != 0) Distance = Mathf.Clamp(Distance * Mathf.Pow(0.88f, wheel), MinDistance, MaxDistance);
 
             // Местная вертикаль; кадр камеры доворачивается на её изменение, а не строится заново —
@@ -153,7 +179,7 @@ namespace Kare.Space.Game
                 fitVessel = v;
                 fitLength = fit;
                 float half = (float)fit * (1 + FitBelow) * 0.5f * FitMargin;
-                Distance = Mathf.Clamp(half / Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad), MinDistance, MaxDistance);
+                Distance = Mathf.Clamp(half / Mathf.Tan(baseFov * 0.5f * Mathf.Deg2Rad), MinDistance, MaxDistance);
             }
 
             var rot = frame * Quaternion.Euler(Pitch, Yaw, 0);
@@ -174,13 +200,19 @@ namespace Kare.Space.Game
                        // (кадр на 6 км, 01.10.2026). Пара: ChuteReach — та же высота, что и в подгонке дистанции.
                        + up * (float)(VesselView.ChuteReach(v) * 0.5);
             var pos = target - rot * Vector3.forward * Distance;
+            var aim = target;
+            float fov = baseFov;
+            // Переопределения ориентации поверх обычного вида: сперва кино (оно задаёт и позу, и FOV), затем взгляд на планету.
+            if (CinematicOn) CinematicPose(u, v, att, up, (float)length, (float)com, ref pos, ref rot, ref aim, ref fov);
+            ApplyLook(v, att, up, aim, ref pos, ref rot);
+            if (CinematicOn) { cam.fieldOfView = fov; fovOverridden = true; }
             // Над рельефом (см. GroundClearance): поднимаем по вертикали и смотрим на ту же цель — кадр «с земли вверх».
             var rel = pos - FloatingOrigin.ToUnity(FloatingOrigin.WorldP(v));
             double agl = v.Body.AltitudeAboveTerrain(v.Position + new Vector3d(rel.x, rel.y, rel.z).SwapYZ);
             if (agl < GroundClearance)
             {
                 pos += up * (float)(GroundClearance - agl);
-                rot = Quaternion.LookRotation(target - pos, up);
+                rot = Quaternion.LookRotation(aim - pos, up);
             }
             transform.SetPositionAndRotation(pos, rot);
         }

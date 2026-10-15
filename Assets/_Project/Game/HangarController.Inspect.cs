@@ -208,7 +208,9 @@ namespace Kare.Space.Game
         /// <summary>Кнопка в правом верхнем углу предпросмотра; рисует PartInspector (поверх, в том же масштабе).</summary>
         public void InspectorButtons(GUIStyle style)
         {
-            if (build == null || showFiles) return;
+            // Кнопку рисует OnGUI инспектора — поверх GUI.Window конструктора: при открытом списке миссий она
+            // перекрывала его первую строку. Пока список открыт — прячем.
+            if (build == null || showFiles || popup != Popup.None) return;
             bool open = PartInspector.IsOpen(StagesKey);
             var r = new Rect(vw - RightW - Pad - 176, TopH + 6, 170, 26);
             HudHits.Add(r);

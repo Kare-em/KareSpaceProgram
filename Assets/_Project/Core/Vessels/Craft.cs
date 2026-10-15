@@ -690,6 +690,21 @@ namespace Kare.Space.Core
             bool control = false;
             foreach (var s in d.Sections) control |= s.RcsTorque > 0 || s.HasEngine && s.Engine.GimbalDeg > 0;
             if (!control) b.Warnings.Add("Нечем управлять ориентацией: нет RCS и качающихся двигателей");
+            // Стыковка (§6.6): захват — только верхним торцом связки (Vessel.HasFreePort), сближение — поступательной РСУ.
+            int port = c.Stack.FindLastIndex(p => PartCatalog.Resolve(p).DockingPort);
+            if (port >= 0)
+            {
+                for (int i = port + 1; i < c.Stack.Count; i++)
+                {
+                    var above = PartCatalog.Resolve(c.Stack[i]);
+                    if (above.Fairing) continue; // створки сбрасываются до стыковки
+                    b.Warnings.Add($"Стыковочный узел не на самом верху — над ним «{above.Name}»: причалить не выйдет");
+                    break;
+                }
+                bool rcs = false;
+                foreach (var s in d.Sections) rcs |= s.RcsTorque > 0;
+                if (!rcs) b.Warnings.Add("Есть стыковочный узел, но нет RCS: сдвигаться к цели нечем (Tab — ручная стыковка)");
+            }
             bool crewOrProbe = false;
             foreach (var cp in c.Stack) crewOrProbe |= PartCatalog.Resolve(cp).Category == PartCategory.Command;
             if (!crewOrProbe) b.Warnings.Add("Нет командного модуля или блока управления");

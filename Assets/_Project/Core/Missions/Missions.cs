@@ -116,6 +116,11 @@ namespace Kare.Space.Core
         public string FailReason { get; private set; }
         public readonly bool[] Done;
         readonly double[] holdStart;
+        /// <summary>
+        /// Борт покидал тело после прошлого пролёта того же тела (Венера дважды у «Кассини»): без этого второй пролёт
+        /// засчитывался в том же кадре, что и первый, — условие «высота ниже Max» у них одно.
+        /// </summary>
+        readonly bool[] leftBody;
         public event Action<string> Changed;
 
         public MissionTracker(MissionDef def)
@@ -123,6 +128,7 @@ namespace Kare.Space.Core
             Def = def;
             int n = def.Objectives.Count;
             Done = new bool[n];
+            leftBody = new bool[n];
             holdStart = new double[n];
             for (int i = 0; i < n; i++) holdStart[i] = double.NaN;
         }
@@ -230,6 +236,12 @@ namespace Kare.Space.Core
 
                 case ObjectiveType.Flyby:
                 {
+                    if (i > 0 && Def.Objectives[i - 1].Type == ObjectiveType.Flyby && Def.Objectives[i - 1].Body == o.Body)
+                    {
+                        if (!Done[i - 1]) return false;
+                        if (!onBody) leftBody[i] = true;
+                        if (!leftBody[i]) return false;
+                    }
                     if (!onBody || v.IsLanded) return false;
                     var orbit = KeplerOrbit.FromState(v.Position, v.Velocity, body.Mu, t);
                     // На ускорении момент перицентра можно перешагнуть — засчитываем и уже пройденный.

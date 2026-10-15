@@ -20,10 +20,31 @@ namespace Kare.Space.Game
 
         void Update()
         {
+            // Ожидание новой клавиши в «Управлении» забирает кадр целиком: Esc там — отмена, а не выход из меню.
+            if (ControlsMenu.Poll()) return;
             if (!Input.GetKeyDown(KeyCode.Escape)) return;
-            // Esc из таблицы миссий возвращает в меню, а не в полёт.
+            // Esc из таблицы миссий и из «Управления» возвращает в меню, а не в полёт.
             if (IsOpen && MissionPicker.Open) MissionPicker.Open = false;
-            else { IsOpen = !IsOpen; MissionPicker.Open = false; }
+            else if (IsOpen && ControlsMenu.Open) ControlsMenu.Close();
+            else if (IsOpen && savesOpen) savesOpen = false;
+            else { IsOpen = !IsOpen; MissionPicker.Open = false; ControlsMenu.Close(); savesOpen = false; }
+        }
+
+        static bool savesOpen;
+
+        /// <summary>Окно сохранений: список слотов SaveController (F9 — быстрое, F10 — загрузить последнее).</summary>
+        void DrawSaves()
+        {
+            float h = 50 + SaveController.MenuHeight + 16 + Row + 16;
+            var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
+            GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            float x = r.x + 20, y = r.y + 12, w = Width - 40;
+            GUI.Label(new Rect(x, y, w, 30), "СОХРАНЕНИЯ", title); y += 38;
+            SaveController.DrawMenu(new Rect(x, y, w, SaveController.MenuHeight));
+            y += SaveController.MenuHeight + 16;
+            if (GUI.Button(new Rect(x, y, w, Row), $"Назад (Esc) · {KeyBinds.Label(Bind.QuickSave)} — быстрое, {KeyBinds.Label(Bind.QuickLoad)} — загрузить", button)) savesOpen = false;
         }
 
         void OnGUI()
@@ -43,8 +64,18 @@ namespace Kare.Space.Game
                 MissionPicker.Draw(boot.Mission, SelectMission);
                 return;
             }
+            if (ControlsMenu.Open)
+            {
+                ControlsMenu.Draw();
+                return;
+            }
+            if (savesOpen)
+            {
+                DrawSaves();
+                return;
+            }
 
-            float h = 70 + Row * 5 + 30 + 3 * (Row + 8) + 20 + 30 + (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
+            float h = 70 + Row * 5 + 30 + 4 * (Row + 8) + 20 + 30 + (Row + 4) + 16 + 30 + 2 * Row + 20 + 30 + 2 * Row + 2 * (Row + 4) + 10 + BrightnessBlock + SoundBlock + DetailBlock + CreditsBlock;
             var r = new Rect((Screen.width - Width) / 2, (Screen.height - h) / 2, Width, h);
             GUI.color = new Color(0.06f, 0.08f, 0.12f, 0.95f);
             GUI.DrawTexture(r, Texture2D.whiteTexture);
@@ -74,6 +105,12 @@ namespace Kare.Space.Game
                 HangarController.ReturnMissionId = boot.Mission?.Id;
                 SceneManager.LoadScene(HangarController.SceneName);
             }
+            y += Row + 8;
+            // Клавиши (§10.1): переназначение, подсказки HUD берут подписи из KeyBinds.
+            // Сохранения — своим окном поверх (как «Управление»): панель паузы и так почти во весь экран.
+            float half = (w - 8) / 2;
+            if (GUI.Button(new Rect(x, y, half, Row), "Управление (клавиши)…", button)) ControlsMenu.Open = true;
+            if (GUI.Button(new Rect(x + half + 8, y, half, Row), "Сохранения…", button)) savesOpen = true;
             y += Row + 20;
 
             // Выбор миссии: таблица с описаниями и схемами полёта (MissionPicker), перезапуск сцены с другой миссией.

@@ -7,7 +7,7 @@ using Kare.Space.Core;
 
 // Прогон ядра без Unity: математика, эфемериды, атмосфера и полные полёты миссий автопилотом.
 // Запуск: dotnet run --project Tools/CoreTests [имя теста]
-static class Program
+static partial class Program
 {
     static int passed, failed;
 
@@ -78,12 +78,15 @@ static class Program
         Run("apollo11", () => TestApollo("apollo11"), only);
         Run("planets", TestPlanets, only);
         Run("voyager", TestVoyager, only);
+        Run("cassini", TestCassini, only);
         Run("autoplan", TestAutoPlan, only);
         Run("patches", TestPatches, only);
         Run("booster", TestBooster, only);
         Run("booster_defer", TestBoosterDefer, only);
         Run("starship", TestStarship, only);
         Run("starship_catch", TestStarshipCatch, only);
+        Run("save", TestSave, only);
+        Run("save_booster", TestSaveBooster, only);
         // Миссии целиком автопилотом Y без рук и с автоускорением: «auto» — все, «auto_<id>» — одна.
         foreach (var id in AutoMissions)
             Run("auto_" + id, () => TestAuto(id), only == "auto" ? "auto_" + id : only);
@@ -226,7 +229,7 @@ static class Program
         "karman", "sputnik", "vostok", "freedom7", "juno1", "friendship7", "gemini3", "mechta", "vympel", "farside",
         "ranger7", "luna9", "surveyor1", "luna17", "apollo8", "apollo11",
         "voskhod2", "soyuz_tm31", "crew_dragon", "sts1", "buran", "ift5", "starship_catch",
-        "sts1_landing", "buran_landing", "starship_landing", "voyager1", "voyager2",
+        "sts1_landing", "buran_landing", "starship_landing", "voyager1", "voyager2", "cassini",
     };
 
     /// <summary>Миссия от стола до успеха одним автопилотом миссии: ни клавиш, ни ускорения из сценария.</summary>
@@ -679,6 +682,45 @@ static class Program
                 $"C3 {c3:F0} км²/с², Δv с 200 км {tour.DepartDv:F0} м/с, рассогласование пролётов {tour.Mismatch:F1} м/с, {ms} мс");
             Check($"voyager: {id} — пролёты без двигателя", tour.Mismatch < 20, $"{tour.Mismatch:F1} м/с");
         }
+    }
+
+    /// <summary>
+    /// «Кассини — Гюйгенс»: запас Δv «Центавра T» на довыведение и отлёт к Венере, тур VVEJGA от исторических дат.
+    /// Двойная Венера без манёвра в дальнем космосе не сходится по модулю v∞ — рассогласование печатаем, а не требуем ноль:
+    /// его снимает коррекция после первой Венеры (как DSM 3.12.1998, ≈ 450 м/с).
+    /// </summary>
+    static void TestCassini()
+    {
+        var (u, tr) = StartMission("cassini");
+        var v = u.Active;
+        double dv = 0;
+        foreach (var st in v.RemainingStats())
+        {
+            Console.WriteLine($"   {st.Name}: {st.DeltaVVac:F0} м/с, {st.BurnTime:F0} с, {st.StartMass / 1000:F1} → {st.EndMass / 1000:F1} т");
+            if (st.Name.StartsWith("Центавр")) dv += Math.Max(0, st.DeltaVVac);
+        }
+        var earth = u.System.Get("earth");
+        var sw = Stopwatch.StartNew();
+        var tour = MissionCatalog.PlanTour(tr.Def, u.System, u.Time + 3600, earth.Radius + 200e3);
+        long ms = sw.ElapsedMilliseconds;
+        Check("cassini: тур найден", tour != null, $"{ms} мс");
+        if (tour == null) return;
+        var legs = tr.Def.Objectives.FindAll(o => o.Type == ObjectiveType.Flyby);
+        for (int i = 0; i < tour.Bodies.Length; i++)
+        {
+            double shift = (tour.Times[i] - legs[i].Date) / 86400;
+            string pe = double.IsNaN(tour.Periapsis[i]) ? "—" : $"{(tour.Periapsis[i] - tour.Bodies[i].Radius) / 1e3:F0} км";
+            Console.WriteLine($"   {tour.Bodies[i].Name}: {GameCalendar.Format(tour.Times[i])} ({shift:+0.0;-0.0} сут к истории), " +
+                              $"v∞ {tour.VIn[i].magnitude:F0} → {tour.VOut[i].magnitude:F0} м/с, высота пролёта {pe}");
+            if (tour.DsmTime != null && !double.IsNaN(tour.DsmTime[i]))
+                Console.WriteLine($"   манёвр в дальнем космосе: {GameCalendar.Format(tour.DsmTime[i])}, {tour.DsmDv[i].magnitude:F0} м/с");
+        }
+        double c3 = tour.VInfDepart.sqrMagnitude / 1e6;
+        Check("cassini: отлёт по силам «Центавру T»", tour.DepartDv + 1100 < dv,
+            $"C3 {c3:F1} км²/с², Δv с 200 км {tour.DepartDv:F0} м/с + довыведение ≈ 1100 при запасе {dv:F0}; рассогласование {tour.Mismatch:F0} м/с");
+        // Орбитеру (2491 м/с) ещё выход на орбиту Сатурна (≈ 620) и наведение на Титан — на тур не больше 900.
+        Check("cassini: манёвр и рассогласование тура по силам орбитеру", tour.Mismatch + tour.DsmTotal < 900,
+            $"манёвр {tour.DsmTotal:F0} м/с, рассогласование {tour.Mismatch:F0} м/с");
     }
 
     /// <summary>Клавиша P: узел к Луне с орбиты Земли, к Земле с орбиты Луны, к Марсу — через ManeuverAutoPlan.</summary>

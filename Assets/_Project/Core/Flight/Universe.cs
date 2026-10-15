@@ -10,11 +10,18 @@ namespace Kare.Space.Core
     /// </summary>
     public sealed partial class Universe
     {
-        public static readonly double[] Warps = { 1, 5, 10, 50, 100, 1e3, 1e4, 1e5, 1e6, 1e7 };
-        /// <summary>Потолок физического ускорения (атмосфера, работа двигателя, автопилот). Шаг интегратора
-        /// остаётся MaxStep — ×10 только множит подшаги кадра (≈8 при 60 к/с), точность не теряется.
-        /// Пара: индекс 2 в Warps = ×10, до него WarpUp пускает при закрытых рельсах.</summary>
-        public const double MaxPhysicsWarp = 10;
+        public static readonly double[] Warps = { 1, 5, 10, 30, 100, 1e3, 1e4, 1e5, 1e6, 1e7 };
+        /// <summary>Потолок физического ускорения для игрока (атмосфера, работа двигателя, прожиг вне атмосферы, §6.11).
+        /// Шаг интегратора остаётся MaxStep — ×30 только множит подшаги кадра (25 при 60 к/с), точность не теряется.
+        /// Пара: индекс 3 в Warps = ×30, до него WarpUp пускает при закрытых рельсах; MaxPhysicsSubsteps режет кадр.</summary>
+        public const double MaxPhysicsWarp = 30;
+        /// <summary>Потолок физического ускорения, который выбирает автоускорение сам: все фазы тестов ядра пройдены на ×10
+        /// (apollo8, auto_*), ×30 автопилоту не проверялось. Пара: индекс 2 в Warps.</summary>
+        public const double AutoPhysicsWarp = 10;
+        /// <summary>Сколько подшагов MaxStep физика делает за кадр. ×30 при 60 к/с — 25 подшагов, при 20 к/с — 75; ниже
+        /// кадровой частоты ускорение честно проседает (EffectiveWarp показывает фактическое), а не вешает игру лавиной
+        /// подшагов, которая сама роняет частоту ещё ниже. Пара: Advance режет realDt до 0,1 с (×10 автопилота — 50).</summary>
+        public const int MaxPhysicsSubsteps = 75;
         /// <summary>
         /// Сколько неактивных бортов ниже «пола» рельсов (атмосфера, низкий пролёт над безатмосферным телом) считается полной
         /// физикой — ближайшие к активному, на любом расстоянии (§5: обломок падает, сгорает или ложится на грунт сам, а не
@@ -41,7 +48,7 @@ namespace Kare.Space.Core
         /// перелёт к Луне шёл 16,6 мин реального времени, половина — спуск по лестнице.
         /// </summary>
         public const double AutoWarpLead = 2;
-        /// <summary>Остаток прожига в вакууме, с, выше которого автопилот ускоряет физику до MaxPhysicsWarp: разгон к Луне
+        /// <summary>Остаток прожига в вакууме, с, выше которого автопилот ускоряет физику до AutoPhysicsWarp: разгон к Луне
         /// идёт ≈ 5,5 мин, на ×10 — полминуты. Шаг интегратора тот же (см. MaxPhysicsWarp), точность импульса не теряется:
         /// apollo8 при 60 и при 15 вышел на одну и ту же орбиту 109,9 × 110,3 км, а кадров стало 5512 → 4693.</summary>
         public const double AutoBurnWarpMin = 15;
@@ -439,9 +446,12 @@ namespace Kare.Space.Core
             }
             else
             {
-                EffectiveWarp = Math.Min(warp, MaxPhysicsWarp);
+                double sim = Math.Min(realDt * Math.Min(warp, MaxPhysicsWarp), MaxPhysicsSubsteps * FlightPhysics.MaxStep);
+                // ×1 не режем: кадр 0,1 с — это 5 подшагов, а замедлять время ниже реального незачем.
+                if (warp <= 1) sim = realDt;
+                EffectiveWarp = sim / realDt;
                 RailsActive = false;
-                AdvancePhysics(realDt * EffectiveWarp);
+                AdvancePhysics(sim);
                 CheckDocking();
             }
             System.Update(Time);
@@ -852,7 +862,7 @@ namespace Kare.Space.Core
         /// <summary>
         /// Автоускорение (§6.11): пока работает автопилот, ступень Warps выбирает он — на рельсах наибольшая, у которой до
         /// ближайшего события (WarpLimitTime, смена сферы влияния, вход в атмосферу) остаётся AutoWarpLead реальных секунд;
-        /// в физике — ×1, а на долгом прожиге в вакууме ×MaxPhysicsWarp. Когда автопилоты закончились, ускорение — в ×1:
+        /// в физике — ×1, а на долгом прожиге в вакууме ×AutoPhysicsWarp. Когда автопилоты закончились, ускорение — в ×1:
         /// иначе после выхода на орбиту Луны время продолжало бы нестись на последней ступени.
         /// </summary>
         void DriveWarp()
@@ -878,10 +888,10 @@ namespace Kare.Space.Core
             {
                 bool air = v.Body.HasAtmosphere && v.Altitude < v.Body.AtmosphereTop;
                 if (v.AnyEngineRunning && v.Node != null && !air && FlightControl.BurnTime(v, v.Node.Remaining.magnitude) > AutoBurnWarpMin)
-                    return Array.IndexOf(Warps, MaxPhysicsWarp);
+                    return Array.IndexOf(Warps, AutoPhysicsWarp);
                 // Миссия целиком: выведение, спуск в атмосфере и посадка проверены тестами ядра на ×10 физики
                 // (шаг интегратора от ускорения не зависит, растёт лишь число шагов в кадре).
-                if (Mission != null && Mission.PhysicsWarpOk(this)) return Array.IndexOf(Warps, MaxPhysicsWarp);
+                if (Mission != null && Mission.PhysicsWarpOk(this)) return Array.IndexOf(Warps, AutoPhysicsWarp);
                 return 0;
             }
             double next = NextEventTime();
@@ -895,7 +905,7 @@ namespace Kare.Space.Core
                 double burn = FlightControl.StagedBurnTime(v, v.Node.Total);
                 start = v.Node.Time - (double.IsInfinity(burn) ? 0 : burn / 2);
             }
-            i = Ladder(Math.Min(start, next) - Time, Array.IndexOf(Warps, MaxPhysicsWarp));
+            i = Ladder(Math.Min(start, next) - Time, Array.IndexOf(Warps, AutoPhysicsWarp));
             autoPhysics = i > 0;
             return i;
         }
