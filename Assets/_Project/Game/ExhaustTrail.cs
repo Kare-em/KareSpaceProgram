@@ -321,10 +321,12 @@ namespace Kare.Space.Game
                 float noise = 0.65f * Mathf.PerlinNoise(x * 0.06f + 3, y * 0.06f + 7)
                             + 0.35f * Mathf.PerlinNoise(x * 0.17f + 21, y * 0.17f + 5);
                 float rn = r * (1 + PuffRagged * (noise - 0.5f));
-                float f = 1 - Mathf.SmoothStep(0.15f, 0.75f, rn);
+                // EarthSurface.Smooth — GLSL smoothstep. Mathf.SmoothStep(a, b, t) интерполирует МЕЖДУ a и b: с ним центр
+                // клуба имел альфу 0,27, а край квадрата — 0,03, и облако на старте не было видно вовсе (замер 16.10.2026).
+                float f = 1 - EarthSurface.Smooth(0.15f, 0.75f, rn);
                 // Жёсткое окно: альфа ровно 0 за PuffEdgeEnd, иначе у квадрата виден прямой край (03.10.2026,
                 // старая формула давала 0,10 на середине стороны). Пара: край квадрата r = 1, окно кончается раньше.
-                float win = 1 - Mathf.SmoothStep(PuffEdgeStart, PuffEdgeEnd, r);
+                float win = 1 - EarthSurface.Smooth(PuffEdgeStart, PuffEdgeEnd, r);
                 f *= win;
                 puffTex.SetPixel(x, y, new Color(1, 1, 1, f * f * (3 - 2 * f)));
             }

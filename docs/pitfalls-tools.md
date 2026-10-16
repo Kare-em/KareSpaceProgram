@@ -321,3 +321,14 @@ Read before working through MCP, debugging in Play, and bulk file edits.
   `EditorApplication.isCompiling` stays true until Play ends — the console shows no errors yet. Offline check without touching Temp: build
   an rsp from `Kare.Space.Game.csproj` (DefineConstants + all HintPath refs, minus Core) + `Assets/_Project/{Game,Core}/**/*.cs`,
   `-nostdlib -langversion:9.0 -out:<scratchpad>`, run `DotNetSdk/dotnet.exe DotNetSdk/sdk/8.0.318/Roslyn/bincore/csc.dll @game.rsp` (~20 s).
+- **Launch screenshots from a "tripod"**: FlightCamera overrides Distance at liftoff, and the Flight scene has TWO FlightCamera instances
+  (Main + Second Camera) — disable both every frame, put the camera at `pad + right*320 + up*50`, look at `pad + up*70`. Re-enabling FlightCamera
+  in the frame of the last `ScreenCapture` spoils that shot — add a dummy capture time after it. Do not delete a capture target file after the
+  capture was requested (it is written at the end of the frame). PIL on Windows needs `C:\...` paths, not `/c/...`.
+- **Career mode blocks test launches**: with PlayerPrefs `kare.career.mode` = 1, `CareerFlight` holds the rocket (gate Funds/Locked,
+  `Time.timeScale = 0`). For tests do what the "Лететь вне карьеры" button does: by reflection set `gate` = 0, `counted` = false,
+  `Time.timeScale` = 1. Never touch career.json / PlayerPrefs of the user.
+- **Injecting pilot input**: `FlightInput` overwrites `Vessel.PilotInput` every frame — disable the FlightInput behaviour for the test and restore
+  it. `Vessel.ControlDeflection` = applied / max torque (gimbal check: R-7 reached 3.99° of 4° on 18 gimbals).
+- **Opening IMGUI windows for a screenshot**: `PauseMenu.IsOpen` (private setter, set via reflection) + `OrbitSpawnMenu.Open` / `CareerWindow.Open`;
+  reset `CareerWindow.Open = false` before leaving Play — the static survives until the domain reload.

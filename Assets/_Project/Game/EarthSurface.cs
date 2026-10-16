@@ -106,7 +106,7 @@ namespace Kare.Space.Game
         static double Sq(double x) => x * x;
 
         /// <summary>GLSL smoothstep (Mathf.SmoothStep — другое: интерполяция между from и to).</summary>
-        static float Smooth(float e0, float e1, float x)
+        internal static float Smooth(float e0, float e1, float x)
         {
             float t = Mathf.Clamp01((x - e0) / (e1 - e0));
             return t * t * (3 - 2 * t);

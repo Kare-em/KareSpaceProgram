@@ -169,7 +169,7 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
   `WFX_Nuke` (R/4). Time by Froude 1/√scale, in vacuum the smoke systems are extinguished. Fields `GameBootstrap.BlastPrefab/
   BigBlastPrefab`, materials — menu Kare/Convert WarFX to HDRP. Not verified in Play (brightness, scale, timing).
 - Separation: a flash and a white ring of pyro bolts at the upper end of the new debris piece, flying together with it.
-- Ground cloud at liftoff/landing (`Game/ExhaustTrail.Ground.cs`, 15.10.2026): 160-puff pool per vessel, scale k = (thrust/4 MN)^1/3
+- Ground cloud at liftoff/landing (`Game/ExhaustTrail.Ground.cs`, 15.10.2026): 240-puff pool per vessel (16.10: puffs 7 m + 8 m/√s growth, rate 10/s, alpha 0.85 — R-7 cloud ≈30–40 m puffs), scale k = (thrust/4 MN)^1/3
   (0.35..3): in air (ρ ≥ 0.05) puffs below 60·k m billow radially (32·√k m/s, drag τ 3.5·√k s), rise by buoyancy, wind drift, live 10+8k s
   (≤30); on R-7/LC-39 pads 80 % exit along the flame trench (`LaunchPadView.FlameTrench`); young smoke darker → white steam; flame
   forward-scatter glow = emission 0.6·I/d²·0.85/π from active "Plume Light"s. Thin air/vacuum (Moon, Mars): flat dust fan below 30·k m
@@ -567,7 +567,8 @@ Table floodlights at night (4 masts, `LitNits` holds the exposure), concrete apr
 ## Plumes 2.0, RCS, aurora (15.10.2026)
 - **Plume** (`Game/VesselView.Exhaust.cs`, shader `Settings/Resources/KarePlumeHDRP.shader`): rim fall-off by view angle, drifting turbulence, shock diamonds at
   low altitude (fade with altitude/node number), under-expanded dome in vacuum; propellant colours and `BrightnessSettings.Plume` unchanged.
-- **Smoke trail** (`Game/ExhaustTrail.cs`): lit round column (cylindrical normals), lumpy edges, wider in thin air; launch-pad puffs are hemisphere-normal
+- **Smoke trail** (`Game/ExhaustTrail.cs`): lit round column (cylindrical normals), lumpy edges, wider in thin air (16.10: emerge row at the nozzle,
+  super-gaussian across-profile, width 3 calibers + spread 1.5, vacuum ×2 — the old trail read as a thin needle); launch-pad puffs are hemisphere-normal
   meshes with random roll.
 - **RCS** (`Game/RcsJets.cs`): quad blocks with small bell nozzles; jet style by RCS type (hypergolic, micro-thruster, big), ignition flash, condensate puff in
   atmosphere, PWM pulses for partial commands.

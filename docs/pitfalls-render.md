@@ -514,3 +514,9 @@ Read when editing `Game/` (rendering, sky, materials, patch, plume) and `FlightS
   screenshot. Debug returns (`return float4(float3(day,...),0)`) are handy for isolating a factor, but remove them before finishing.
 - **Smoke ribbon**: HDRP/Lit has no vertex colours — density is set by ribbon width and age by U; volume comes from "cylindrical" normals across
   `Across` columns, ragged edges (`LumpL/LumpR`), faster spreading in thin air (`Sample.Spread`).
+- **`Mathf.SmoothStep(from, to, t)` is NOT GLSL smoothstep(e0, e1, x)** — it interpolates between from and to by t. Used as smoothstep in
+  `ExhaustTrail.PuffTexture` it gave puff centre alpha 0.27 and edge 0.03: the launch ground cloud was invisible (16.10.2026). Use
+  `EarthSurface.Smooth(e0, e1, x)` (internal). `BlastEffects` fire texture (≈line 745) still has the misuse but was tuned visually on it —
+  fixing it brightens the fire ≈30×, so it was left as is.
+- **Trail reads as a needle**: a gaussian across-profile shows only its core (visible width ≈ 1/3 of the mesh), and the first sample row
+  starting a few metres behind the nozzle pinches the column into a point. Fix: super-gaussian profile + an extra "emerge" row at the nozzle exit.

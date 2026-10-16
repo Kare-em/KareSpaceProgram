@@ -31,7 +31,7 @@ namespace Kare.Space.Game
         // ---- пул
         /// <summary>Клубов на борт. Пара: частота рождения не выше GroundPool / наибольшая жизнь (CloudLifeMax·LifeJitterMax) —
         /// тогда слот к повторному рождению уже погас, и клубы не исчезают рывком.</summary>
-        const int GroundPool = 160;
+        const int GroundPool = 240;
         /// <summary>Залп при зажигании: столько клубов ×k сразу, если до того BurstGap с не было ни одного — вал из лотка
         /// появляется разом, а не по одному клубу. Сверху — GroundBurstMax.</summary>
         const float BurstPuffs = 10;
@@ -44,9 +44,11 @@ namespace Kare.Space.Game
         /// <summary>Клубы рождаются, пока срез ниже CloudHeight·k над грунтом (не ниже CloudHeightMin), CloudRate·k клубов/с.
         /// 100 м — Р-7 набирает их за ≈ 9 с: на хрониках облако у стола растёт столько же. Пара: GroundPool — при 60 м пул
         /// заполнялся на треть, а облако жило 6 с и с камеры за ракетой не читалось (замер 15.10: 35 клубов к T+5 с).</summary>
-        const float CloudHeight = 100, CloudHeightMin = 25, CloudRate = 7;
-        /// <summary>Полуразмер при рождении и рост, м и м/√с (×k): R-7 через 18 с ≈ 23 м, Saturn V через 26 с ≈ 55 м полуразмера.</summary>
-        const float CloudSize0 = 4, CloudGrowth = 4.5f;
+        const float CloudHeight = 100, CloudHeightMin = 25, CloudRate = 10;
+        /// <summary>Полуразмер при рождении и рост, м и м/√с (×k): R-7 через 9 с ≈ 31 м, через 18 с ≈ 41 м, Saturn V через 26 с
+        /// ≈ 95 м полуразмера. Было 4 и 4,5: к T+9 клубы по 15 м на поле 200 м, с треноги в 320 м облако — отдельные клочья
+        /// (замер 16.10.2026, 49 клубов). Пара: CloudAlpha — крупные клубы перекрываются, суммарная плотность растёт.</summary>
+        const float CloudSize0 = 7, CloudGrowth = 8;
         /// <summary>Разлёт по грунту: начальная скорость, м/с (×√k), её гасит воздух за CloudDrag с (×√k) — дальность валa
         /// CloudSpeed·CloudDrag·k ≈ 110 м у Р-7 и ≈ 230 м у Saturn V; дальше облако расползается вовлечением воздуха CloudCreep, м/с.</summary>
         const float CloudSpeed = 32, CloudDrag = 3.5f, CloudCreep = 1.2f;
@@ -55,7 +57,7 @@ namespace Kare.Space.Game
         const float RiseHot = 5, RiseHotTime = 3, RiseCold = 0.8f;
         /// <summary>Жизнь, с: CloudLife + CloudLifePerScale·k, не больше CloudLifeMax: R-7 18 с, Saturn V 26 с, Starship 30 с.</summary>
         const float CloudLife = 10, CloudLifePerScale = 8, CloudLifeMax = 30;
-        const float CloudAlpha = 0.7f;
+        const float CloudAlpha = 0.85f;
         /// <summary>Ветер у грунта, м/с: облако сносит целиком (направление — случайное на борт).</summary>
         const float WindSpeed = 2.5f;
         /// <summary>Вал у грунта приплюснут: высота клуба GroundFlat от ширины при рождении, к FlatTime с — круглый.

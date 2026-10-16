@@ -89,7 +89,10 @@ namespace Kare.Space.Game
                     var style = b == picked ? on : depth == 0 ? planet : moon;
                     // Сфера влияния меньше тела (Фобос, Деймос): круговой орбиты вокруг него нет.
                     GUI.enabled = MaxAlt(b) > MinAlt(b);
-                    if (GUI.Button(new Rect((i % per) * (CellW + Gap), y, CellW, Row), b.Name, style)) Pick(b);
+                    // Тело без спутников (кометы) стоит в строке одно — кнопка по ширине имени: «Комета Хейла — Боппа»
+                    // в CellW обрезалась до «ета Хейла — Бо» (замер 16.10.2026).
+                    float cw = g.Count == 1 ? Mathf.Max(CellW, style.CalcSize(new GUIContent(b.Name)).x + 16) : CellW;
+                    if (GUI.Button(new Rect((i % per) * (CellW + Gap), y, cw, Row), b.Name, style)) Pick(b);
                     GUI.enabled = true;
                 }
                 y += Row + Gap + 8;
